@@ -14,6 +14,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import '../services/responsive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import 'attendance_report_screen.dart';
@@ -642,57 +643,61 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 await _loadMasters();
                 await _loadDay();
               },
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-                children: [
-                  GestureDetector(
-                    onTap: _pickDate,
-                    child: Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFE0E7D8))),
-                      child: Row(children: [
-                        const Icon(Icons.calendar_today,
-                            size: 18, color: idaGreen),
-                        const SizedBox(width: 10),
-                        Text(
-                            DateFormat('EEEE, dd MMM yyyy')
-                                .format(selectedDate),
+              child: Responsive.constrainedContent(
+                  context,
+                  ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                    children: [
+                      GestureDetector(
+                        onTap: _pickDate,
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border:
+                                  Border.all(color: const Color(0xFFE0E7D8))),
+                          child: Row(children: [
+                            const Icon(Icons.calendar_today,
+                                size: 18, color: idaGreen),
+                            const SizedBox(width: 10),
+                            Text(
+                                DateFormat('EEEE, dd MMM yyyy')
+                                    .format(selectedDate),
+                                style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: idaDark)),
+                            const Spacer(),
+                            const Icon(Icons.edit_calendar_outlined,
+                                size: 18, color: Colors.grey),
+                          ]),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      _workflowStepper(loc),
+                      const SizedBox(height: 12),
+                      _statusBanner(loc),
+                      const SizedBox(height: 16),
+                      if (loadingDay)
+                        const Center(
+                            child: Padding(
+                                padding: EdgeInsets.all(30),
+                                child:
+                                    CircularProgressIndicator(color: idaGreen)))
+                      else ...[
+                        _headcountCard(loc),
+                        const SizedBox(height: 16),
+                        _presentWorkersCard(loc),
+                      ],
+                      if (error != null) ...[
+                        const SizedBox(height: 10),
+                        Text(error!,
                             style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: idaDark)),
-                        const Spacer(),
-                        const Icon(Icons.edit_calendar_outlined,
-                            size: 18, color: Colors.grey),
-                      ]),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  _workflowStepper(loc),
-                  const SizedBox(height: 12),
-                  _statusBanner(loc),
-                  const SizedBox(height: 16),
-                  if (loadingDay)
-                    const Center(
-                        child: Padding(
-                            padding: EdgeInsets.all(30),
-                            child: CircularProgressIndicator(color: idaGreen)))
-                  else ...[
-                    _headcountCard(loc),
-                    const SizedBox(height: 16),
-                    _presentWorkersCard(loc),
-                  ],
-                  if (error != null) ...[
-                    const SizedBox(height: 10),
-                    Text(error!,
-                        style:
-                            const TextStyle(color: Colors.red, fontSize: 12.5)),
-                  ],
-                ],
-              ),
+                                color: Colors.red, fontSize: 12.5)),
+                      ],
+                    ],
+                  )),
             ),
     );
   }
@@ -929,6 +934,28 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
   }
 
+  // Same reasoning as Dashboard's tile grid: one column on mobile
+  // (unchanged behavior), reflowing to 2-3 columns on wider screens.
+  // Each row card is wrapped in a fixed-width SizedBox before going
+  // into the Wrap, since the card's Row contains an Expanded, which
+  // needs a bounded width - a bare Wrap gives unbounded width and
+  // would crash without this.
+  Widget _presentWorkersGrid(BuildContext context, List<Widget> cards) {
+    final columns = Responsive.gridColumns(context);
+    if (columns == 1) return Column(children: cards);
+    const spacing = 10.0;
+    return LayoutBuilder(builder: (context, constraints) {
+      final cardWidth =
+          (constraints.maxWidth - spacing * (columns - 1)) / columns;
+      return Wrap(
+        spacing: spacing,
+        runSpacing: 0,
+        children:
+            cards.map((c) => SizedBox(width: cardWidth, child: c)).toList(),
+      );
+    });
+  }
+
   Widget _presentWorkersCard(AppLocalizations loc) {
     final male = int.tryParse(maleCountCtrl.text) ?? 0;
     final female = int.tryParse(femaleCountCtrl.text) ?? 0;
@@ -1026,69 +1053,72 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     color: Color(0xFF6B7280),
                     letterSpacing: 0.6)),
             const SizedBox(height: 8),
-            ...(selectedWorkerIds.toList()
-                  ..sort((a, b) {
-                    final nameA = workers.firstWhere((w) => w['id'] == a,
-                            orElse: () => {})['name'] ??
-                        '';
-                    final nameB = workers.firstWhere((w) => w['id'] == b,
-                            orElse: () => {})['name'] ??
-                        '';
-                    return nameA
-                        .toString()
-                        .toLowerCase()
-                        .compareTo(nameB.toString().toLowerCase());
-                  }))
-                .map((id) {
-              final w =
-                  workers.firstWhere((w) => w['id'] == id, orElse: () => {});
-              return Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                    color: const Color(0xFFE8F5E2),
-                    borderRadius: BorderRadius.circular(10)),
-                child: Row(children: [
-                  Icon(w['gender'] == 'M' ? Icons.male : Icons.female,
-                      color: idaGreen, size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(
-                      child: Text(tl(context, w['name'] ?? ''),
-                          style: const TextStyle(
-                              fontSize: 13.5, fontWeight: FontWeight.w600),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1)),
-                  SizedBox(
-                    width: 100,
-                    child: TextField(
-                      controller: presentWageCtrls[id],
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      onChanged: (_) => setState(() {}),
-                      style: const TextStyle(fontSize: 13),
-                      decoration: InputDecoration(
-                        prefixText: '₹',
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 8),
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide.none),
+            _presentWorkersGrid(
+                context,
+                (selectedWorkerIds.toList()
+                      ..sort((a, b) {
+                        final nameA = workers.firstWhere((w) => w['id'] == a,
+                                orElse: () => {})['name'] ??
+                            '';
+                        final nameB = workers.firstWhere((w) => w['id'] == b,
+                                orElse: () => {})['name'] ??
+                            '';
+                        return nameA
+                            .toString()
+                            .toLowerCase()
+                            .compareTo(nameB.toString().toLowerCase());
+                      }))
+                    .map((id) {
+                  final w = workers.firstWhere((w) => w['id'] == id,
+                      orElse: () => {});
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                        color: const Color(0xFFE8F5E2),
+                        borderRadius: BorderRadius.circular(10)),
+                    child: Row(children: [
+                      Icon(w['gender'] == 'M' ? Icons.male : Icons.female,
+                          color: idaGreen, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                          child: Text(tl(context, w['name'] ?? ''),
+                              style: const TextStyle(
+                                  fontSize: 13.5, fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1)),
+                      SizedBox(
+                        width: 100,
+                        child: TextField(
+                          controller: presentWageCtrls[id],
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          onChanged: (_) => setState(() {}),
+                          style: const TextStyle(fontSize: 13),
+                          decoration: InputDecoration(
+                            prefixText: '₹',
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 8),
+                            filled: true,
+                            fillColor: Colors.white,
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide.none),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, size: 18, color: Colors.red),
-                    onPressed: () => _removeWorker(id),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                ]),
-              );
-            }),
+                      IconButton(
+                        icon: const Icon(Icons.close,
+                            size: 18, color: Colors.red),
+                        onPressed: () => _removeWorker(id),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ]),
+                  );
+                }).toList()),
             const SizedBox(height: 4),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),

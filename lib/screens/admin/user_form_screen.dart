@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../../models/user_model.dart';
 import '../../services/api_service.dart';
+import '../../services/responsive.dart';
 
 class UserFormScreen extends StatefulWidget {
   final AppUser? existingUser;
@@ -144,201 +145,208 @@ class _UserFormScreenState extends State<UserFormScreen> {
           ),
         ]),
       ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
-          children: [
-            // ── Account details ──────────────────────────────────────
-            _SectionLabel(icon: Icons.person_outline, label: 'Account Details'),
-            const SizedBox(height: 12),
-            _Card(
-                child: Column(children: [
-              TextFormField(
-                controller: _nameCtrl,
-                textCapitalization: TextCapitalization.words,
-                decoration:
-                    _deco(label: 'Full name', icon: Icons.badge_outlined),
-                validator: (v) => (v == null || v.trim().isEmpty)
-                    ? 'Full name is required'
-                    : null,
-              ),
-              const SizedBox(height: 14),
-              TextFormField(
-                controller: _userCtrl,
-                autocorrect: false,
-                // Lock username in edit mode — changing it could break sessions
-                readOnly: _isEdit,
-                decoration: _deco(
-                  label: 'Username',
-                  icon: Icons.alternate_email_rounded,
-                ).copyWith(
-                  helperText: _isEdit
-                      ? 'Username cannot be changed after creation'
-                      : 'Used to log in to the app',
-                  filled: true,
-                  fillColor: _isEdit
-                      ? const Color(0xFFF0F0F0)
-                      : const Color(0xFFF7FAF5),
-                ),
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty)
-                    return 'Username is required';
-                  if (v.contains(' ')) return 'No spaces allowed';
-                  if (v.length < 3) return 'At least 3 characters';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 14),
-              TextFormField(
-                controller: _passCtrl,
-                obscureText: _obscurePass,
-                decoration: _deco(
-                  label: _isEdit
-                      ? 'New password (leave blank to keep)'
-                      : 'Password',
-                  icon: Icons.lock_outline_rounded,
-                ).copyWith(
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePass
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
-                      size: 20,
+      body: Responsive.constrainedContent(
+          context,
+          Form(
+            key: _formKey,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
+              children: [
+                // ── Account details ──────────────────────────────────────
+                _SectionLabel(
+                    icon: Icons.person_outline, label: 'Account Details'),
+                const SizedBox(height: 12),
+                _Card(
+                    child: Column(children: [
+                  TextFormField(
+                    controller: _nameCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    decoration:
+                        _deco(label: 'Full name', icon: Icons.badge_outlined),
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'Full name is required'
+                        : null,
+                  ),
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: _userCtrl,
+                    autocorrect: false,
+                    // Lock username in edit mode — changing it could break sessions
+                    readOnly: _isEdit,
+                    decoration: _deco(
+                      label: 'Username',
+                      icon: Icons.alternate_email_rounded,
+                    ).copyWith(
+                      helperText: _isEdit
+                          ? 'Username cannot be changed after creation'
+                          : 'Used to log in to the app',
+                      filled: true,
+                      fillColor: _isEdit
+                          ? const Color(0xFFF0F0F0)
+                          : const Color(0xFFF7FAF5),
                     ),
-                    onPressed: () =>
-                        setState(() => _obscurePass = !_obscurePass),
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty)
+                        return 'Username is required';
+                      if (v.contains(' ')) return 'No spaces allowed';
+                      if (v.length < 3) return 'At least 3 characters';
+                      return null;
+                    },
                   ),
-                ),
-                validator: (v) {
-                  if (!_isEdit && (v == null || v.isEmpty)) {
-                    return 'Password is required';
-                  }
-                  if (v != null && v.isNotEmpty && v.length < 6) {
-                    return 'Minimum 6 characters';
-                  }
-                  return null;
-                },
-              ),
-              if (_isEdit) ...[
-                const SizedBox(height: 14),
-                const Divider(height: 1),
-                const SizedBox(height: 8),
-                Row(children: [
-                  const Expanded(
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Account active',
-                              style: TextStyle(
-                                  fontSize: 14, fontWeight: FontWeight.w500)),
-                          Text('Inactive users cannot log in',
-                              style:
-                                  TextStyle(fontSize: 12, color: Colors.grey)),
-                        ]),
-                  ),
-                  Switch.adaptive(
-                    value: _isActive,
-                    onChanged: (v) => setState(() => _isActive = v),
-                    activeColor: idaGreen,
-                  ),
-                ]),
-              ],
-            ])),
-
-            // ── Module access ────────────────────────────────────────
-            const SizedBox(height: 24),
-            _SectionLabel(icon: Icons.apps_outlined, label: 'Module Access'),
-            Padding(
-              padding: const EdgeInsets.only(top: 4, bottom: 12, left: 2),
-              child: Text(
-                'Select the modules this user can see and use.',
-                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-              ),
-            ),
-            _Card(
-                child: Column(children: [
-              // Select all / none quick actions
-              Row(children: [
-                Text(
-                    '${_perms.length} of ${kModuleDefinitions.length} selected',
-                    style: const TextStyle(fontSize: 13, color: Colors.grey)),
-                const Spacer(),
-                TextButton(
-                  style: TextButton.styleFrom(
-                      foregroundColor: idaGreen,
-                      padding: EdgeInsets.zero,
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                  onPressed: () => setState(() => _perms = {
-                        for (final m in kModuleDefinitions) m['key']!: 'view',
-                      }),
-                  child: const Text('Select all (view)',
-                      style: TextStyle(fontSize: 13)),
-                ),
-                const Text(' · ', style: TextStyle(color: Colors.grey)),
-                TextButton(
-                  style: TextButton.styleFrom(
-                      foregroundColor: Colors.grey,
-                      padding: EdgeInsets.zero,
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                  onPressed: () => setState(() => _perms.clear()),
-                  child: const Text('None', style: TextStyle(fontSize: 13)),
-                ),
-              ]),
-              const Divider(height: 20),
-
-              // Module rows — 3-way: no access / view / edit.
-              ...kModuleDefinitions.map((mod) {
-                final level = _perms[mod['key']]; // null | 'view' | 'edit'
-                return _ModuleRow(
-                  mod: mod,
-                  level: level,
-                  onChanged: (newLevel) => setState(() {
-                    if (newLevel == null) {
-                      _perms.remove(mod['key']!);
-                    } else {
-                      _perms[mod['key']!] = newLevel;
-                    }
-                  }),
-                );
-              }),
-            ])),
-
-            const SizedBox(height: 28),
-
-            // ── Save ─────────────────────────────────────────────────
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: ElevatedButton(
-                onPressed: _saving ? null : _save,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: idaGreen,
-                  disabledBackgroundColor: idaGreen.withOpacity(0.6),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                  elevation: 0,
-                ),
-                child: _saving
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2))
-                    : Text(
-                        _isEdit ? 'Save Changes' : 'Create User',
-                        style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white),
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: _passCtrl,
+                    obscureText: _obscurePass,
+                    decoration: _deco(
+                      label: _isEdit
+                          ? 'New password (leave blank to keep)'
+                          : 'Password',
+                      icon: Icons.lock_outline_rounded,
+                    ).copyWith(
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscurePass
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                          size: 20,
+                        ),
+                        onPressed: () =>
+                            setState(() => _obscurePass = !_obscurePass),
                       ),
-              ),
+                    ),
+                    validator: (v) {
+                      if (!_isEdit && (v == null || v.isEmpty)) {
+                        return 'Password is required';
+                      }
+                      if (v != null && v.isNotEmpty && v.length < 6) {
+                        return 'Minimum 6 characters';
+                      }
+                      return null;
+                    },
+                  ),
+                  if (_isEdit) ...[
+                    const SizedBox(height: 14),
+                    const Divider(height: 1),
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      const Expanded(
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Account active',
+                                  style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500)),
+                              Text('Inactive users cannot log in',
+                                  style: TextStyle(
+                                      fontSize: 12, color: Colors.grey)),
+                            ]),
+                      ),
+                      Switch.adaptive(
+                        value: _isActive,
+                        onChanged: (v) => setState(() => _isActive = v),
+                        activeColor: idaGreen,
+                      ),
+                    ]),
+                  ],
+                ])),
+
+                // ── Module access ────────────────────────────────────────
+                const SizedBox(height: 24),
+                _SectionLabel(
+                    icon: Icons.apps_outlined, label: 'Module Access'),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, bottom: 12, left: 2),
+                  child: Text(
+                    'Select the modules this user can see and use.',
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                  ),
+                ),
+                _Card(
+                    child: Column(children: [
+                  // Select all / none quick actions
+                  Row(children: [
+                    Text(
+                        '${_perms.length} of ${kModuleDefinitions.length} selected',
+                        style:
+                            const TextStyle(fontSize: 13, color: Colors.grey)),
+                    const Spacer(),
+                    TextButton(
+                      style: TextButton.styleFrom(
+                          foregroundColor: idaGreen,
+                          padding: EdgeInsets.zero,
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      onPressed: () => setState(() => _perms = {
+                            for (final m in kModuleDefinitions)
+                              m['key']!: 'view',
+                          }),
+                      child: const Text('Select all (view)',
+                          style: TextStyle(fontSize: 13)),
+                    ),
+                    const Text(' · ', style: TextStyle(color: Colors.grey)),
+                    TextButton(
+                      style: TextButton.styleFrom(
+                          foregroundColor: Colors.grey,
+                          padding: EdgeInsets.zero,
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      onPressed: () => setState(() => _perms.clear()),
+                      child: const Text('None', style: TextStyle(fontSize: 13)),
+                    ),
+                  ]),
+                  const Divider(height: 20),
+
+                  // Module rows — 3-way: no access / view / edit.
+                  ...kModuleDefinitions.map((mod) {
+                    final level = _perms[mod['key']]; // null | 'view' | 'edit'
+                    return _ModuleRow(
+                      mod: mod,
+                      level: level,
+                      onChanged: (newLevel) => setState(() {
+                        if (newLevel == null) {
+                          _perms.remove(mod['key']!);
+                        } else {
+                          _perms[mod['key']!] = newLevel;
+                        }
+                      }),
+                    );
+                  }),
+                ])),
+
+                const SizedBox(height: 28),
+
+                // ── Save ─────────────────────────────────────────────────
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
+                    onPressed: _saving ? null : _save,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: idaGreen,
+                      disabledBackgroundColor: idaGreen.withOpacity(0.6),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      elevation: 0,
+                    ),
+                    child: _saving
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2))
+                        : Text(
+                            _isEdit ? 'Save Changes' : 'Create User',
+                            style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white),
+                          ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          )),
     );
   }
 

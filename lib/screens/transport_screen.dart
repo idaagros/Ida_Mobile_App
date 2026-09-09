@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/responsive.dart';
 
 class TransportScreen extends StatefulWidget {
   const TransportScreen({super.key});
@@ -286,12 +287,15 @@ class _TransportScreenState extends State<TransportScreen> {
           ),
         ],
       ),
-      body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFF3B7A28)))
-          : _isSearching && _searchQuery.isNotEmpty
-              ? _buildSearchResults()
-              : _buildCategoryGrid(),
+      body: Responsive.constrainedContent(
+          context,
+          _loading
+              ? const Center(
+                  child: CircularProgressIndicator(color: Color(0xFF3B7A28)))
+              : _isSearching && _searchQuery.isNotEmpty
+                  ? _buildSearchResults()
+                  : _buildCategoryGrid(),
+          maxWidth: 600),
       floatingActionButton: _isAdmin
           ? FloatingActionButton(
               backgroundColor: primaryColor,
@@ -777,51 +781,57 @@ class _TransportCategoryScreenState extends State<_TransportCategoryScreen> {
           ),
         ),
         Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : filtered.isEmpty
-                  ? Center(
-                      child: Text(
-                          _search.isNotEmpty
-                              ? 'No results for "$_search"'
-                              : 'No transporters yet. Tap + to add.',
-                          style: const TextStyle(color: Colors.grey)))
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      itemCount: filtered.length,
-                      itemBuilder: (_, i) {
-                        final e = filtered[i];
-                        return Card(
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                          margin: const EdgeInsets.only(bottom: 8),
-                          child: ListTile(
-                            leading: CircleAvatar(
-                                backgroundColor: themeColor.withOpacity(0.1),
-                                child: Icon(widget.icon,
-                                    color: themeColor, size: 20)),
-                            title: Text(e['name'] ?? '',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold)),
-                            subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  if (e['gst'] != null &&
-                                      e['gst'].toString().isNotEmpty)
-                                    Text('GST: ${e['gst']}',
-                                        style: const TextStyle(fontSize: 12)),
-                                  if (e['phone'] != null)
-                                    Text('Phone: ${e['phone']}',
-                                        style: const TextStyle(fontSize: 12)),
-                                ]),
-                            isThreeLine: true,
-                            trailing:
-                                const Icon(Icons.arrow_forward_ios, size: 14),
-                            onTap: () => _showDetails(e),
-                          ),
-                        );
-                      },
-                    ),
+          child: Responsive.constrainedContent(
+              context,
+              _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : filtered.isEmpty
+                      ? Center(
+                          child: Text(
+                              _search.isNotEmpty
+                                  ? 'No results for "$_search"'
+                                  : 'No transporters yet. Tap + to add.',
+                              style: const TextStyle(color: Colors.grey)))
+                      : ListView.builder(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          itemCount: filtered.length,
+                          itemBuilder: (_, i) {
+                            final e = filtered[i];
+                            return Card(
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                              margin: const EdgeInsets.only(bottom: 8),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                    backgroundColor:
+                                        themeColor.withOpacity(0.1),
+                                    child: Icon(widget.icon,
+                                        color: themeColor, size: 20)),
+                                title: Text(e['name'] ?? '',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold)),
+                                subtitle: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (e['gst'] != null &&
+                                          e['gst'].toString().isNotEmpty)
+                                        Text('GST: ${e['gst']}',
+                                            style:
+                                                const TextStyle(fontSize: 12)),
+                                      if (e['phone'] != null)
+                                        Text('Phone: ${e['phone']}',
+                                            style:
+                                                const TextStyle(fontSize: 12)),
+                                    ]),
+                                isThreeLine: true,
+                                trailing: const Icon(Icons.arrow_forward_ios,
+                                    size: 14),
+                                onTap: () => _showDetails(e),
+                              ),
+                            );
+                          },
+                        )),
         ),
       ]),
       floatingActionButton: FloatingActionButton(

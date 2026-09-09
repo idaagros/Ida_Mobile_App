@@ -23,6 +23,7 @@ import 'package:share_plus/share_plus.dart';
 import '../services/pdf_download_helper.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
+import '../services/responsive.dart';
 
 class AttendanceReportScreen extends StatefulWidget {
   const AttendanceReportScreen({super.key});
@@ -48,6 +49,12 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
   DateTime _wageTo = DateTime.now();
   bool _generatingWageReport = false;
   String? _wageError;
+
+  // ── Report 1b: Worker Wage Report, Male/Female split ─────────
+  DateTime _genderSplitFrom = DateTime.now().subtract(const Duration(days: 6));
+  DateTime _genderSplitTo = DateTime.now();
+  bool _generatingGenderSplitReport = false;
+  String? _genderSplitError;
 
   // ── Report 2: Dynamic Report ────────────────────────────────
   DateTime _dynFrom = DateTime.now().subtract(const Duration(days: 29));
@@ -114,7 +121,8 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
             content: Text(loc.faReportDownloaded),
             backgroundColor: idaGreen,
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             margin: const EdgeInsets.all(16),
           ));
         } else {
@@ -133,6 +141,75 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
       setState(() => _wageError = 'Could not reach server: $e');
     } finally {
       if (mounted) setState(() => _generatingWageReport = false);
+    }
+  }
+
+  // ── Report 1b actions ─────────────────────────────────────────
+  Future<void> _pickGenderSplitDate({required bool isFrom}) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: isFrom ? _genderSplitFrom : _genderSplitTo,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null) {
+      setState(() {
+        if (isFrom) {
+          _genderSplitFrom = picked;
+          if (_genderSplitFrom.isAfter(_genderSplitTo))
+            _genderSplitTo = _genderSplitFrom;
+        } else {
+          _genderSplitTo = picked;
+          if (_genderSplitTo.isBefore(_genderSplitFrom))
+            _genderSplitFrom = _genderSplitTo;
+        }
+      });
+    }
+  }
+
+  Future<void> _generateGenderSplitReport() async {
+    setState(() {
+      _generatingGenderSplitReport = true;
+      _genderSplitError = null;
+    });
+    try {
+      final h = await _headers;
+      final from = _fmt(_genderSplitFrom);
+      final to = _fmt(_genderSplitTo);
+      final res = await http.get(
+        Uri.parse('$baseUrl/attendance/report-gender-split?from=$from&to=$to'),
+        headers: h,
+      );
+      if (res.statusCode == 200) {
+        final filename = 'attendance-report-gender-split_${from}_to_$to.xlsx';
+        final result = await savePdfBytes(res.bodyBytes, filename);
+        if (!mounted) return;
+        final loc = AppLocalizations.of(context)!;
+        if (result.isWeb) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(loc.faReportDownloaded),
+            backgroundColor: idaGreen,
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            margin: const EdgeInsets.all(16),
+          ));
+        } else {
+          await _showResultSheet(result.filePath!, filename);
+        }
+      } else {
+        Map<String, dynamic> data = {};
+        try {
+          data = jsonDecode(res.body);
+        } catch (_) {}
+        final serverMsg = data['error'] as String?;
+        setState(() => _genderSplitError = serverMsg ??
+            'Server returned ${res.statusCode}: ${res.body.length > 200 ? '${res.body.substring(0, 200)}…' : res.body}');
+      }
+    } catch (e) {
+      setState(() => _genderSplitError = 'Could not reach server: $e');
+    } finally {
+      if (mounted) setState(() => _generatingGenderSplitReport = false);
     }
   }
 
@@ -218,7 +295,8 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
             content: Text(loc.faReportDownloaded),
             backgroundColor: idaGreen,
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             margin: const EdgeInsets.all(16),
           ));
         } else {
@@ -253,20 +331,25 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => Padding(
         padding: const EdgeInsets.all(24),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(
             width: 56,
             height: 56,
-            decoration: BoxDecoration(color: idaGreen.withOpacity(0.12), shape: BoxShape.circle),
+            decoration: BoxDecoration(
+                color: idaGreen.withOpacity(0.12), shape: BoxShape.circle),
             child: const Icon(Icons.grid_on, color: idaGreen, size: 28),
           ),
           const SizedBox(height: 14),
-          const Text('Report ready', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          const Text('Report ready',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
-          Text(filename, style: const TextStyle(fontSize: 12, color: Colors.grey), textAlign: TextAlign.center),
+          Text(filename,
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              textAlign: TextAlign.center),
           const SizedBox(height: 20),
           Row(children: [
             Expanded(
@@ -276,23 +359,29 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: idaGreen,
                   side: const BorderSide(color: idaGreen),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
                 onPressed: () {
                   Navigator.pop(context);
-                  Share.shareXFiles([XFile(filePath)], text: 'Ida AgriCo Attendance Report');
+                  Share.shareXFiles([XFile(filePath)],
+                      text: 'Ida AgriCo Attendance Report');
                 },
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: ElevatedButton.icon(
-                icon: const Icon(Icons.open_in_new, size: 18, color: Colors.white),
-                label: const Text('Open', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                icon: const Icon(Icons.open_in_new,
+                    size: 18, color: Colors.white),
+                label: const Text('Open',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w600)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: idaGreen,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
                 onPressed: () {
@@ -315,16 +404,21 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
         backgroundColor: idaDark,
         foregroundColor: Colors.white,
         elevation: 0,
-        title: Text(AppLocalizations.of(context)!.faReportsTitle, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+        title: Text(AppLocalizations.of(context)!.faReportsTitle,
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-        children: [
-          _wageReportCard(),
-          const SizedBox(height: 24),
-          _dynamicReportCard(),
-        ],
-      ),
+      body: Responsive.constrainedContent(
+          context,
+          ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+            children: [
+              _wageReportCard(),
+              const SizedBox(height: 24),
+              _genderSplitReportCard(),
+              const SizedBox(height: 24),
+              _dynamicReportCard(),
+            ],
+          )),
     );
   }
 
@@ -339,7 +433,9 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
         border: Border.all(color: const Color(0xFFE0E7D8)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(loc.faWorkerWageReportTitle, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: idaDark)),
+        Text(loc.faWorkerWageReportTitle,
+            style: const TextStyle(
+                fontSize: 16, fontWeight: FontWeight.w700, color: idaDark)),
         const SizedBox(height: 4),
         Text(
           loc.faWorkerWageReportDesc,
@@ -347,29 +443,109 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
         ),
         const SizedBox(height: 16),
         Row(children: [
-          Expanded(child: _dateField(loc.faFrom, _wageFrom, () => _pickWageDate(isFrom: true))),
+          Expanded(
+              child: _dateField(
+                  loc.faFrom, _wageFrom, () => _pickWageDate(isFrom: true))),
           const SizedBox(width: 10),
-          Expanded(child: _dateField(loc.faTo, _wageTo, () => _pickWageDate(isFrom: false))),
+          Expanded(
+              child: _dateField(
+                  loc.faTo, _wageTo, () => _pickWageDate(isFrom: false))),
         ]),
         if (_wageError != null) ...[
           const SizedBox(height: 10),
-          Text(_wageError!, style: const TextStyle(color: Colors.red, fontSize: 12.5)),
+          Text(_wageError!,
+              style: const TextStyle(color: Colors.red, fontSize: 12.5)),
         ],
         const SizedBox(height: 16),
         SizedBox(
           width: double.infinity,
           child: ElevatedButton.icon(
             icon: _generatingWageReport
-                ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                ? const SizedBox(
+                    height: 16,
+                    width: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
                 : const Icon(Icons.grid_on, color: Colors.white, size: 18),
-            label: Text(_generatingWageReport ? loc.faGenerating : loc.faGenerateExcelReport,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+            label: Text(
+                _generatingWageReport
+                    ? loc.faGenerating
+                    : loc.faGenerateExcelReport,
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w700)),
             style: ElevatedButton.styleFrom(
               backgroundColor: idaGreen,
               padding: const EdgeInsets.symmetric(vertical: 13),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
             onPressed: _generatingWageReport ? null : _generateWageReport,
+          ),
+        ),
+      ]),
+    );
+  }
+
+  // ── UI: Report 1b card ───────────────────────────────────────
+  Widget _genderSplitReportCard() {
+    final loc = AppLocalizations.of(context)!;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE0E7D8)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(loc.faGenderSplitReportTitle,
+            style: const TextStyle(
+                fontSize: 16, fontWeight: FontWeight.w700, color: idaDark)),
+        const SizedBox(height: 4),
+        Text(
+          loc.faGenderSplitReportDesc,
+          style: const TextStyle(fontSize: 12.5, color: Color(0xFF6B7280)),
+        ),
+        const SizedBox(height: 16),
+        Row(children: [
+          Expanded(
+              child: _dateField(loc.faFrom, _genderSplitFrom,
+                  () => _pickGenderSplitDate(isFrom: true))),
+          const SizedBox(width: 10),
+          Expanded(
+              child: _dateField(loc.faTo, _genderSplitTo,
+                  () => _pickGenderSplitDate(isFrom: false))),
+        ]),
+        if (_genderSplitError != null) ...[
+          const SizedBox(height: 10),
+          Text(_genderSplitError!,
+              style: const TextStyle(color: Colors.red, fontSize: 12.5)),
+        ],
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            icon: _generatingGenderSplitReport
+                ? const SizedBox(
+                    height: 16,
+                    width: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.grid_on, color: Colors.white, size: 18),
+            label: Text(
+                _generatingGenderSplitReport
+                    ? loc.faGenerating
+                    : loc.faGenerateExcelReport,
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w700)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: idaGreen,
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: _generatingGenderSplitReport
+                ? null
+                : _generateGenderSplitReport,
           ),
         ),
       ]),
@@ -387,7 +563,9 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
         border: Border.all(color: const Color(0xFFE0E7D8)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(loc.faDynamicReportTitle, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: idaDark)),
+        Text(loc.faDynamicReportTitle,
+            style: const TextStyle(
+                fontSize: 16, fontWeight: FontWeight.w700, color: idaDark)),
         const SizedBox(height: 4),
         Text(
           loc.faDynamicReportDesc,
@@ -395,42 +573,61 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
         ),
         const SizedBox(height: 16),
         Row(children: [
-          Expanded(child: _dateField(loc.faFrom, _dynFrom, () => _pickDynDate(isFrom: true))),
+          Expanded(
+              child: _dateField(
+                  loc.faFrom, _dynFrom, () => _pickDynDate(isFrom: true))),
           const SizedBox(width: 10),
-          Expanded(child: _dateField(loc.faTo, _dynTo, () => _pickDynDate(isFrom: false))),
+          Expanded(
+              child: _dateField(
+                  loc.faTo, _dynTo, () => _pickDynDate(isFrom: false))),
         ]),
         const SizedBox(height: 12),
-        _levelDropdown(loc.faSelection1, _level1, exclude: const [], onChanged: (v) => setState(() {
-          _level1 = v;
-          if (_level2 == v) _level2 = null;
-          if (_level3 == v) _level3 = null;
-        })),
+        _levelDropdown(loc.faSelection1, _level1,
+            exclude: const [],
+            onChanged: (v) => setState(() {
+                  _level1 = v;
+                  if (_level2 == v) _level2 = null;
+                  if (_level3 == v) _level3 = null;
+                })),
         const SizedBox(height: 10),
-        _levelDropdown(loc.faSelection2, _level2, exclude: [if (_level1 != null) _level1!], onChanged: (v) => setState(() {
-          _level2 = v;
-          if (_level3 == v) _level3 = null;
-        })),
+        _levelDropdown(loc.faSelection2, _level2,
+            exclude: [if (_level1 != null) _level1!],
+            onChanged: (v) => setState(() {
+                  _level2 = v;
+                  if (_level3 == v) _level3 = null;
+                })),
         const SizedBox(height: 10),
-        _levelDropdown(loc.faSelection3, _level3, exclude: [if (_level1 != null) _level1!, if (_level2 != null) _level2!], onChanged: (v) => setState(() => _level3 = v)),
-
+        _levelDropdown(loc.faSelection3, _level3,
+            exclude: [
+              if (_level1 != null) _level1!,
+              if (_level2 != null) _level2!
+            ],
+            onChanged: (v) => setState(() => _level3 = v)),
         if (_dynError != null) ...[
           const SizedBox(height: 10),
-          Text(_dynError!, style: const TextStyle(color: Colors.red, fontSize: 12.5)),
+          Text(_dynError!,
+              style: const TextStyle(color: Colors.red, fontSize: 12.5)),
         ],
-
         const SizedBox(height: 16),
         Row(children: [
           Expanded(
             child: ElevatedButton.icon(
               icon: _loadingDynamic
-                  ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Icon(Icons.filter_alt_outlined, color: Colors.white, size: 18),
+                  ? const SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.filter_alt_outlined,
+                      color: Colors.white, size: 18),
               label: Text(_loadingDynamic ? loc.faGenerating : loc.faGenerate,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                  style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w700)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: idaGreen,
                 padding: const EdgeInsets.symmetric(vertical: 13),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
               ),
               onPressed: _loadingDynamic ? null : _runDynamicReport,
             ),
@@ -440,22 +637,29 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
             Expanded(
               child: OutlinedButton.icon(
                 icon: _exportingDynamic
-                    ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: idaGreen))
-                    : const Icon(Icons.download_outlined, size: 18, color: idaGreen),
-                label: Text(_exportingDynamic ? loc.faExporting : loc.faExportToExcel,
-                    style: const TextStyle(color: idaGreen, fontWeight: FontWeight.w700)),
+                    ? const SizedBox(
+                        height: 16,
+                        width: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: idaGreen))
+                    : const Icon(Icons.download_outlined,
+                        size: 18, color: idaGreen),
+                label: Text(
+                    _exportingDynamic ? loc.faExporting : loc.faExportToExcel,
+                    style: const TextStyle(
+                        color: idaGreen, fontWeight: FontWeight.w700)),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: idaGreen,
                   side: const BorderSide(color: idaGreen),
                   padding: const EdgeInsets.symmetric(vertical: 13),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                 ),
                 onPressed: _exportingDynamic ? null : _exportDynamicReport,
               ),
             ),
           ],
         ]),
-
         if (_dynResult != null) ...[
           const SizedBox(height: 18),
           const Divider(height: 1),
@@ -468,11 +672,16 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
 
   String _dimLabel(AppLocalizations loc, String? key) {
     switch (key) {
-      case 'farm': return loc.faFarm;
-      case 'worker': return loc.faWorker;
-      case 'work_type': return loc.faWorkType;
-      case 'gender': return loc.faGender;
-      default: return loc.faNone;
+      case 'farm':
+        return loc.faFarm;
+      case 'worker':
+        return loc.faWorker;
+      case 'work_type':
+        return loc.faWorkType;
+      case 'gender':
+        return loc.faGender;
+      default:
+        return loc.faNone;
     }
   }
 
@@ -486,7 +695,8 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
     if (rows.isEmpty) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Text(loc.faNoEntriesRange, style: const TextStyle(color: Colors.black54, fontSize: 13)),
+        child: Text(loc.faNoEntriesRange,
+            style: const TextStyle(color: Colors.black54, fontSize: 13)),
       );
     }
 
@@ -495,29 +705,64 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
       child: DataTable(
         headingRowColor: WidgetStateProperty.all(const Color(0xFFF4F7F2)),
         columns: [
-          ...dims.map((d) => DataColumn(label: Text(d, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)))),
-          DataColumn(label: Text(loc.faTotalDaysCol, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5))),
-          DataColumn(label: Text(loc.faTotalWageCol, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5))),
-          DataColumn(label: Text(loc.faEntriesCol, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5))),
+          ...dims.map((d) => DataColumn(
+              label: Text(d,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 12.5)))),
+          DataColumn(
+              label: Text(loc.faTotalDaysCol,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 12.5))),
+          DataColumn(
+              label: Text(loc.faTotalWageCol,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 12.5))),
+          DataColumn(
+              label: Text(loc.faEntriesCol,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 12.5))),
         ],
         rows: [
           ...rows.map((r) => DataRow(cells: [
                 ...List.generate(dims.length, (i) {
                   final raw = r['level${i + 1}']?.toString() ?? '';
-                  final isNameDim = i < groupBy.length && groupBy[i] != 'gender';
-                  return DataCell(Text(isNameDim ? tl(context, raw) : raw, style: const TextStyle(fontSize: 12.5)));
+                  final isNameDim =
+                      i < groupBy.length && groupBy[i] != 'gender';
+                  return DataCell(Text(isNameDim ? tl(context, raw) : raw,
+                      style: const TextStyle(fontSize: 12.5)));
                 }),
-                DataCell(Text(r['total_days'].toString(), style: const TextStyle(fontSize: 12.5))),
-                DataCell(Text('₹${r['total_wage']}', style: const TextStyle(fontSize: 12.5))),
-                DataCell(Text(r['entries'].toString(), style: const TextStyle(fontSize: 12.5))),
+                DataCell(Text(r['total_days'].toString(),
+                    style: const TextStyle(fontSize: 12.5))),
+                DataCell(Text('₹${r['total_wage']}',
+                    style: const TextStyle(fontSize: 12.5))),
+                DataCell(Text(r['entries'].toString(),
+                    style: const TextStyle(fontSize: 12.5))),
               ])),
           DataRow(
             color: WidgetStateProperty.all(const Color(0xFFE8F5E2)),
             cells: [
-              ...List.generate(dims.length, (i) => DataCell(Text(i == 0 ? loc.faGrandTotal : '', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: idaGreen)))),
-              DataCell(Text('${result['grand_total_days']}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: idaGreen))),
-              DataCell(Text('₹${result['grand_total_wage']}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: idaGreen))),
-              DataCell(Text('${result['grand_entries']}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: idaGreen))),
+              ...List.generate(
+                  dims.length,
+                  (i) => DataCell(Text(i == 0 ? loc.faGrandTotal : '',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12.5,
+                          color: idaGreen)))),
+              DataCell(Text('${result['grand_total_days']}',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12.5,
+                      color: idaGreen))),
+              DataCell(Text('₹${result['grand_total_wage']}',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12.5,
+                      color: idaGreen))),
+              DataCell(Text('${result['grand_entries']}',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12.5,
+                      color: idaGreen))),
             ],
           ),
         ],
@@ -536,21 +781,28 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
           border: Border.all(color: const Color(0xFFE0E7D8)),
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: const TextStyle(fontSize: 10.5, color: Color(0xFF6B7280))),
+          Text(label,
+              style: const TextStyle(fontSize: 10.5, color: Color(0xFF6B7280))),
           const SizedBox(height: 2),
           Row(children: [
             const Icon(Icons.calendar_today, size: 14, color: idaGreen),
             const SizedBox(width: 6),
-            Text(DateFormat('dd MMM yyyy').format(value), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: idaDark)),
+            Text(DateFormat('dd MMM yyyy').format(value),
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600, color: idaDark)),
           ]),
         ]),
       ),
     );
   }
 
-  Widget _levelDropdown(String label, String? value, {required List<String> exclude, required ValueChanged<String?> onChanged}) {
+  Widget _levelDropdown(String label, String? value,
+      {required List<String> exclude,
+      required ValueChanged<String?> onChanged}) {
     final loc = AppLocalizations.of(context)!;
-    final options = _dimOptions.where((o) => o['key'] == null || !exclude.contains(o['key'])).toList();
+    final options = _dimOptions
+        .where((o) => o['key'] == null || !exclude.contains(o['key']))
+        .toList();
     return DropdownButtonFormField<String?>(
       value: value,
       decoration: InputDecoration(
@@ -558,12 +810,20 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
         labelStyle: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
         filled: true,
         fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE0E7D8))),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: idaGreen, width: 1.5)),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(color: Color(0xFFE0E7D8))),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(color: idaGreen, width: 1.5)),
       ),
       items: options
-          .map<DropdownMenuItem<String?>>((o) => DropdownMenuItem(value: o['key'], child: Text(_dimLabel(loc, o['key']), style: const TextStyle(fontSize: 13))))
+          .map<DropdownMenuItem<String?>>((o) => DropdownMenuItem(
+              value: o['key'],
+              child: Text(_dimLabel(loc, o['key']),
+                  style: const TextStyle(fontSize: 13))))
           .toList(),
       onChanged: onChanged,
     );

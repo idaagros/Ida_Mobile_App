@@ -14,6 +14,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../services/pdf_download_helper.dart';
+import '../services/responsive.dart';
 
 class DailyReportsScreen extends StatefulWidget {
   const DailyReportsScreen({super.key});
@@ -272,180 +273,190 @@ class _DailyReportsScreenState extends State<DailyReportsScreen> {
         title: const Text('Daily Reports',
             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Generate a PDF report',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 4),
-          const Text(
-            'Includes previous reading, today\'s reading, the difference and '
-            'a grayscale photo for each entry.',
-            style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
-          ),
-          const SizedBox(height: 20),
+      body: Responsive.constrainedContent(
+          context,
+          SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Generate a PDF report',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              const Text(
+                'Includes previous reading, today\'s reading, the difference and '
+                'a grayscale photo for each entry.',
+                style: TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
+              ),
+              const SizedBox(height: 20),
 
-          // ── Module multi-select ───────────────────────────
-          const Text('Modules',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: _moduleOptions.map((m) {
-              final key = m['key'] as String;
-              final selected = _selectedModules.contains(key);
-              return GestureDetector(
-                onTap: () => _toggleModule(key),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: selected ? idaGreen : Colors.white,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                        color: selected ? idaGreen : const Color(0xFFE0E7D8)),
+              // ── Module multi-select ───────────────────────────
+              const Text('Modules',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: _moduleOptions.map((m) {
+                  final key = m['key'] as String;
+                  final selected = _selectedModules.contains(key);
+                  return GestureDetector(
+                    onTap: () => _toggleModule(key),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: selected ? idaGreen : Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color:
+                                selected ? idaGreen : const Color(0xFFE0E7D8)),
+                      ),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(m['icon'] as IconData,
+                            size: 16,
+                            color: selected ? Colors.white : idaGreen),
+                        const SizedBox(width: 6),
+                        Text(m['label'] as String,
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color:
+                                    selected ? Colors.white : Colors.black87)),
+                      ]),
+                    ),
+                  );
+                }).toList(),
+              ),
+
+              const SizedBox(height: 24),
+
+              // ── Date range ─────────────────────────────────────
+              const Text('Date range',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              const Text(
+                  'Defaults to yesterday — tap to choose a custom range.',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+              const SizedBox(height: 10),
+              Row(children: [
+                Expanded(
+                  child: _dateField(
+                    label: 'From',
+                    date: _fromDate,
+                    onTap: () => _pickDate(isFrom: true),
                   ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(m['icon'] as IconData,
-                        size: 16, color: selected ? Colors.white : idaGreen),
-                    const SizedBox(width: 6),
-                    Text(m['label'] as String,
-                        style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: selected ? Colors.white : Colors.black87)),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _dateField(
+                    label: 'To',
+                    date: _toDate,
+                    onTap: () => _pickDate(isFrom: false),
+                  ),
+                ),
+              ]),
+
+              const SizedBox(height: 20),
+
+              // ── Preview ────────────────────────────────────────
+              if (_selectedModules.isNotEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE0E7D8)),
+                  ),
+                  child: _loadingPreview
+                      ? const Center(
+                          child: SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: idaGreen)))
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                              Row(children: [
+                                Icon(Icons.insights, size: 16, color: idaGreen),
+                                const SizedBox(width: 6),
+                                Text(
+                                    '$_totalEntries entr${_totalEntries == 1 ? "y" : "ies"} will be included',
+                                    style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600)),
+                              ]),
+                              if (_previewCounts?['counts'] != null) ...[
+                                const SizedBox(height: 8),
+                                ...(_previewCounts!['counts'] as Map)
+                                    .entries
+                                    .map((e) => Padding(
+                                          padding:
+                                              const EdgeInsets.only(top: 2),
+                                          child: Text(
+                                            '• ${_labelFor(e.key.toString())}: ${e.value} entr${e.value == 1 ? "y" : "ies"}',
+                                            style: const TextStyle(
+                                                fontSize: 12,
+                                                color: Color(0xFF6B7280)),
+                                          ),
+                                        )),
+                              ],
+                            ]),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              if (_error != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: Row(children: [
+                    Icon(Icons.error_outline,
+                        size: 16, color: Colors.red.shade700),
+                    const SizedBox(width: 8),
+                    Expanded(
+                        child: Text(_error!,
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.red.shade700))),
                   ]),
                 ),
-              );
-            }).toList(),
-          ),
+                const SizedBox(height: 16),
+              ],
 
-          const SizedBox(height: 24),
-
-          // ── Date range ─────────────────────────────────────
-          const Text('Date range',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 4),
-          const Text('Defaults to yesterday — tap to choose a custom range.',
-              style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(
-              child: _dateField(
-                label: 'From',
-                date: _fromDate,
-                onTap: () => _pickDate(isFrom: true),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _dateField(
-                label: 'To',
-                date: _toDate,
-                onTap: () => _pickDate(isFrom: false),
-              ),
-            ),
-          ]),
-
-          const SizedBox(height: 20),
-
-          // ── Preview ────────────────────────────────────────
-          if (_selectedModules.isNotEmpty) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFE0E7D8)),
-              ),
-              child: _loadingPreview
-                  ? const Center(
-                      child: SizedBox(
-                          height: 20,
-                          width: 20,
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: _generating
+                      ? const SizedBox(
+                          height: 16,
+                          width: 16,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2, color: idaGreen)))
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                          Row(children: [
-                            Icon(Icons.insights, size: 16, color: idaGreen),
-                            const SizedBox(width: 6),
-                            Text(
-                                '$_totalEntries entr${_totalEntries == 1 ? "y" : "ies"} will be included',
-                                style: const TextStyle(
-                                    fontSize: 13, fontWeight: FontWeight.w600)),
-                          ]),
-                          if (_previewCounts?['counts'] != null) ...[
-                            const SizedBox(height: 8),
-                            ...(_previewCounts!['counts'] as Map)
-                                .entries
-                                .map((e) => Padding(
-                                      padding: const EdgeInsets.only(top: 2),
-                                      child: Text(
-                                        '• ${_labelFor(e.key.toString())}: ${e.value} entr${e.value == 1 ? "y" : "ies"}',
-                                        style: const TextStyle(
-                                            fontSize: 12,
-                                            color: Color(0xFF6B7280)),
-                                      ),
-                                    )),
-                          ],
-                        ]),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          if (_error != null) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.red.shade200),
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.picture_as_pdf_outlined,
+                          color: Colors.white),
+                  label: Text(_generating ? 'Generating…' : 'Generate Report',
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.w700)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: idaGreen,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  onPressed: (_selectedModules.isEmpty || _generating)
+                      ? null
+                      : _generateReport,
+                ),
               ),
-              child: Row(children: [
-                Icon(Icons.error_outline, size: 16, color: Colors.red.shade700),
-                const SizedBox(width: 8),
-                Expanded(
-                    child: Text(_error!,
-                        style: TextStyle(
-                            fontSize: 12, color: Colors.red.shade700))),
-              ]),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              icon: _generating
-                  ? const SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.picture_as_pdf_outlined,
-                      color: Colors.white),
-              label: Text(_generating ? 'Generating…' : 'Generate Report',
-                  style: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w700)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: idaGreen,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-              onPressed: (_selectedModules.isEmpty || _generating)
-                  ? null
-                  : _generateReport,
-            ),
-          ),
-        ]),
-      ),
+            ]),
+          )),
     );
   }
 

@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../services/responsive.dart';
 
 class PartiesScreen extends StatefulWidget {
   const PartiesScreen({super.key});
@@ -41,7 +42,8 @@ class _PartiesScreenState extends State<PartiesScreen> {
     setState(() => loading = true);
     try {
       final h = await _headers;
-      final res = await http.get(Uri.parse('$baseUrl/parties?all=1'), headers: h);
+      final res =
+          await http.get(Uri.parse('$baseUrl/parties?all=1'), headers: h);
       if (res.statusCode == 200) setState(() => parties = jsonDecode(res.body));
     } catch (e) {
       debugPrint('Load error: $e');
@@ -100,7 +102,8 @@ class _PartiesScreenState extends State<PartiesScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Add Party', style: TextStyle(fontWeight: FontWeight.w700)),
+        title: const Text('Add Party',
+            style: TextStyle(fontWeight: FontWeight.w700)),
         content: TextField(
           controller: ctrl,
           autofocus: true,
@@ -110,7 +113,10 @@ class _PartiesScreenState extends State<PartiesScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child:
+                  const Text('Cancel', style: TextStyle(color: Colors.grey))),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
             onPressed: () {
@@ -133,47 +139,57 @@ class _PartiesScreenState extends State<PartiesScreen> {
         backgroundColor: idaDark,
         foregroundColor: Colors.white,
         elevation: 0,
-        title: const Text('Manage Parties', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+        title: const Text('Manage Parties',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: idaGreen,
         onPressed: _showAddDialog,
         child: const Icon(Icons.add, color: Colors.white),
       ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator(color: idaGreen))
-          : parties.isEmpty
-              ? const Center(child: Text('No parties yet — tap + to add one', style: TextStyle(color: Colors.black54)))
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                  itemCount: parties.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, i) {
-                    final p = parties[i];
-                    final active = p['is_active'] == 1;
-                    return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFE0E7D8)),
-                      ),
-                      child: ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(p['name'] ?? '',
-                            style: TextStyle(
-                                fontSize: 14, fontWeight: FontWeight.w600,
-                                color: active ? Colors.black87 : Colors.grey,
-                                decoration: active ? null : TextDecoration.lineThrough)),
-                        trailing: Switch(
-                          value: active,
-                          activeColor: idaGreen,
-                          onChanged: (_) => _toggleActive(p),
-                        ),
-                      ),
-                    );
-                  },
-                ),
+      body: Responsive.constrainedContent(
+          context,
+          loading
+              ? const Center(child: CircularProgressIndicator(color: idaGreen))
+              : parties.isEmpty
+                  ? const Center(
+                      child: Text('No parties yet — tap + to add one',
+                          style: TextStyle(color: Colors.black54)))
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
+                      itemCount: parties.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (_, i) {
+                        final p = parties[i];
+                        final active = p['is_active'] == 1;
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFE0E7D8)),
+                          ),
+                          child: ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(p['name'] ?? '',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color:
+                                        active ? Colors.black87 : Colors.grey,
+                                    decoration: active
+                                        ? null
+                                        : TextDecoration.lineThrough)),
+                            trailing: Switch(
+                              value: active,
+                              activeColor: idaGreen,
+                              onChanged: (_) => _toggleActive(p),
+                            ),
+                          ),
+                        );
+                      },
+                    )),
     );
   }
 }

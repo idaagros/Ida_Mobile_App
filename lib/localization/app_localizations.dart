@@ -197,6 +197,14 @@ class AppLocalizations {
   String get faWaRejectHint => _t('fa_wa_reject_hint');
   String get faWaErrStillNeedTask => _t('fa_wa_err_still_need_task');
   String get faWaErrAddTaskGroup => _t('fa_wa_err_add_task_group');
+  String get faWaDidNotWork => _t('fa_wa_did_not_work');
+  String get faWaDidNotWorkHint => _t('fa_wa_did_not_work_hint');
+  String get faWaAddMissedWorker => _t('fa_wa_add_missed_worker');
+  String get faWaAddMissedWorkerHint => _t('fa_wa_add_missed_worker_hint');
+  String get faWaWorkerLabel => _t('fa_wa_worker_label');
+  String get faWaFarmLabel => _t('fa_wa_farm_label');
+  String get faWaWorkTypeOptionalLabel => _t('fa_wa_work_type_optional_label');
+  String get faWaReasonLabel => _t('fa_wa_reason_label');
   String get faWaErrSaveAllocation => _t('fa_wa_err_save_allocation');
   String get faWaBreakAttendanceTitlePrefix =>
       _t('fa_wa_break_attendance_title_prefix');
@@ -249,6 +257,8 @@ class AppLocalizations {
   String get faReportsTitle => _t('fa_reports_title');
   String get faWorkerWageReportTitle => _t('fa_worker_wage_report_title');
   String get faWorkerWageReportDesc => _t('fa_worker_wage_report_desc');
+  String get faGenderSplitReportTitle => _t('fa_gender_split_report_title');
+  String get faGenderSplitReportDesc => _t('fa_gender_split_report_desc');
   String get faFrom => _t('fa_from');
   String get faTo => _t('fa_to');
   String get faGenerateExcelReport => _t('fa_generate_excel_report');
@@ -520,7 +530,7 @@ class AppLocalizations {
       'invalid_credentials_error': 'Invalid credentials. Please try again.',
       'welcome_back': 'Welcome back',
       'section_daily_entries': 'Daily Entries',
-      'section_reports_analytics': 'Reports & Analytics',
+      'section_reports_analytics': 'Reports',
       'section_payroll': 'Payroll',
       'section_farm_operations': 'Farm Operations',
       'section_administrative': 'Administrative',
@@ -660,6 +670,16 @@ class AppLocalizations {
       'fa_wa_reject_hint': 'Why is this being sent back for correction?',
       'fa_wa_err_still_need_task': 'present worker(s) still need a task:',
       'fa_wa_err_add_task_group': 'Add at least one task group',
+      'fa_wa_did_not_work': 'Did not work',
+      'fa_wa_did_not_work_hint':
+          'They were marked present this morning but did not actually work — removed from today\'s present count entirely, and no wage will be paid.',
+      'fa_wa_add_missed_worker': 'Add Missed Worker',
+      'fa_wa_add_missed_worker_hint':
+          'For a worker who actually worked today but was left out of the original headcount. Adds them to today\'s present count and pays them directly — final immediately, no further approval needed.',
+      'fa_wa_worker_label': 'Worker',
+      'fa_wa_farm_label': 'Farm',
+      'fa_wa_work_type_optional_label': 'Work type (optional)',
+      'fa_wa_reason_label': 'Reason',
       'fa_wa_err_save_allocation': 'Failed to save allocation',
       'fa_wa_break_attendance_title_prefix': 'Break Attendance',
       'fa_wa_break_hint':
@@ -712,6 +732,9 @@ class AppLocalizations {
       'fa_worker_wage_report_title': 'Worker Wage Report',
       'fa_worker_wage_report_desc':
           'One row per worker, each date as its own Days / Amount / Farm / Work Type block, with a running total per worker.',
+      'fa_gender_split_report_title': 'Worker Wage Report — Male/Female Split',
+      'fa_gender_split_report_desc':
+          'One row per worker, one column per date, a total per worker — shown in two separate tables, Male and Female, each with its own subtotal.',
       'fa_from': 'From',
       'fa_to': 'To',
       'fa_generate_excel_report': 'Generate Excel Report',
@@ -1120,6 +1143,16 @@ class AppLocalizations {
       'fa_wa_reject_hint': 'दुरुस्तीसाठी हे परत का पाठवले जात आहे?',
       'fa_wa_err_still_need_task': 'हजर मजुरांना अजून काम नेमलेले नाही:',
       'fa_wa_err_add_task_group': 'किमान एक काम गट जोडा',
+      'fa_wa_did_not_work': 'काम केले नाही',
+      'fa_wa_did_not_work_hint':
+          'आज सकाळी उपस्थित नोंदवले होते पण प्रत्यक्षात काम केले नाही — आजच्या उपस्थिती संख्येतून पूर्णपणे वगळले जाईल, आणि मजुरी दिली जाणार नाही.',
+      'fa_wa_add_missed_worker': 'चुकलेला मजूर जोडा',
+      'fa_wa_add_missed_worker_hint':
+          'ज्या मजुराने आज प्रत्यक्षात काम केले पण मूळ हजेरीत सुटला त्याच्यासाठी. आजच्या उपस्थिती संख्येत जोडले जाईल आणि थेट मजुरी दिली जाईल — लगेच अंतिम, पुढील मंजुरीची गरज नाही.',
+      'fa_wa_worker_label': 'मजूर',
+      'fa_wa_farm_label': 'शेत',
+      'fa_wa_work_type_optional_label': 'कामाचा प्रकार (ऐच्छिक)',
+      'fa_wa_reason_label': 'कारण',
       'fa_wa_err_save_allocation': 'वाटप जतन करण्यात अयशस्वी',
       'fa_wa_break_attendance_title_prefix': 'तुटलेली हजेरी',
       'fa_wa_break_hint':
@@ -1173,6 +1206,9 @@ class AppLocalizations {
       'fa_worker_wage_report_title': 'मजूर वेतन अहवाल',
       'fa_worker_wage_report_desc':
           'प्रत्येक मजुरासाठी एक ओळ, प्रत्येक तारखेचा दिवस / रक्कम / शेत / कामाचा प्रकार गट, आणि मजुराची एकूण बेरीज.',
+      'fa_gender_split_report_title': 'मजूर वेतन अहवाल — पुरुष/स्त्री विभागणी',
+      'fa_gender_split_report_desc':
+          'प्रत्येक मजुरासाठी एक ओळ, प्रत्येक तारखेसाठी एक स्तंभ, मजुराची एकूण बेरीज — पुरुष आणि स्त्री अशा दोन स्वतंत्र तक्त्यांमध्ये, प्रत्येकाची स्वतःची उपबेरीज.',
       'fa_from': 'पासून',
       'fa_to': 'पर्यंत',
       'fa_generate_excel_report': 'एक्सेल अहवाल तयार करा',

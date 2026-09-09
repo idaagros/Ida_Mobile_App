@@ -19,6 +19,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/image_helper.dart';
 import '../services/colored_date_picker.dart';
+import '../services/responsive.dart';
 
 class OutwardRegisterScreen extends StatefulWidget {
   final int? recordId; // null = create new; non-null = open existing
@@ -315,54 +316,59 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator(color: idaGreen))
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildHeaderCard(),
-                    if (errorMessage != null) ...[
-                      const SizedBox(height: 12),
-                      _errorBanner(errorMessage!),
-                    ],
-                    if (isNewRecord) ...[
-                      const SizedBox(height: 20),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 52,
-                        child: ElevatedButton.icon(
-                          onPressed: saving ? null : _createRecord,
-                          icon: saving
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                      color: Colors.white, strokeWidth: 2))
-                              : const Icon(Icons.add, color: Colors.white),
-                          label: Text(
-                              saving ? 'Creating...' : 'Create Dispatch Entry',
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 15)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: idaGreen,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
+          : Responsive.constrainedContent(
+              context,
+              SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildHeaderCard(),
+                      if (errorMessage != null) ...[
+                        const SizedBox(height: 12),
+                        _errorBanner(errorMessage!),
+                      ],
+                      if (isNewRecord) ...[
+                        const SizedBox(height: 20),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: ElevatedButton.icon(
+                            onPressed: saving ? null : _createRecord,
+                            icon: saving
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                        color: Colors.white, strokeWidth: 2))
+                                : const Icon(Icons.add, color: Colors.white),
+                            label: Text(
+                                saving
+                                    ? 'Creating...'
+                                    : 'Create Dispatch Entry',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 15)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: idaGreen,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Center(
-                        child: Text('Sections unlock once the entry is created',
-                            style: TextStyle(
-                                fontSize: 12, color: Color(0xFF9CA3AF))),
-                      ),
-                    ] else
-                      _buildSections(),
-                    const SizedBox(height: 32),
-                  ]),
-            ),
+                        const SizedBox(height: 8),
+                        const Center(
+                          child: Text(
+                              'Sections unlock once the entry is created',
+                              style: TextStyle(
+                                  fontSize: 12, color: Color(0xFF9CA3AF))),
+                        ),
+                      ] else
+                        _buildSections(),
+                      const SizedBox(height: 32),
+                    ]),
+              )),
     );
   }
 

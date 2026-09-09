@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/responsive.dart';
 
 class AdminReviewScreen extends StatefulWidget {
   // Optional initial status filter — 'pending', 'approved', or 'returned'.
@@ -30,7 +31,6 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
 
   List _electricity = [];
   List _tractor = [];
-  List _labour = [];
   List _factory = [];
   List _machine = [];
   List _machinePf = [];
@@ -53,7 +53,7 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
     super.initState();
     _filter = widget.initialFilter ?? 'pending';
     _tabs = TabController(
-        length: 6, vsync: this, initialIndex: widget.initialTabIndex ?? 0);
+        length: 5, vsync: this, initialIndex: widget.initialTabIndex ?? 0);
     _tabs.addListener(() => setState(() {}));
     _fetchAll();
     _fetchCounts();
@@ -130,8 +130,6 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
       final results = await Future.wait([
         fetchModule('electricity'),
         fetchModule('tractor'),
-        fetchModule('labour',
-            dateKey: 'work_start_date', supportsStatusFilter: false),
         fetchModule('factory', dateKey: 'entry_date'),
         fetchModule('machine'),
         fetchModule('machine-pf'),
@@ -139,10 +137,9 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
       setState(() {
         _electricity = results[0];
         _tractor = results[1];
-        _labour = results[2];
-        _factory = results[3];
-        _machine = results[4];
-        _machinePf = results[5];
+        _factory = results[2];
+        _machine = results[3];
+        _machinePf = results[4];
       });
     } catch (e) {
       debugPrint('Fetch error: $e');
@@ -223,9 +220,6 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
               break;
             case 'tractor':
               _tractor.removeWhere((r) => r['id'] == id);
-              break;
-            case 'labour':
-              _labour.removeWhere((r) => r['id'] == id);
               break;
             case 'factory':
               _factory.removeWhere((r) => r['id'] == id);
@@ -782,12 +776,10 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
       case 1:
         return _tractor;
       case 2:
-        return _labour;
-      case 3:
         return _factory;
-      case 4:
+      case 3:
         return _machine;
-      case 5:
+      case 4:
         return _machinePf;
       default:
         return [];
@@ -801,12 +793,10 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
       case 1:
         return 'tractor';
       case 2:
-        return 'labour';
-      case 3:
         return 'factory';
-      case 4:
+      case 3:
         return 'machine';
-      case 5:
+      case 4:
         return 'machine-pf';
       default:
         return 'electricity';
@@ -829,32 +819,66 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
           Image.asset('assets/images/idalogo.png', height: 28),
           const SizedBox(width: 10),
           const Flexible(
-            child: Text('Review Submissions',
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    color: amber, fontSize: 17, fontWeight: FontWeight.w600)),
+            child: Tooltip(
+              message: 'Review Submissions',
+              child: Text('Review Submissions',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: amber, fontSize: 17, fontWeight: FontWeight.w600)),
+            ),
           ),
         ]),
         actions: [
           IconButton(
               icon: const Icon(Icons.refresh_rounded), onPressed: _fetchAll),
         ],
-        bottom: TabBar(
-          controller: _tabs,
-          isScrollable: true,
-          indicatorColor: amber,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white54,
-          labelStyle:
-              const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-          tabs: [
-            Tab(text: 'Electricity\n(${_badgeCount('electricity')})'),
-            Tab(text: 'Tractor\n(${_badgeCount('tractor')})'),
-            Tab(text: 'Labour\n(${_labour.length})'),
-            Tab(text: 'Factory\n(${_badgeCount('factory')})'),
-            Tab(text: 'Machine\n(${_badgeCount('machine')})'),
-            Tab(text: 'Machine PF\n(${_badgeCount('machine-pf')})'),
-          ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48),
+          child: Stack(
+            children: [
+              TabBar(
+                controller: _tabs,
+                isScrollable: true,
+                indicatorColor: amber,
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.white54,
+                labelStyle:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                tabs: [
+                  Tab(text: 'Electricity\n(${_badgeCount('electricity')})'),
+                  Tab(text: 'Tractor\n(${_badgeCount('tractor')})'),
+                  Tab(text: 'Factory\n(${_badgeCount('factory')})'),
+                  Tab(text: 'Machine\n(${_badgeCount('machine')})'),
+                  Tab(text: 'Machine PF\n(${_badgeCount('machine-pf')})'),
+                ],
+              ),
+              // Fade indicator on the right edge - the tab bar scrolls
+              // (isScrollable: true above), but with no visual cue for
+              // that, the extra tabs weren't discoverable at all. This
+              // is decorative only (IgnorePointer), so it never blocks
+              // taps or the tab bar's own scroll gesture underneath it.
+              Positioned(
+                right: 0,
+                top: 0,
+                bottom: 0,
+                child: IgnorePointer(
+                  child: Container(
+                    width: 28,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        colors: [
+                          idaDark.withOpacity(0),
+                          idaDark.withOpacity(0.85),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
       body: Column(children: [
@@ -983,24 +1007,55 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
                   : RefreshIndicator(
                       color: idaGreen,
                       onRefresh: _fetchAll,
-                      child: ListView.separated(
+                      child: SingleChildScrollView(
                         padding: const EdgeInsets.all(16),
-                        itemCount: list.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
-                        itemBuilder: (_, i) => _RecordCard(
-                          record: list[i],
-                          module: module,
-                          onTap: () => _showDetail(Map.from(list[i]), module),
-                          onApprove: () =>
-                              _updateStatus(module, list[i]['id'], 'approved'),
-                          onReturn: () =>
-                              _showReturnDialog(module, list[i]['id']),
-                        ),
+                        child: _recordGrid(
+                            context,
+                            list
+                                .map((r) => _RecordCard(
+                                      record: r,
+                                      module: module,
+                                      onTap: () =>
+                                          _showDetail(Map.from(r), module),
+                                      onApprove: () => _updateStatus(
+                                          module, r['id'], 'approved'),
+                                      onReturn: () =>
+                                          _showReturnDialog(module, r['id']),
+                                    ))
+                                .toList()),
                       ),
                     ),
         ),
       ]),
     );
+  }
+
+  // Same reasoning as the grids built for Dashboard, Farm Attendance,
+  // and Work Allocation: one column on mobile (unchanged), reflowing
+  // to 2-3 columns on wider screens. Unlike those, _RecordCard has no
+  // margin of its own - its spacing came entirely from the ListView's
+  // separatorBuilder, which this replaces - so runSpacing here
+  // actually needs to provide the gap, not stay at 0.
+  Widget _recordGrid(BuildContext context, List<Widget> cards) {
+    if (cards.isEmpty) return const SizedBox.shrink();
+    final columns = Responsive.gridColumns(context);
+    if (columns == 1) {
+      return Column(
+        children: cards.expand((c) => [c, const SizedBox(height: 10)]).toList()
+          ..removeLast(),
+      );
+    }
+    const spacing = 12.0;
+    return LayoutBuilder(builder: (context, constraints) {
+      final cardWidth =
+          (constraints.maxWidth - spacing * (columns - 1)) / columns;
+      return Wrap(
+        spacing: spacing,
+        runSpacing: spacing,
+        children:
+            cards.map((c) => SizedBox(width: cardWidth, child: c)).toList(),
+      );
+    });
   }
 }
 

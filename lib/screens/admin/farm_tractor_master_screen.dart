@@ -18,6 +18,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import '../../localization/app_localizations.dart';
 import '../../localization/transliterate.dart';
+import '../../services/responsive.dart';
 
 enum _Tab { tractors, rateCard }
 
@@ -329,10 +330,12 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
           ]),
         ),
         Expanded(
-            child: loading
-                ? const Center(
-                    child: CircularProgressIndicator(color: idaGreen))
-                : _buildList(loc)),
+            child: Responsive.constrainedContent(
+                context,
+                loading
+                    ? const Center(
+                        child: CircularProgressIndicator(color: idaGreen))
+                    : _buildList(loc))),
       ]),
     );
   }

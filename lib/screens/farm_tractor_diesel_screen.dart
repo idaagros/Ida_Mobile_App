@@ -13,6 +13,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
+import '../services/responsive.dart';
 
 class FarmTractorDieselScreen extends StatefulWidget {
   const FarmTractorDieselScreen({super.key});
@@ -244,103 +245,108 @@ class _FarmTractorDieselScreenState extends State<FarmTractorDieselScreen> {
                         child: CircularProgressIndicator(color: idaGreen)))
               else
                 Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                    children: [
-                      if (average != null)
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                              color: idaGreen.withOpacity(0.08),
-                              borderRadius: BorderRadius.circular(12)),
-                          child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(loc.ftAverageFuelUse,
-                                    style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
-                                        color: Color(0xFF6B7280),
-                                        letterSpacing: 0.6)),
-                                const SizedBox(height: 6),
-                                if (average!['average_liters_per_hour'] != null)
-                                  Text(
-                                      '${average!['average_liters_per_hour']} L / hour',
-                                      style: const TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.w700,
-                                          color: idaDark))
-                                else
-                                  Text(
-                                      average!['note'] ?? 'Not enough data yet',
-                                      style: TextStyle(
-                                          fontSize: 13,
-                                          color: Colors.grey.shade600)),
-                              ]),
-                        ),
-                      const SizedBox(height: 16),
-                      Text(loc.ftFillupHistory,
-                          style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF6B7280),
-                              letterSpacing: 0.6)),
-                      const SizedBox(height: 8),
-                      if (logs.isEmpty)
-                        Container(
-                          padding: const EdgeInsets.all(20),
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border:
-                                  Border.all(color: const Color(0xFFE0E7D8))),
-                          child: Text(loc.ftNoDieselLogs,
+                  child: Responsive.constrainedContent(
+                      context,
+                      ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
+                        children: [
+                          if (average != null)
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                  color: idaGreen.withOpacity(0.08),
+                                  borderRadius: BorderRadius.circular(12)),
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(loc.ftAverageFuelUse,
+                                        style: const TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF6B7280),
+                                            letterSpacing: 0.6)),
+                                    const SizedBox(height: 6),
+                                    if (average!['average_liters_per_hour'] !=
+                                        null)
+                                      Text(
+                                          '${average!['average_liters_per_hour']} L / hour',
+                                          style: const TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.w700,
+                                              color: idaDark))
+                                    else
+                                      Text(
+                                          average!['note'] ??
+                                              'Not enough data yet',
+                                          style: TextStyle(
+                                              fontSize: 13,
+                                              color: Colors.grey.shade600)),
+                                  ]),
+                            ),
+                          const SizedBox(height: 16),
+                          Text(loc.ftFillupHistory,
                               style: const TextStyle(
-                                  color: Colors.black54, fontSize: 13)),
-                        )
-                      else
-                        ...logs.map((l) => Container(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.all(14),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF6B7280),
+                                  letterSpacing: 0.6)),
+                          const SizedBox(height: 8),
+                          if (logs.isEmpty)
+                            Container(
+                              padding: const EdgeInsets.all(20),
+                              alignment: Alignment.center,
                               decoration: BoxDecoration(
                                   color: Colors.white,
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
                                       color: const Color(0xFFE0E7D8))),
-                              child: Row(children: [
-                                const Icon(Icons.local_gas_station,
-                                    color: idaGreen, size: 18),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text('${l['liters_filled']} L',
-                                            style: const TextStyle(
-                                                fontSize: 13.5,
-                                                fontWeight: FontWeight.w600)),
-                                        Text(
-                                          '${l['log_date']}${l['hour_meter_reading'] != null ? ' · meter: ${l['hour_meter_reading']}' : ''}',
-                                          style: TextStyle(
-                                              fontSize: 11.5,
-                                              color: Colors.grey.shade600),
-                                          overflow: TextOverflow.ellipsis,
-                                          maxLines: 1,
-                                        ),
-                                      ]),
-                                ),
-                                if (l['cost'] != null)
-                                  Text('₹${l['cost']}',
-                                      style: const TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w700,
-                                          color: idaGreen)),
-                              ]),
-                            )),
-                    ],
-                  ),
+                              child: Text(loc.ftNoDieselLogs,
+                                  style: const TextStyle(
+                                      color: Colors.black54, fontSize: 13)),
+                            )
+                          else
+                            ...logs.map((l) => Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                          color: const Color(0xFFE0E7D8))),
+                                  child: Row(children: [
+                                    const Icon(Icons.local_gas_station,
+                                        color: idaGreen, size: 18),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text('${l['liters_filled']} L',
+                                                style: const TextStyle(
+                                                    fontSize: 13.5,
+                                                    fontWeight:
+                                                        FontWeight.w600)),
+                                            Text(
+                                              '${l['log_date']}${l['hour_meter_reading'] != null ? ' · meter: ${l['hour_meter_reading']}' : ''}',
+                                              style: TextStyle(
+                                                  fontSize: 11.5,
+                                                  color: Colors.grey.shade600),
+                                              overflow: TextOverflow.ellipsis,
+                                              maxLines: 1,
+                                            ),
+                                          ]),
+                                    ),
+                                    if (l['cost'] != null)
+                                      Text('₹${l['cost']}',
+                                          style: const TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w700,
+                                              color: idaGreen)),
+                                  ]),
+                                )),
+                        ],
+                      )),
                 ),
             ]),
     );

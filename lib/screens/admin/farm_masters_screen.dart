@@ -15,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../localization/app_localizations.dart';
 import '../../localization/transliterate.dart';
 import '../face_enrollment_screen.dart';
+import '../../services/responsive.dart';
 
 class FarmMastersScreen extends StatefulWidget {
   const FarmMastersScreen({super.key});
@@ -668,13 +669,16 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
           ]),
         ),
         Expanded(
-          child: loading
-              ? const Center(child: CircularProgressIndicator(color: idaGreen))
-              : RefreshIndicator(
-                  color: idaGreen,
-                  onRefresh: _loadAll,
-                  child: _buildList(),
-                ),
+          child: Responsive.constrainedContent(
+              context,
+              loading
+                  ? const Center(
+                      child: CircularProgressIndicator(color: idaGreen))
+                  : RefreshIndicator(
+                      color: idaGreen,
+                      onRefresh: _loadAll,
+                      child: _buildList(),
+                    )),
         ),
       ]),
     );

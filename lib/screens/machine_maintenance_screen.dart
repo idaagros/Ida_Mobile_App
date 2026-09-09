@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -135,18 +136,62 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
 
     if (confirmed != true) return;
 
+    // Immediate feedback the moment the dialog closes - a loading
+    // snackbar that shows right away, rather than nothing until the
+    // network call resolves. If the call hangs, the person sees THIS
+    // instead of silence.
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(children: [
+            SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white)),
+            SizedBox(width: 12),
+            Text('Logging maintenance…'),
+          ]),
+          duration: Duration(seconds: 30),
+        ),
+      );
+    }
+
     try {
       final h = await _headers;
-      final res = await http.post(
-        Uri.parse('$baseUrl/machine-maintenance/log'),
-        headers: h,
-        body: jsonEncode({
-          'activity_id': activity['id'],
-          'notes': notesCtrl.text.trim(),
-          'done_date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
-        }),
-      );
-      final data = jsonDecode(res.body);
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/machine-maintenance/log'),
+            headers: h,
+            body: jsonEncode({
+              'activity_id': activity['id'],
+              'notes': notesCtrl.text.trim(),
+              'done_date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+            }),
+          )
+          // A hung request with no timeout looks EXACTLY like "nothing
+          // happened" - this turns that into a visible error instead.
+          .timeout(const Duration(seconds: 20));
+
+      if (mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+      Map<String, dynamic> data;
+      try {
+        data = jsonDecode(res.body);
+      } catch (_) {
+        // Response wasn't valid JSON (e.g. a proxy/gateway error page) -
+        // still surface SOMETHING rather than let this fall through
+        // silently.
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                'Unexpected response from server (status ${res.statusCode})'),
+            backgroundColor: red,
+          ));
+        }
+        return;
+      }
+
       if (res.statusCode == 200) {
         _loadAll();
         if (mounted)
@@ -162,10 +207,21 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
             backgroundColor: red,
           ));
       }
+    } on TimeoutException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content:
+              Text('Request timed out — check your connection and try again'),
+          backgroundColor: red,
+        ));
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Error: $e'), backgroundColor: red));
+      }
     }
   }
 
@@ -248,12 +304,15 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
           Image.asset('assets/images/idalogo.png', height: 28),
           const SizedBox(width: 8),
           const Flexible(
-              child: Text('Machine Maintenance',
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFFF5A623)))),
+              child: Tooltip(
+            message: 'Machine Maintenance',
+            child: Text('Machine Maintenance',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFFF5A623))),
+          )),
           if (overdueCount > 0) ...[
             const SizedBox(width: 8),
             Container(

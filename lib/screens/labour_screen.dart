@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/responsive.dart';
 
 class LabourScreen extends StatefulWidget {
   const LabourScreen({super.key});
@@ -114,16 +115,20 @@ class _LabourScreenState extends State<LabourScreen> {
       backgroundColor: const Color(0xFFF7F9F5),
       appBar: AppBar(
         backgroundColor: idaDark,
+        iconTheme: const IconThemeData(color: Colors.white),
         title: Row(children: [
           Image.asset('assets/images/idalogo.png', height: 28),
           const SizedBox(width: 10),
           const Flexible(
-              child: Text('Labour Management',
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFFF5A623)))),
+              child: Tooltip(
+            message: 'Labour Management',
+            child: Text('Labour Management',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFFF5A623))),
+          )),
         ]),
         actions: [
           IconButton(
@@ -145,95 +150,98 @@ class _LabourScreenState extends State<LabourScreen> {
           : RefreshIndicator(
               color: idaGreen,
               onRefresh: _loadData,
-              child: CustomScrollView(
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // ── Summary cards ─────────────────────
-                            Row(children: [
-                              _summaryCard(
-                                  '${summary['total'] ?? 0}', 'Total', idaDark),
-                              const SizedBox(width: 8),
-                              _summaryCard('${summary['active'] ?? 0}',
-                                  'Active', idaGreen),
-                              const SizedBox(width: 8),
-                              _summaryCard('${summary['on_leave'] ?? 0}',
-                                  'On Leave', amber),
-                              const SizedBox(width: 8),
-                              _summaryCard('${summary['resigned'] ?? 0}',
-                                  'Resigned', Colors.grey),
-                            ]),
+              child: Responsive.constrainedContent(
+                  context,
+                  CustomScrollView(
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // ── Summary cards ─────────────────────
+                                Row(children: [
+                                  _summaryCard('${summary['total'] ?? 0}',
+                                      'Total', idaDark),
+                                  const SizedBox(width: 8),
+                                  _summaryCard('${summary['active'] ?? 0}',
+                                      'Active', idaGreen),
+                                  const SizedBox(width: 8),
+                                  _summaryCard('${summary['on_leave'] ?? 0}',
+                                      'On Leave', amber),
+                                  const SizedBox(width: 8),
+                                  _summaryCard('${summary['resigned'] ?? 0}',
+                                      'Resigned', Colors.grey),
+                                ]),
 
-                            const SizedBox(height: 20),
+                                const SizedBox(height: 20),
 
-                            // ── Filter chips ──────────────────────
-                            const Text('Filter by status',
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: Color(0xFF6B7280))),
-                            const SizedBox(height: 8),
-                            SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: Row(children: [
-                                _filterChip('all', 'All'),
-                                _filterChip('active', 'Active'),
-                                _filterChip('on_leave', 'On Leave'),
-                                _filterChip('resigned', 'Resigned'),
-                                _filterChip('terminated', 'Terminated'),
-                              ]),
-                            ),
-
-                            const SizedBox(height: 16),
-
-                            Text(
-                              '${labourList.length} ${filterStatus == 'all' ? '' : _statusLabel(filterStatus)} record${labourList.length != 1 ? 's' : ''}',
-                              style: const TextStyle(
-                                  fontSize: 13, color: Color(0xFF6B7280)),
-                            ),
-                            const SizedBox(height: 12),
-                          ]),
-                    ),
-                  ),
-
-                  // ── Labour list ───────────────────────────
-                  labourList.isEmpty
-                      ? SliverToBoxAdapter(
-                          child: Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(48),
-                              child: Column(children: [
-                                Icon(Icons.people_outline,
-                                    size: 56, color: Colors.grey.shade300),
-                                const SizedBox(height: 16),
-                                Text('No labour records found',
+                                // ── Filter chips ──────────────────────
+                                const Text('Filter by status',
                                     style: TextStyle(
-                                        color: Colors.grey.shade500,
-                                        fontSize: 15)),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF6B7280))),
                                 const SizedBox(height: 8),
-                                Text('Tap + Add Labour to get started',
-                                    style: TextStyle(
-                                        color: Colors.grey.shade400,
-                                        fontSize: 13)),
+                                SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: Row(children: [
+                                    _filterChip('all', 'All'),
+                                    _filterChip('active', 'Active'),
+                                    _filterChip('on_leave', 'On Leave'),
+                                    _filterChip('resigned', 'Resigned'),
+                                    _filterChip('terminated', 'Terminated'),
+                                  ]),
+                                ),
+
+                                const SizedBox(height: 16),
+
+                                Text(
+                                  '${labourList.length} ${filterStatus == 'all' ? '' : _statusLabel(filterStatus)} record${labourList.length != 1 ? 's' : ''}',
+                                  style: const TextStyle(
+                                      fontSize: 13, color: Color(0xFF6B7280)),
+                                ),
+                                const SizedBox(height: 12),
                               ]),
-                            ),
-                          ),
-                        )
-                      : SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-                          sliver: SliverList(
-                            delegate: SliverChildBuilderDelegate(
-                              (ctx, i) => _labourCard(labourList[i]),
-                              childCount: labourList.length,
-                            ),
-                          ),
                         ),
-                ],
-              ),
+                      ),
+
+                      // ── Labour list ───────────────────────────
+                      labourList.isEmpty
+                          ? SliverToBoxAdapter(
+                              child: Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(48),
+                                  child: Column(children: [
+                                    Icon(Icons.people_outline,
+                                        size: 56, color: Colors.grey.shade300),
+                                    const SizedBox(height: 16),
+                                    Text('No labour records found',
+                                        style: TextStyle(
+                                            color: Colors.grey.shade500,
+                                            fontSize: 15)),
+                                    const SizedBox(height: 8),
+                                    Text('Tap + Add Labour to get started',
+                                        style: TextStyle(
+                                            color: Colors.grey.shade400,
+                                            fontSize: 13)),
+                                  ]),
+                                ),
+                              ),
+                            )
+                          : SliverPadding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                              sliver: SliverList(
+                                delegate: SliverChildBuilderDelegate(
+                                  (ctx, i) => _labourCard(labourList[i]),
+                                  childCount: labourList.length,
+                                ),
+                              ),
+                            ),
+                    ],
+                  )),
             ),
     );
   }

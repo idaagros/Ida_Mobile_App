@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import '../services/image_helper.dart';
 import '../services/colored_date_picker.dart';
+import '../services/responsive.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -431,7 +432,7 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
           Image.asset('assets/images/idalogo.png', height: 28),
           const SizedBox(width: 10),
           const Flexible(
-              child: Text('Machine PF Reading',
+              child: Text('Power Factor Reading',
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                       fontSize: 17,
@@ -441,539 +442,552 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator(color: idaGreen))
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Correction banner (shown when opened from returned record)
-                    if (widget.returnedRecordId != null) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFF8EC),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                              color: const Color(0xFFFFCC02), width: 1.5),
-                        ),
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Row(children: [
-                                Icon(Icons.assignment_return_rounded,
-                                    color: Color(0xFFF57C00), size: 16),
-                                SizedBox(width: 8),
-                                Text('Correction Required',
-                                    style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: Color(0xFFF57C00))),
-                              ]),
-                              if (widget.adminNote != null &&
-                                  widget.adminNote!.isNotEmpty) ...[
-                                const SizedBox(height: 6),
-                                Text(widget.adminNote!,
-                                    style: const TextStyle(
-                                        fontSize: 13,
-                                        color: Color(0xFF6B7280))),
-                              ],
-                              const SizedBox(height: 6),
-                              const Text(
-                                  'Please correct the PF reading below and resubmit.',
-                                  style: TextStyle(
-                                      fontSize: 12, color: Color(0xFF9CA3AF))),
-                            ]),
-                      ),
-                    ],
-
-                    // Previous PF reading card (context only — no diff math)
-                    previousPf != null
-                        ? _infoCard(
-                            icon: Icons.history,
-                            color: idaGreen,
-                            title: 'Previous PF reading',
-                            value: previousPf!.toStringAsFixed(3),
-                            sub:
-                                'Recorded on ${_formatRecordedOn(previousDate, previousTime)}',
-                          )
-                        : _infoCard(
-                            icon: Icons.info_outline,
-                            color: amber,
-                            title: 'First record',
-                            value: 'No previous PF reading found',
-                            sub: 'This will be the first recorded entry',
+          : Responsive.constrainedContent(
+              context,
+              SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Correction banner (shown when opened from returned record)
+                      if (widget.returnedRecordId != null) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF8EC),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                color: const Color(0xFFFFCC02), width: 1.5),
                           ),
-
-                    const SizedBox(height: 20),
-
-                    // Date & Time
-                    if (widget.returnedRecordId != null) ...[
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF4F7F2),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFE0E7D8)),
-                        ),
-                        child: Row(children: [
-                          const Icon(Icons.lock_outline,
-                              size: 16, color: Colors.grey),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text('Original record date (locked)',
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Row(children: [
+                                  Icon(Icons.assignment_return_rounded,
+                                      color: Color(0xFFF57C00), size: 16),
+                                  SizedBox(width: 8),
+                                  Text('Correction Required',
                                       style: TextStyle(
-                                          fontSize: 11, color: Colors.grey)),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    DateFormat('dd MMM yyyy')
-                                        .format(selectedDate),
-                                    style: const TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                        color: Color(0xFF1E4012)),
-                                  ),
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFFF57C00))),
                                 ]),
-                          ),
-                        ]),
-                      ),
-                    ] else ...[
-                      Row(children: [
-                        Expanded(
-                            child: _pickerTile(
-                          icon: Icons.calendar_today,
-                          label: 'Date',
-                          value: DateFormat('dd MMM yyyy').format(selectedDate),
-                          onTap: _pickDate,
-                        )),
-                        const SizedBox(width: 12),
-                        Expanded(
-                            child: _pickerTile(
-                          icon: Icons.access_time,
-                          label: 'Time',
-                          value: selectedTime.format(context),
-                          onTap: _pickTime,
-                        )),
-                      ]),
-                    ],
-
-                    const SizedBox(height: 20),
-
-                    // PF value input
-                    Row(children: [
-                      _sectionLabel('PF (POWER FACTOR)'),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                            color: const Color(0xFFFDE8E8),
-                            borderRadius: BorderRadius.circular(10)),
-                        child: const Text('Required',
-                            style: TextStyle(
-                                fontSize: 10, color: Color(0xFFB23A3A))),
-                      ),
-                    ]),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: pfCtrl,
-                      enabled: !isDateLocked && existingRecordStatus == null,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w700,
-                          color: idaDark),
-                      decoration: InputDecoration(
-                        hintText: '0.99',
-                        hintStyle: TextStyle(
-                            color: Colors.grey.shade400, fontSize: 24),
-                        prefixIcon: const Icon(Icons.bolt, color: idaGreen),
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide:
-                                const BorderSide(color: Color(0xFFE0E7D8))),
-                        focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide:
-                                const BorderSide(color: idaGreen, width: 1.5)),
-                        errorBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.red)),
-                        errorText: errorMessage,
-                      ),
-                    ),
-
-                    if (showPfBanner) ...[
-                      const SizedBox(height: 10),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: isLowPf
-                              ? const Color(0xFFFDE8E8)
-                              : const Color(0xFFE8F5E2),
-                          borderRadius: BorderRadius.circular(10),
+                                if (widget.adminNote != null &&
+                                    widget.adminNote!.isNotEmpty) ...[
+                                  const SizedBox(height: 6),
+                                  Text(widget.adminNote!,
+                                      style: const TextStyle(
+                                          fontSize: 13,
+                                          color: Color(0xFF6B7280))),
+                                ],
+                                const SizedBox(height: 6),
+                                const Text(
+                                    'Please correct the PF reading below and resubmit.',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFF9CA3AF))),
+                              ]),
                         ),
-                        child: Row(children: [
-                          Icon(
-                            isLowPf
-                                ? Icons.warning_amber_rounded
-                                : Icons.check_circle,
-                            color: isLowPf ? const Color(0xFFB23A3A) : idaGreen,
-                            size: 18,
+                      ],
+
+                      // Previous PF reading card (context only — no diff math)
+                      previousPf != null
+                          ? _infoCard(
+                              icon: Icons.history,
+                              color: idaGreen,
+                              title: 'Previous PF reading',
+                              value: previousPf!.toStringAsFixed(3),
+                              sub:
+                                  'Recorded on ${_formatRecordedOn(previousDate, previousTime)}',
+                            )
+                          : _infoCard(
+                              icon: Icons.info_outline,
+                              color: amber,
+                              title: 'First record',
+                              value: 'No previous PF reading found',
+                              sub: 'This will be the first recorded entry',
+                            ),
+
+                      const SizedBox(height: 20),
+
+                      // Date & Time
+                      if (widget.returnedRecordId != null) ...[
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF4F7F2),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFE0E7D8)),
                           ),
-                          const SizedBox(width: 8),
+                          child: Row(children: [
+                            const Icon(Icons.lock_outline,
+                                size: 16, color: Colors.grey),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('Original record date (locked)',
+                                        style: TextStyle(
+                                            fontSize: 11, color: Colors.grey)),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      DateFormat('dd MMM yyyy')
+                                          .format(selectedDate),
+                                      style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF1E4012)),
+                                    ),
+                                  ]),
+                            ),
+                          ]),
+                        ),
+                      ] else ...[
+                        Row(children: [
                           Expanded(
-                            child: Text(
-                              isLowPf
-                                  ? 'Low PF — below 0.99 may incur a power-factor penalty. Admin will be alerted.'
-                                  : 'PF looks healthy.',
+                              child: _pickerTile(
+                            icon: Icons.calendar_today,
+                            label: 'Date',
+                            value:
+                                DateFormat('dd MMM yyyy').format(selectedDate),
+                            onTap: _pickDate,
+                          )),
+                          const SizedBox(width: 12),
+                          Expanded(
+                              child: _pickerTile(
+                            icon: Icons.access_time,
+                            label: 'Time',
+                            value: selectedTime.format(context),
+                            onTap: _pickTime,
+                          )),
+                        ]),
+                      ],
+
+                      const SizedBox(height: 20),
+
+                      // PF value input
+                      Row(children: [
+                        _sectionLabel('PF (POWER FACTOR)'),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                              color: const Color(0xFFFDE8E8),
+                              borderRadius: BorderRadius.circular(10)),
+                          child: const Text('Required',
                               style: TextStyle(
-                                color:
-                                    isLowPf ? const Color(0xFFB23A3A) : idaDark,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 12.5,
+                                  fontSize: 10, color: Color(0xFFB23A3A))),
+                        ),
+                      ]),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: pfCtrl,
+                        enabled: !isDateLocked && existingRecordStatus == null,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w700,
+                            color: idaDark),
+                        decoration: InputDecoration(
+                          hintText: '0.99',
+                          hintStyle: TextStyle(
+                              color: Colors.grey.shade400, fontSize: 24),
+                          prefixIcon: const Icon(Icons.bolt, color: idaGreen),
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide:
+                                  const BorderSide(color: Color(0xFFE0E7D8))),
+                          focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                  color: idaGreen, width: 1.5)),
+                          errorBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: Colors.red)),
+                          errorText: errorMessage,
+                        ),
+                      ),
+
+                      if (showPfBanner) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: isLowPf
+                                ? const Color(0xFFFDE8E8)
+                                : const Color(0xFFE8F5E2),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(children: [
+                            Icon(
+                              isLowPf
+                                  ? Icons.warning_amber_rounded
+                                  : Icons.check_circle,
+                              color:
+                                  isLowPf ? const Color(0xFFB23A3A) : idaGreen,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                isLowPf
+                                    ? 'Low PF — below 0.99 may incur a power-factor penalty. Admin will be alerted.'
+                                    : 'PF looks healthy.',
+                                style: TextStyle(
+                                  color: isLowPf
+                                      ? const Color(0xFFB23A3A)
+                                      : idaDark,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 12.5,
+                                ),
                               ),
                             ),
-                          ),
-                        ]),
-                      ),
-                    ],
-
-                    const SizedBox(height: 20),
-
-                    // Photo (optional)
-                    Row(children: [
-                      _sectionLabel('PF METER PHOTO'),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                            color: Colors.grey.shade100,
-                            borderRadius: BorderRadius.circular(10)),
-                        child: const Text('Optional but recommended',
-                            style: TextStyle(fontSize: 10, color: Colors.grey)),
-                      ),
-                    ]),
-                    const SizedBox(height: 8),
-
-                    GestureDetector(
-                      onTap: (isDateLocked || existingRecordStatus != null)
-                          ? null
-                          : _pickPhoto,
-                      child: Container(
-                        width: double.infinity,
-                        height: (photoBytes != null || _lockedPhotoUrl != null)
-                            ? 200
-                            : 110,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color:
-                                (photoBytes != null || _lockedPhotoUrl != null)
-                                    ? idaGreen
-                                    : const Color(0xFFE0E7D8),
-                            width:
-                                (photoBytes != null || _lockedPhotoUrl != null)
-                                    ? 1.5
-                                    : 1,
-                          ),
+                          ]),
                         ),
-                        child: (isDateLocked || existingRecordStatus != null)
-                            ? (_lockedPhotoUrl != null
-                                ? ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Image.network(_lockedPhotoUrl!,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => Center(
-                                            child: Text('Photo unavailable',
-                                                style: TextStyle(
-                                                    color: Colors.grey.shade500,
-                                                    fontSize: 12)))),
-                                  )
-                                : Center(
-                                    child: Text('No photo for this entry',
-                                        style: TextStyle(
-                                            color: Colors.grey.shade500,
-                                            fontSize: 13))))
-                            : photoBytes != null
-                                ? ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Image.memory(photoBytes!,
-                                        fit: BoxFit.cover),
-                                  )
-                                : Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.add_a_photo_outlined,
-                                          size: 32,
-                                          color: Colors.grey.shade400),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                          'Tap to attach PF meter photo (camera or gallery)',
-                                          style: TextStyle(
-                                              color: Colors.grey.shade500,
-                                              fontSize: 13)),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                          'Photo will be compressed automatically · Blurry images will be rejected',
-                                          style: TextStyle(
-                                              color: Colors.grey.shade400,
-                                              fontSize: 11)),
-                                    ],
-                                  ),
-                      ),
-                    ),
+                      ],
 
-                    if (!isDateLocked && photoBytes != null) ...[
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 20),
+
+                      // Photo (optional)
                       Row(children: [
-                        const Icon(Icons.check_circle,
-                            color: idaGreen, size: 14),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            photoName ?? 'Photo selected',
-                            style:
-                                const TextStyle(fontSize: 12, color: idaGreen),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: () => setState(() {
-                            photoBytes = null;
-                            photoName = null;
-                          }),
-                          style: TextButton.styleFrom(padding: EdgeInsets.zero),
-                          child: const Text('Remove',
+                        _sectionLabel('PF METER PHOTO'),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                              color: Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(10)),
+                          child: const Text('Optional but recommended',
                               style:
-                                  TextStyle(color: Colors.red, fontSize: 12)),
+                                  TextStyle(fontSize: 10, color: Colors.grey)),
                         ),
                       ]),
-                    ],
+                      const SizedBox(height: 8),
 
-                    const SizedBox(height: 20),
-
-                    // Notes
-                    _sectionLabel('NOTES (OPTIONAL)'),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: notesCtrl,
-                      enabled: !isDateLocked && existingRecordStatus == null,
-                      maxLines: 3,
-                      decoration: InputDecoration(
-                        hintText: 'Any observations about the PF meter...',
-                        hintStyle: TextStyle(
-                            color: Colors.grey.shade400, fontSize: 13),
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide:
-                              const BorderSide(color: Color(0xFFE0E7D8)),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide:
-                              const BorderSide(color: idaGreen, width: 1.5),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    // Success card
-                    if (successMessage != null)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(16),
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE8F5E2),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFB8D99E)),
-                        ),
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Row(children: [
-                                Icon(Icons.check_circle,
-                                    color: idaGreen, size: 18),
-                                SizedBox(width: 8),
-                                Text('PF reading submitted!',
-                                    style: TextStyle(
-                                        color: idaDark,
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 14)),
-                              ]),
-                              const SizedBox(height: 6),
-                              const Text('Pending admin review',
-                                  style: TextStyle(
-                                      color: Color(0xFF6B7280), fontSize: 11)),
-                            ]),
-                      ),
-
-                    // Photo-missing notice — never blocks saving, just a
-                    // clear heads-up that no photo was attached this time.
-                    if (photoMissingWarning)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFF8EC),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFFFCC02)),
-                        ),
-                        child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Icon(Icons.info_outline,
-                                  color: Color(0xFFF57C00), size: 18),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  'Photo not uploaded. Please upload a photo of the PF meter — '
-                                  'you can add one on a correction.',
-                                  style: TextStyle(
-                                      fontSize: 12.5,
-                                      color: Colors.grey.shade800),
-                                ),
-                              ),
-                            ]),
-                      ),
-
-                    // Existing-but-not-approved banner
-                    if (existingRecordStatus != null) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFF8EC),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFFFCC02)),
-                        ),
-                        child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Icon(Icons.info_outline,
-                                  color: Color(0xFFF57C00), size: 18),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  existingRecordStatus == 'returned'
-                                      ? 'A PF reading already exists for this date and was returned for correction. Open it from your returned records to edit it.'
-                                      : 'A PF reading already exists for this date and is pending admin review. It cannot be edited here right now.',
-                                  style: TextStyle(
-                                      fontSize: 12.5,
-                                      color: Colors.grey.shade800),
-                                ),
-                              ),
-                            ]),
-                      ),
-                    ],
-
-                    // Locked-date banner
-                    if (isDateLocked) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE8F0FE),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                              color: const Color(0xFF1A73E8).withOpacity(0.3)),
-                        ),
-                        child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Icon(Icons.lock_outline,
-                                  size: 18, color: Color(0xFF1A73E8)),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Text('This date is locked',
-                                          style: TextStyle(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w700,
-                                              color: Color(0xFF1A73E8))),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        'This reading has already been approved by admin. '
-                                        'You can view it here, but only an admin can change it.',
-                                        style: TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.grey.shade700),
-                                      ),
-                                    ]),
-                              ),
-                            ]),
-                      ),
-                    ],
-
-                    // Submit button
-                    SizedBox(
-                      width: double.infinity,
-                      height: 54,
-                      child: ElevatedButton.icon(
-                        onPressed: (submitting ||
-                                isDateLocked ||
-                                existingRecordStatus != null)
+                      GestureDetector(
+                        onTap: (isDateLocked || existingRecordStatus != null)
                             ? null
-                            : _submit,
-                        icon: submitting
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                    color: Colors.white, strokeWidth: 2))
-                            : Icon(
-                                (isDateLocked || existingRecordStatus != null)
-                                    ? Icons.lock_outline
-                                    : Icons.send,
-                                color: Colors.white,
-                                size: 18),
-                        label: Text(
-                          submitting
-                              ? 'Submitting...'
-                              : isDateLocked
-                                  ? 'Locked — Approved'
-                                  : existingRecordStatus != null
-                                      ? 'Entry already exists for this date'
-                                      : (widget.returnedRecordId != null
-                                          ? 'Resubmit for Approval'
-                                          : 'Submit PF Reading'),
-                          style: const TextStyle(
-                              fontSize: 16,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: idaGreen,
-                          disabledBackgroundColor: Colors.grey.shade300,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
+                            : _pickPhoto,
+                        child: Container(
+                          width: double.infinity,
+                          height:
+                              (photoBytes != null || _lockedPhotoUrl != null)
+                                  ? 200
+                                  : 110,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: (photoBytes != null ||
+                                      _lockedPhotoUrl != null)
+                                  ? idaGreen
+                                  : const Color(0xFFE0E7D8),
+                              width: (photoBytes != null ||
+                                      _lockedPhotoUrl != null)
+                                  ? 1.5
+                                  : 1,
+                            ),
+                          ),
+                          child: (isDateLocked || existingRecordStatus != null)
+                              ? (_lockedPhotoUrl != null
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Image.network(_lockedPhotoUrl!,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, __, ___) => Center(
+                                              child: Text('Photo unavailable',
+                                                  style: TextStyle(
+                                                      color:
+                                                          Colors.grey.shade500,
+                                                      fontSize: 12)))),
+                                    )
+                                  : Center(
+                                      child: Text('No photo for this entry',
+                                          style: TextStyle(
+                                              color: Colors.grey.shade500,
+                                              fontSize: 13))))
+                              : photoBytes != null
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Image.memory(photoBytes!,
+                                          fit: BoxFit.cover),
+                                    )
+                                  : Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.add_a_photo_outlined,
+                                            size: 32,
+                                            color: Colors.grey.shade400),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                            'Tap to attach PF meter photo (camera or gallery)',
+                                            style: TextStyle(
+                                                color: Colors.grey.shade500,
+                                                fontSize: 13)),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                            'Photo will be compressed automatically · Blurry images will be rejected',
+                                            style: TextStyle(
+                                                color: Colors.grey.shade400,
+                                                fontSize: 11)),
+                                      ],
+                                    ),
                         ),
                       ),
-                    ),
 
-                    const SizedBox(height: 32),
-                  ]),
-            ),
+                      if (!isDateLocked && photoBytes != null) ...[
+                        const SizedBox(height: 6),
+                        Row(children: [
+                          const Icon(Icons.check_circle,
+                              color: idaGreen, size: 14),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              photoName ?? 'Photo selected',
+                              style: const TextStyle(
+                                  fontSize: 12, color: idaGreen),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => setState(() {
+                              photoBytes = null;
+                              photoName = null;
+                            }),
+                            style:
+                                TextButton.styleFrom(padding: EdgeInsets.zero),
+                            child: const Text('Remove',
+                                style:
+                                    TextStyle(color: Colors.red, fontSize: 12)),
+                          ),
+                        ]),
+                      ],
+
+                      const SizedBox(height: 20),
+
+                      // Notes
+                      _sectionLabel('NOTES (OPTIONAL)'),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: notesCtrl,
+                        enabled: !isDateLocked && existingRecordStatus == null,
+                        maxLines: 3,
+                        decoration: InputDecoration(
+                          hintText: 'Any observations about the PF meter...',
+                          hintStyle: TextStyle(
+                              color: Colors.grey.shade400, fontSize: 13),
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide:
+                                const BorderSide(color: Color(0xFFE0E7D8)),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide:
+                                const BorderSide(color: idaGreen, width: 1.5),
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      // Success card
+                      if (successMessage != null)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(16),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8F5E2),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFB8D99E)),
+                          ),
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Row(children: [
+                                  Icon(Icons.check_circle,
+                                      color: idaGreen, size: 18),
+                                  SizedBox(width: 8),
+                                  Text('PF reading submitted!',
+                                      style: TextStyle(
+                                          color: idaDark,
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 14)),
+                                ]),
+                                const SizedBox(height: 6),
+                                const Text('Pending admin review',
+                                    style: TextStyle(
+                                        color: Color(0xFF6B7280),
+                                        fontSize: 11)),
+                              ]),
+                        ),
+
+                      // Photo-missing notice — never blocks saving, just a
+                      // clear heads-up that no photo was attached this time.
+                      if (photoMissingWarning)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF8EC),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFFFCC02)),
+                          ),
+                          child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.info_outline,
+                                    color: Color(0xFFF57C00), size: 18),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    'Photo not uploaded. Please upload a photo of the PF meter — '
+                                    'you can add one on a correction.',
+                                    style: TextStyle(
+                                        fontSize: 12.5,
+                                        color: Colors.grey.shade800),
+                                  ),
+                                ),
+                              ]),
+                        ),
+
+                      // Existing-but-not-approved banner
+                      if (existingRecordStatus != null) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF8EC),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFFFCC02)),
+                          ),
+                          child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.info_outline,
+                                    color: Color(0xFFF57C00), size: 18),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    existingRecordStatus == 'returned'
+                                        ? 'A PF reading already exists for this date and was returned for correction. Open it from your returned records to edit it.'
+                                        : 'A PF reading already exists for this date and is pending admin review. It cannot be edited here right now.',
+                                    style: TextStyle(
+                                        fontSize: 12.5,
+                                        color: Colors.grey.shade800),
+                                  ),
+                                ),
+                              ]),
+                        ),
+                      ],
+
+                      // Locked-date banner
+                      if (isDateLocked) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8F0FE),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                color:
+                                    const Color(0xFF1A73E8).withOpacity(0.3)),
+                          ),
+                          child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.lock_outline,
+                                    size: 18, color: Color(0xFF1A73E8)),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Text('This date is locked',
+                                            style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w700,
+                                                color: Color(0xFF1A73E8))),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'This reading has already been approved by admin. '
+                                          'You can view it here, but only an admin can change it.',
+                                          style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.grey.shade700),
+                                        ),
+                                      ]),
+                                ),
+                              ]),
+                        ),
+                      ],
+
+                      // Submit button
+                      SizedBox(
+                        width: double.infinity,
+                        height: 54,
+                        child: ElevatedButton.icon(
+                          onPressed: (submitting ||
+                                  isDateLocked ||
+                                  existingRecordStatus != null)
+                              ? null
+                              : _submit,
+                          icon: submitting
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                      color: Colors.white, strokeWidth: 2))
+                              : Icon(
+                                  (isDateLocked || existingRecordStatus != null)
+                                      ? Icons.lock_outline
+                                      : Icons.send,
+                                  color: Colors.white,
+                                  size: 18),
+                          label: Text(
+                            submitting
+                                ? 'Submitting...'
+                                : isDateLocked
+                                    ? 'Locked — Approved'
+                                    : existingRecordStatus != null
+                                        ? 'Entry already exists for this date'
+                                        : (widget.returnedRecordId != null
+                                            ? 'Resubmit for Approval'
+                                            : 'Submit PF Reading'),
+                            style: const TextStyle(
+                                fontSize: 16,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: idaGreen,
+                            disabledBackgroundColor: Colors.grey.shade300,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 32),
+                    ]),
+              )),
     );
   }
 

@@ -18,6 +18,7 @@ import 'admin/farm_tractor_master_screen.dart';
 import 'farm_tractor_diesel_screen.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
+import '../services/responsive.dart';
 
 class FarmTractorWorkScreen extends StatefulWidget {
   const FarmTractorWorkScreen({super.key});
@@ -455,84 +456,89 @@ class _FarmTractorWorkScreenState extends State<FarmTractorWorkScreen> {
                 await _loadMasters();
                 await _loadEntries();
               },
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                children: [
-                  GestureDetector(
-                    onTap: _pickDate,
-                    child: Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFE0E7D8))),
-                      child: Row(children: [
-                        const Icon(Icons.calendar_today,
-                            size: 18, color: idaGreen),
-                        const SizedBox(width: 10),
-                        Text(
-                            DateFormat('EEEE, dd MMM yyyy')
-                                .format(selectedDate),
-                            style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: idaDark)),
-                        const Spacer(),
-                        const Icon(Icons.edit_calendar_outlined,
-                            size: 18, color: Colors.grey),
-                      ]),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  if (loadingEntries)
-                    const Center(
-                        child: Padding(
-                            padding: EdgeInsets.all(30),
-                            child: CircularProgressIndicator(color: idaGreen)))
-                  else ...[
-                    if (inProgress.isNotEmpty) ...[
-                      Text(loc.ftInProgress,
-                          style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.orange,
-                              letterSpacing: 0.6)),
-                      const SizedBox(height: 8),
-                      ...inProgress.map(
-                          (e) => _entryCard(e, inProgress: true, loc: loc)),
+              child: Responsive.constrainedContent(
+                  context,
+                  ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
+                    children: [
+                      GestureDetector(
+                        onTap: _pickDate,
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border:
+                                  Border.all(color: const Color(0xFFE0E7D8))),
+                          child: Row(children: [
+                            const Icon(Icons.calendar_today,
+                                size: 18, color: idaGreen),
+                            const SizedBox(width: 10),
+                            Text(
+                                DateFormat('EEEE, dd MMM yyyy')
+                                    .format(selectedDate),
+                                style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: idaDark)),
+                            const Spacer(),
+                            const Icon(Icons.edit_calendar_outlined,
+                                size: 18, color: Colors.grey),
+                          ]),
+                        ),
+                      ),
                       const SizedBox(height: 16),
-                    ],
-                    Text(loc.ftCompleted,
-                        style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF6B7280),
-                            letterSpacing: 0.6)),
-                    const SizedBox(height: 8),
-                    if (completed.isEmpty)
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFFE0E7D8))),
-                        child: Text(loc.ftNoCompletedWork,
+                      if (loadingEntries)
+                        const Center(
+                            child: Padding(
+                                padding: EdgeInsets.all(30),
+                                child:
+                                    CircularProgressIndicator(color: idaGreen)))
+                      else ...[
+                        if (inProgress.isNotEmpty) ...[
+                          Text(loc.ftInProgress,
+                              style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.orange,
+                                  letterSpacing: 0.6)),
+                          const SizedBox(height: 8),
+                          ...inProgress.map(
+                              (e) => _entryCard(e, inProgress: true, loc: loc)),
+                          const SizedBox(height: 16),
+                        ],
+                        Text(loc.ftCompleted,
                             style: const TextStyle(
-                                color: Colors.black54, fontSize: 13)),
-                      )
-                    else
-                      ...completed.map(
-                          (e) => _entryCard(e, inProgress: false, loc: loc)),
-                  ],
-                  if (error != null) ...[
-                    const SizedBox(height: 10),
-                    Text(error!,
-                        style:
-                            const TextStyle(color: Colors.red, fontSize: 12.5)),
-                  ],
-                ],
-              ),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF6B7280),
+                                letterSpacing: 0.6)),
+                        const SizedBox(height: 8),
+                        if (completed.isEmpty)
+                          Container(
+                            padding: const EdgeInsets.all(20),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border:
+                                    Border.all(color: const Color(0xFFE0E7D8))),
+                            child: Text(loc.ftNoCompletedWork,
+                                style: const TextStyle(
+                                    color: Colors.black54, fontSize: 13)),
+                          )
+                        else
+                          ...completed.map((e) =>
+                              _entryCard(e, inProgress: false, loc: loc)),
+                      ],
+                      if (error != null) ...[
+                        const SizedBox(height: 10),
+                        Text(error!,
+                            style: const TextStyle(
+                                color: Colors.red, fontSize: 12.5)),
+                      ],
+                    ],
+                  )),
             ),
     );
   }

@@ -6,6 +6,8 @@ import 'package:http/http.dart' as http;
 import '../../models/user_model.dart';
 import '../../services/api_service.dart';
 import 'user_form_screen.dart';
+import 'user_face_enrollment_screen.dart';
+import '../../services/responsive.dart';
 
 class UsersScreen extends StatefulWidget {
   const UsersScreen({super.key});
@@ -234,24 +236,37 @@ class _UsersScreenState extends State<UsersScreen> {
 
         // List
         Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator(color: idaGreen))
-              : _filtered.isEmpty
-                  ? _EmptyState(onAdd: () => _openForm())
-                  : RefreshIndicator(
-                      color: idaGreen,
-                      onRefresh: _fetchUsers,
-                      child: ListView.separated(
-                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 100),
-                        itemCount: _filtered.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
-                        itemBuilder: (_, i) => _UserCard(
-                          user: _filtered[i],
-                          onEdit: () => _openForm(user: _filtered[i]),
-                          onToggle: () => _confirmToggle(_filtered[i]),
-                        ),
-                      ),
-                    ),
+          child: Responsive.constrainedContent(
+              context,
+              _loading
+                  ? const Center(
+                      child: CircularProgressIndicator(color: idaGreen))
+                  : _filtered.isEmpty
+                      ? _EmptyState(onAdd: () => _openForm())
+                      : RefreshIndicator(
+                          color: idaGreen,
+                          onRefresh: _fetchUsers,
+                          child: ListView.separated(
+                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 100),
+                            itemCount: _filtered.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (_, i) => _UserCard(
+                              user: _filtered[i],
+                              onEdit: () => _openForm(user: _filtered[i]),
+                              onToggle: () => _confirmToggle(_filtered[i]),
+                              onEnrollFace: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => UserFaceEnrollmentScreen(
+                                    userId: _filtered[i].id ?? '',
+                                    userName: _filtered[i].displayName,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        )),
         ),
       ]),
     );
@@ -287,8 +302,12 @@ class _UserCard extends StatelessWidget {
   final AppUser user;
   final VoidCallback onEdit;
   final VoidCallback onToggle;
+  final VoidCallback onEnrollFace;
   const _UserCard(
-      {required this.user, required this.onEdit, required this.onToggle});
+      {required this.user,
+      required this.onEdit,
+      required this.onToggle,
+      required this.onEnrollFace});
 
   static const idaGreen = Color(0xFF3B7A28);
 
@@ -374,6 +393,16 @@ class _UserCard extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.all(6),
                 child: Icon(Icons.edit_outlined,
+                    size: 20, color: Colors.grey.shade600),
+              ),
+            ),
+            const SizedBox(width: 2),
+            InkWell(
+              onTap: onEnrollFace,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Icon(Icons.face_outlined,
                     size: 20, color: Colors.grey.shade600),
               ),
             ),

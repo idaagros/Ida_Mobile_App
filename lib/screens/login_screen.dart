@@ -7,7 +7,7 @@ import '../services/api_service.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../localization/app_localizations.dart';
-import '../localization/app_locale.dart';
+import 'face_login_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -119,11 +119,11 @@ class _LoginScreenState extends State<LoginScreen>
                 const SizedBox(height: 10),
                 Text(
                   loc.appTagline,
+                  key: ValueKey('tagline_${loc.appTagline}'),
                   style: const TextStyle(
                       color: Colors.white60, fontSize: 13, letterSpacing: 0.4),
                 ),
-                const SizedBox(height: 16),
-                _languageToggle(),
+                const SizedBox(height: 10),
               ]),
             ),
 
@@ -140,12 +140,15 @@ class _LoginScreenState extends State<LoginScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(loc.signIn,
+                          key: ValueKey('signin_title_${loc.signIn}'),
                           style: const TextStyle(
                               fontSize: 22,
                               fontWeight: FontWeight.w700,
                               color: idaDark)),
                       const SizedBox(height: 4),
                       Text(loc.enterCredentials,
+                          key: ValueKey(
+                              'signin_subtitle_${loc.enterCredentials}'),
                           style: const TextStyle(
                               fontSize: 13, color: Colors.grey)),
                       const SizedBox(height: 28),
@@ -208,10 +211,55 @@ class _LoginScreenState extends State<LoginScreen>
                                       color: Colors.white, strokeWidth: 2),
                                 )
                               : Text(loc.signIn,
+                                  key: ValueKey('signin_btn_${loc.signIn}'),
                                   style: const TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w600,
                                       color: Colors.white)),
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // "or" divider + face login option - additional
+                      // way to sign in, password above still works
+                      // exactly as before.
+                      Row(children: [
+                        Expanded(child: Divider(color: Colors.grey.shade300)),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Text('or',
+                              style: TextStyle(
+                                  color: Colors.grey.shade500, fontSize: 12)),
+                        ),
+                        Expanded(child: Divider(color: Colors.grey.shade300)),
+                      ]),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: OutlinedButton.icon(
+                          onPressed: _loading
+                              ? null
+                              : () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) =>
+                                            const FaceLoginScreen()),
+                                  ),
+                          icon: const Icon(Icons.face_outlined,
+                              color: idaDark, size: 22),
+                          label: const Text('Sign In With Face',
+                              style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: idaDark)),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(
+                                color: Color(0xFFDDE8D8), width: 1.5),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14)),
+                          ),
                         ),
                       ),
 
@@ -230,47 +278,6 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ]),
         ),
-      ),
-    );
-  }
-
-  // Local-only until login (nothing to persist against yet) — once a
-  // user signs in, their account's own preferred_language takes over
-  // as the authoritative source (see ApiService.saveSession).
-  Widget _languageToggle() {
-    return ValueListenableBuilder<Locale>(
-      valueListenable: appLocaleNotifier,
-      builder: (context, locale, _) {
-        final loc = AppLocalizations.of(context)!;
-        return Container(
-          padding: const EdgeInsets.all(3),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            _langChip('EN', 'en', locale.languageCode == 'en'),
-            _langChip('मर', 'mr', locale.languageCode == 'mr'),
-          ]),
-        );
-      },
-    );
-  }
-
-  Widget _langChip(String label, String code, bool selected) {
-    return GestureDetector(
-      onTap: () => AppLocale.apply(code),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected ? idaGreen : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(label,
-            style: TextStyle(
-                color: selected ? Colors.white : Colors.white60,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700)),
       ),
     );
   }

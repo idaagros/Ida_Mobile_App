@@ -20,6 +20,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
+import '../services/responsive.dart';
 
 class WorkAllocationScreen extends StatefulWidget {
   final DateTime attendanceDate;
@@ -490,24 +491,26 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
               : RefreshIndicator(
                   color: idaGreen,
                   onRefresh: _loadDay,
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-                    children: [
-                      _statusBanner(loc),
-                      const SizedBox(height: 16),
-                      if (_canBuild) ..._buildSection(loc),
-                      if (!_canBuild) ...[
-                        _readOnlyAllocations(loc),
-                        _decisionButtons(loc),
-                      ],
-                      if (error != null) ...[
-                        const SizedBox(height: 10),
-                        Text(error!,
-                            style: const TextStyle(
-                                color: Colors.red, fontSize: 12.5)),
-                      ],
-                    ],
-                  ),
+                  child: Responsive.constrainedContent(
+                      context,
+                      ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                        children: [
+                          _statusBanner(loc),
+                          const SizedBox(height: 16),
+                          if (_canBuild) ..._buildSection(loc),
+                          if (!_canBuild) ...[
+                            _readOnlyAllocations(loc),
+                            _decisionButtons(loc),
+                          ],
+                          if (error != null) ...[
+                            const SizedBox(height: 10),
+                            Text(error!,
+                                style: const TextStyle(
+                                    color: Colors.red, fontSize: 12.5)),
+                          ],
+                        ],
+                      )),
                 ),
     );
   }
@@ -741,7 +744,11 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
           Text(loc.faWaMultiTaskHint,
               style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
           const SizedBox(height: 10),
-          ..._nonBatchTaskWorkers.map((w) => _multiTaskWorkerCard(w, loc)),
+          _tileGrid(
+              context,
+              _nonBatchTaskWorkers
+                  .map((w) => _multiTaskWorkerCard(w, loc))
+                  .toList()),
         ],
       ],
 
@@ -797,6 +804,29 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
   // assigned), one, or several (split across farms/work types).
   List<_TaskGroup> _linesFor(int workerId) =>
       groups.skip(1).where((g) => g.workerIds.contains(workerId)).toList();
+
+  // Same reasoning as Dashboard's and Farm Attendance's grids: one
+  // column on mobile (unchanged), reflowing to 2-3 columns on wider
+  // screens. Cards are wrapped in a fixed-width SizedBox before going
+  // into the Wrap, since _multiTaskWorkerCard uses Expanded
+  // internally, which needs a bounded width - a bare Wrap gives
+  // unbounded width and would crash without this. runSpacing is 0
+  // because each card already carries its own bottom margin.
+  Widget _tileGrid(BuildContext context, List<Widget> cards) {
+    final columns = Responsive.gridColumns(context);
+    if (columns == 1) return Column(children: cards);
+    const spacing = 12.0;
+    return LayoutBuilder(builder: (context, constraints) {
+      final cardWidth =
+          (constraints.maxWidth - spacing * (columns - 1)) / columns;
+      return Wrap(
+        spacing: spacing,
+        runSpacing: 0,
+        children:
+            cards.map((c) => SizedBox(width: cardWidth, child: c)).toList(),
+      );
+    });
+  }
 
   Widget _multiTaskWorkerCard(Map<String, dynamic> w, AppLocalizations loc) {
     final workerId = w['worker_id'] as int;
@@ -914,7 +944,369 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
             onPressed: () => _openMultiTaskSheet(workerId),
           ),
         ),
+        const SizedBox(height: 6),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.person_off_outlined,
+                size: 15, color: Color(0xFFC0392B)),
+            label: Text(loc.faWaDidNotWork,
+                style: const TextStyle(
+                    color: Color(0xFFC0392B),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12.5)),
+            style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFFC0392B),
+                side: const BorderSide(color: Color(0xFFC0392B)),
+                padding: const EdgeInsets.symmetric(vertical: 8)),
+            onPressed: () => _showDidNotWorkDialog(workerId, w['name'] ?? ''),
+          ),
+        ),
       ]),
+    );
+  }
+
+  void _showDidNotWorkDialog(int workerId, String workerName) {
+    final loc = AppLocalizations.of(context)!;
+    final reasonCtrl = TextEditingController();
+    bool submitting = false;
+    String? validationError;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('${loc.faWaDidNotWork} — ${tl(context, workerName)}',
+              style:
+                  const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+          content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  loc.faWaDidNotWorkHint,
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: reasonCtrl,
+                  autofocus: true,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                      labelText: loc.faWaReasonLabel,
+                      isDense: true,
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10))),
+                ),
+                if (validationError != null) ...[
+                  const SizedBox(height: 10),
+                  Text(validationError!,
+                      style: const TextStyle(
+                          color: Color(0xFFC0392B), fontSize: 12)),
+                ],
+              ]),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFC0392B)),
+              onPressed: submitting
+                  ? null
+                  : () async {
+                      if (reasonCtrl.text.trim().isEmpty) {
+                        setDialogState(
+                            () => validationError = loc.faWaReasonLabel);
+                        return;
+                      }
+                      setDialogState(() {
+                        submitting = true;
+                        validationError = null;
+                      });
+                      // Wrapped end to end - same reasoning as Add Missed
+                      // Worker's fix: an unexpected failure here must never
+                      // leave the button stuck spinning forever.
+                      try {
+                        final h = await _headers;
+                        final res = await http.post(
+                          Uri.parse(
+                              '$baseUrl/attendance/day/$_dateStr/did-not-work'),
+                          headers: {...h, 'Content-Type': 'application/json'},
+                          body: jsonEncode({
+                            'worker_id': workerId,
+                            'reason': reasonCtrl.text.trim()
+                          }),
+                        );
+                        if (res.statusCode == 200) {
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          // Clean up any local draft groups this worker was
+                          // part of, so the UI doesn't still show them
+                          // half-assigned to a task after they've been removed
+                          // from the day entirely.
+                          setState(() {
+                            for (final g in groups) {
+                              if (g.workerIds.remove(workerId)) {
+                                g.rateCtrls.remove(workerId)?.dispose();
+                                g.noteCtrls.remove(workerId)?.dispose();
+                              }
+                            }
+                            groups.removeWhere((g) => g.workerIds.isEmpty);
+                          });
+                          await _saveDraft();
+                          await _loadDay();
+                        } else {
+                          final data = jsonDecode(res.body);
+                          setDialogState(() {
+                            submitting = false;
+                            validationError =
+                                data['error'] ?? loc.faWaErrAddTaskGroup;
+                          });
+                        }
+                      } catch (e) {
+                        setDialogState(() {
+                          submitting = false;
+                          validationError = 'Could not reach server: $e';
+                        });
+                      }
+                    },
+              child: submitting
+                  ? const SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : Text(loc.faWaDidNotWork,
+                      style: const TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showAddMissedWorkerDialog() async {
+    final loc = AppLocalizations.of(context)!;
+    final h = await _headers;
+    final res = await http.get(Uri.parse('$baseUrl/farm-workers'), headers: h);
+    if (res.statusCode != 200) return;
+    final allWorkers = List<Map<String, dynamic>>.from(jsonDecode(res.body));
+    final presentIds = presentWorkers.map((p) => p['worker_id']).toSet();
+    // Only workers NOT already on today's present list - by definition,
+    // this dialog exists specifically for someone missing from it.
+    final available = allWorkers
+        .where((w) => !presentIds.contains(w['id']))
+        .toList()
+      ..sort((a, b) => (a['name'] ?? '')
+          .toString()
+          .toLowerCase()
+          .compareTo((b['name'] ?? '').toString().toLowerCase()));
+    if (available.isEmpty || !mounted) return;
+
+    int? selectedWorkerId = available.first['id'];
+    int? selectedFarmId = farms.isNotEmpty ? farms.first['id'] : null;
+    int? selectedWorkTypeId;
+    // Defaults to the selected worker's daily_wage, same fallback the
+    // existing Assign Task sheet already uses for a worker with no
+    // morning_amount - matching the established pattern rather than
+    // leaving this blank, which is what silently broke submission
+    // before (an empty rate parsed to null, and the button did
+    // nothing with zero feedback).
+    final rateCtrl = TextEditingController(
+        text: available.first['daily_wage']?.toString() ?? '');
+    bool rateManuallyEdited = false;
+    final reasonCtrl = TextEditingController();
+    bool submitting = false;
+    String? validationError;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(loc.faWaAddMissedWorker,
+              style:
+                  const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+          content: SingleChildScrollView(
+            child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(loc.faWaAddMissedWorkerHint,
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<int>(
+                    value: selectedWorkerId,
+                    decoration: InputDecoration(
+                        labelText: loc.faWaWorkerLabel,
+                        isDense: true,
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10))),
+                    items: available
+                        .map<DropdownMenuItem<int>>((w) => DropdownMenuItem(
+                            value: w['id'],
+                            child: Text(tl(context, w['name'] ?? ''))))
+                        .toList(),
+                    onChanged: (v) => setDialogState(() {
+                      selectedWorkerId = v;
+                      // Update the default rate to match the newly-selected
+                      // worker - but only if the field hasn't been manually
+                      // touched, per "defaulted... unless changed".
+                      if (!rateManuallyEdited) {
+                        final w = available.firstWhere((w) => w['id'] == v,
+                            orElse: () => {});
+                        rateCtrl.text = w['daily_wage']?.toString() ?? '';
+                      }
+                    }),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<int>(
+                    value: selectedFarmId,
+                    decoration: InputDecoration(
+                        labelText: loc.faWaFarmLabel,
+                        isDense: true,
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10))),
+                    items: farms
+                        .map<DropdownMenuItem<int>>((f) => DropdownMenuItem(
+                            value: f['id'],
+                            child: Text(tl(context, f['name'] ?? ''))))
+                        .toList(),
+                    onChanged: (v) => setDialogState(() => selectedFarmId = v),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<int>(
+                    value: selectedWorkTypeId,
+                    decoration: InputDecoration(
+                        labelText: loc.faWaWorkTypeOptionalLabel,
+                        isDense: true,
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10))),
+                    items: workTypes
+                        .map<DropdownMenuItem<int>>((wt) => DropdownMenuItem(
+                            value: wt['id'],
+                            child: Text(tl(context, wt['name'] ?? ''))))
+                        .toList(),
+                    onChanged: (v) =>
+                        setDialogState(() => selectedWorkTypeId = v),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: rateCtrl,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    onChanged: (_) => rateManuallyEdited = true,
+                    decoration: InputDecoration(
+                        labelText: loc.faWaRateLabel,
+                        isDense: true,
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10))),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: reasonCtrl,
+                    maxLines: 2,
+                    decoration: InputDecoration(
+                        labelText: loc.faWaReasonLabel,
+                        isDense: true,
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10))),
+                  ),
+                  if (validationError != null) ...[
+                    const SizedBox(height: 10),
+                    Text(validationError!,
+                        style: const TextStyle(
+                            color: Color(0xFFC0392B), fontSize: 12)),
+                  ],
+                ]),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
+              onPressed: submitting
+                  ? null
+                  : () async {
+                      final rate = double.tryParse(rateCtrl.text.trim());
+                      // Visible feedback on every validation failure - the
+                      // previous version returned silently here, which is
+                      // exactly what made a missing rate look like the button
+                      // simply did nothing.
+                      if (selectedWorkerId == null) {
+                        setDialogState(
+                            () => validationError = loc.faWaWorkerLabel);
+                        return;
+                      }
+                      if (selectedFarmId == null) {
+                        setDialogState(
+                            () => validationError = loc.faWaFarmLabel);
+                        return;
+                      }
+                      if (rate == null) {
+                        setDialogState(
+                            () => validationError = loc.faWaRateLabel);
+                        return;
+                      }
+                      if (reasonCtrl.text.trim().isEmpty) {
+                        setDialogState(
+                            () => validationError = loc.faWaReasonLabel);
+                        return;
+                      }
+                      setDialogState(() {
+                        submitting = true;
+                        validationError = null;
+                      });
+                      // Wrapped end to end - a network hiccup, timeout, or any
+                      // other unexpected failure here must never leave the
+                      // button stuck showing its spinner forever with
+                      // submitting stuck true and no way to retry or see why.
+                      try {
+                        final h2 = await _headers;
+                        final res2 = await http.post(
+                          Uri.parse(
+                              '$baseUrl/attendance/day/$_dateStr/retroactive-add'),
+                          headers: {...h2, 'Content-Type': 'application/json'},
+                          body: jsonEncode({
+                            'worker_id': selectedWorkerId,
+                            'farm_id': selectedFarmId,
+                            'work_type_id': selectedWorkTypeId,
+                            'rate': rate,
+                            'reason': reasonCtrl.text.trim(),
+                          }),
+                        );
+                        if (res2.statusCode == 200) {
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          await _loadDay();
+                        } else {
+                          final data = jsonDecode(res2.body);
+                          setDialogState(() {
+                            submitting = false;
+                            validationError =
+                                data['error'] ?? loc.faWaErrAddTaskGroup;
+                          });
+                        }
+                      } catch (e) {
+                        setDialogState(() {
+                          submitting = false;
+                          validationError = 'Could not reach server: $e';
+                        });
+                      }
+                    },
+              child: submitting
+                  ? const SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : Text(loc.save, style: const TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1052,7 +1444,8 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
                 color: Color(0xFF6B7280),
                 letterSpacing: 0.6)),
         const SizedBox(height: 10),
-        ...sortedPerWorker.map((pw) => _remarkRow(pw, loc)),
+        _tileGrid(
+            context, sortedPerWorker.map((pw) => _remarkRow(pw, loc)).toList()),
         const SizedBox(height: 18),
       ],
       Row(children: [
@@ -1091,26 +1484,62 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
                       color: idaGreen)),
             ),
             const Divider(height: 1),
-            ...entry.value.map((a) => ListTile(
-                  dense: true,
-                  title: Text(tl(context, a['worker_name'] ?? ''),
-                      style: const TextStyle(
-                          fontSize: 13.5, fontWeight: FontWeight.w600)),
-                  subtitle:
-                      a['notes'] != null && a['notes'].toString().isNotEmpty
-                          ? Text(a['notes'],
-                              style: const TextStyle(
-                                  fontSize: 11, color: Colors.orange))
-                          : null,
-                  trailing: Text('₹${a['total_wage']}',
+            ...entry.value.map((a) {
+              final canMarkDidNotWork = allocationStatus == 'pending' ||
+                  (allocationStatus == 'approved' && isAdmin);
+              return ListTile(
+                dense: true,
+                title: Text(tl(context, a['worker_name'] ?? ''),
+                    style: const TextStyle(
+                        fontSize: 13.5, fontWeight: FontWeight.w600)),
+                subtitle: a['notes'] != null && a['notes'].toString().isNotEmpty
+                    ? Text(a['notes'],
+                        style:
+                            const TextStyle(fontSize: 11, color: Colors.orange))
+                    : null,
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text('₹${a['total_wage']}',
                       style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
                           color: idaGreen)),
-                )),
+                  if (canMarkDidNotWork)
+                    IconButton(
+                      icon: const Icon(Icons.person_off_outlined,
+                          size: 18, color: Color(0xFFC0392B)),
+                      tooltip: loc.faWaDidNotWork,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed: () => _showDidNotWorkDialog(
+                          a['worker_id'], a['worker_name'] ?? ''),
+                    )
+                  else
+                    const SizedBox(width: 4),
+                ]),
+              );
+            }),
           ]),
         );
       }),
+      if (isAdmin) ...[
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.person_add_alt_1, size: 16, color: idaGreen),
+            label: Text(loc.faWaAddMissedWorker,
+                style: const TextStyle(
+                    color: idaGreen,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13)),
+            style: OutlinedButton.styleFrom(
+                foregroundColor: idaGreen,
+                side: const BorderSide(color: idaGreen),
+                padding: const EdgeInsets.symmetric(vertical: 10)),
+            onPressed: _showAddMissedWorkerDialog,
+          ),
+        ),
+      ],
     ]);
   }
 

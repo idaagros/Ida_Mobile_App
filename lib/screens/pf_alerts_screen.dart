@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/responsive.dart';
 
 class PfAlertsScreen extends StatefulWidget {
   const PfAlertsScreen({super.key});
@@ -106,139 +107,151 @@ class _PfAlertsScreenState extends State<PfAlertsScreen> {
         title: const Text('Low PF Alerts',
             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: idaGreen))
-          : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(_error!,
-                        style: const TextStyle(color: Colors.red)),
-                  ),
-                )
-              : _alerts.isEmpty
+      body: Responsive.constrainedContent(
+          context,
+          _loading
+              ? const Center(child: CircularProgressIndicator(color: idaGreen))
+              : _error != null
                   ? Center(
                       child: Padding(
-                        padding: const EdgeInsets.all(40),
-                        child:
-                            Column(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.check_circle_outline,
-                              size: 56, color: Colors.grey.shade300),
-                          const SizedBox(height: 14),
-                          const Text('No low PF alerts',
-                              style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w500,
-                                  color: Colors.black54)),
-                          const SizedBox(height: 6),
-                          Text('All machine PF readings are healthy.',
-                              style: TextStyle(
-                                  fontSize: 13, color: Colors.grey.shade500)),
-                        ]),
+                        padding: const EdgeInsets.all(24),
+                        child: Text(_error!,
+                            style: const TextStyle(color: Colors.red)),
                       ),
                     )
-                  : RefreshIndicator(
-                      color: idaGreen,
-                      onRefresh: _fetchAlerts,
-                      child: ListView.separated(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: _alerts.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
-                        itemBuilder: (_, i) {
-                          final a = _alerts[i];
-                          final pf = double.tryParse(
-                                  a['pf_value']?.toString() ?? '') ??
-                              0;
-                          final photo =
-                              _photoUrl(a['pf_photo_url']?.toString());
-                          return Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              border:
-                                  Border.all(color: const Color(0xFFF3B9B9)),
-                            ),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(10),
-                                  child: photo != null
-                                      ? Image.network(photo,
-                                          width: 70,
-                                          height: 70,
-                                          fit: BoxFit.cover,
-                                          errorBuilder: (_, __, ___) =>
-                                              Container(
-                                                  width: 70,
-                                                  height: 70,
-                                                  color: Colors.grey.shade200,
-                                                  child: const Icon(Icons.bolt,
-                                                      color: Colors.grey)))
-                                      : Container(
-                                          width: 70,
-                                          height: 70,
-                                          color: Colors.grey.shade200,
-                                          child: const Icon(Icons.bolt,
-                                              color: Colors.grey)),
+                  : _alerts.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(40),
+                            child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.check_circle_outline,
+                                      size: 56, color: Colors.grey.shade300),
+                                  const SizedBox(height: 14),
+                                  const Text('No low PF alerts',
+                                      style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w500,
+                                          color: Colors.black54)),
+                                  const SizedBox(height: 6),
+                                  Text('All machine PF readings are healthy.',
+                                      style: TextStyle(
+                                          fontSize: 13,
+                                          color: Colors.grey.shade500)),
+                                ]),
+                          ),
+                        )
+                      : RefreshIndicator(
+                          color: idaGreen,
+                          onRefresh: _fetchAlerts,
+                          child: ListView.separated(
+                            padding: const EdgeInsets.all(16),
+                            itemCount: _alerts.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (_, i) {
+                              final a = _alerts[i];
+                              final pf = double.tryParse(
+                                      a['pf_value']?.toString() ?? '') ??
+                                  0;
+                              final photo =
+                                  _photoUrl(a['pf_photo_url']?.toString());
+                              return Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                      color: const Color(0xFFF3B9B9)),
                                 ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text('PF ${pf.toStringAsFixed(3)}',
-                                          style: const TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w700,
-                                              color: Color(0xFFB23A3A))),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        a['reading_date'] != null
-                                            ? DateFormat('dd-MMM-yyyy').format(
-                                                DateTime.parse(a['reading_date']
-                                                    .toString()))
-                                            : '',
-                                        style: const TextStyle(
-                                            fontSize: 12,
-                                            color: Color(0xFF6B7280)),
-                                      ),
-                                      if (a['submitted_by'] != null)
-                                        Text('By ${a['submitted_by']}',
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: photo != null
+                                          ? Image.network(photo,
+                                              width: 70,
+                                              height: 70,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, __, ___) =>
+                                                  Container(
+                                                      width: 70,
+                                                      height: 70,
+                                                      color:
+                                                          Colors.grey.shade200,
+                                                      child: const Icon(
+                                                          Icons.bolt,
+                                                          color: Colors.grey)))
+                                          : Container(
+                                              width: 70,
+                                              height: 70,
+                                              color: Colors.grey.shade200,
+                                              child: const Icon(Icons.bolt,
+                                                  color: Colors.grey)),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text('PF ${pf.toStringAsFixed(3)}',
+                                              style: const TextStyle(
+                                                  fontSize: 16,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: Color(0xFFB23A3A))),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            a['reading_date'] != null
+                                                ? DateFormat('dd-MMM-yyyy')
+                                                    .format(DateTime.parse(
+                                                        a['reading_date']
+                                                            .toString()))
+                                                : '',
                                             style: const TextStyle(
                                                 fontSize: 12,
-                                                color: Color(0xFF6B7280))),
-                                      const SizedBox(height: 8),
-                                      Align(
-                                        alignment: Alignment.centerRight,
-                                        child: OutlinedButton(
-                                          onPressed: () =>
-                                              _acknowledge(a['id']),
-                                          style: OutlinedButton.styleFrom(
-                                            foregroundColor: idaGreen,
-                                            side: const BorderSide(
-                                                color: idaGreen),
-                                            shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(8)),
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 14, vertical: 6),
+                                                color: Color(0xFF6B7280)),
                                           ),
-                                          child: const Text('Acknowledge',
-                                              style: TextStyle(fontSize: 12)),
-                                        ),
+                                          if (a['submitted_by'] != null)
+                                            Text('By ${a['submitted_by']}',
+                                                style: const TextStyle(
+                                                    fontSize: 12,
+                                                    color: Color(0xFF6B7280))),
+                                          const SizedBox(height: 8),
+                                          Align(
+                                            alignment: Alignment.centerRight,
+                                            child: OutlinedButton(
+                                              onPressed: () =>
+                                                  _acknowledge(a['id']),
+                                              style: OutlinedButton.styleFrom(
+                                                foregroundColor: idaGreen,
+                                                side: const BorderSide(
+                                                    color: idaGreen),
+                                                shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            8)),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 14,
+                                                        vertical: 6),
+                                              ),
+                                              child: const Text('Acknowledge',
+                                                  style:
+                                                      TextStyle(fontSize: 12)),
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                    ),
+                              );
+                            },
+                          ),
+                        )),
     );
   }
 }

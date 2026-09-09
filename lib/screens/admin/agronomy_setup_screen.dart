@@ -21,6 +21,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../localization/app_localizations.dart';
 import '../../localization/transliterate.dart';
 import '../../services/api_service.dart';
+import '../../services/responsive.dart';
 
 enum _Tab { orchardBlocks, stageTemplates, sprayTemplates }
 
@@ -811,10 +812,12 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
           ]),
         ),
         Expanded(
-            child: loading
-                ? const Center(
-                    child: CircularProgressIndicator(color: idaGreen))
-                : _buildList(loc)),
+            child: Responsive.constrainedContent(
+                context,
+                loading
+                    ? const Center(
+                        child: CircularProgressIndicator(color: idaGreen))
+                    : _buildList(loc))),
       ]),
     );
   }

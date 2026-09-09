@@ -16,6 +16,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'crop_calendar_screen.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
+import '../services/responsive.dart';
 
 class CropCyclesScreen extends StatefulWidget {
   const CropCyclesScreen({super.key});
@@ -163,6 +164,15 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
     String intraPairUnit = 'cm';
     final interPairCtrl = TextEditingController();
     String interPairUnit = 'cm';
+    // 'sequence' arrangement: an ordered, repeating list of gaps -
+    // since this screen creates ONE crop at a time (no intercrop
+    // picker here), every pattern line is implicitly the same crop
+    // as varietyId above - only the gap-to-next-line value varies.
+    // Each entry wraps to the first after the last.
+    final List<Map<String, dynamic>> patternLines = [
+      {'gapCtrl': TextEditingController(), 'unit': 'in'},
+      {'gapCtrl': TextEditingController(), 'unit': 'in'},
+    ];
     bool submitting = false;
 
     showDialog(
@@ -286,6 +296,9 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                       child: Text(loc.agriArrangementUniform)),
                   DropdownMenuItem(
                       value: 'paired', child: Text(loc.agriArrangementPaired)),
+                  const DropdownMenuItem(
+                      value: 'sequence',
+                      child: Text('Custom sequence (multi-line pattern)')),
                 ],
                 onChanged: (v) => setDialogState(() => rowArrangement = v!),
               ),
@@ -308,7 +321,7 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                   _unitDropdown(loc, rowSpacingUnit,
                       (v) => setDialogState(() => rowSpacingUnit = v)),
                 ])
-              else ...[
+              else if (rowArrangement == 'paired') ...[
                 Row(children: [
                   Expanded(
                     child: TextField(
@@ -344,6 +357,64 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                   _unitDropdown(loc, interPairUnit,
                       (v) => setDialogState(() => interPairUnit = v)),
                 ]),
+              ] else ...[
+                // 'sequence': an ordered, repeating list of gaps -
+                // e.g. Khalla's 16"/30"/16"/22" - the last line's gap
+                // wraps back to line 1. All lines are this same crop
+                // (varietyId above), since this screen creates one
+                // crop at a time.
+                Text(
+                    'Enter the gap to the NEXT line, in order. The last gap wraps back to line 1.',
+                    style:
+                        TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+                const SizedBox(height: 10),
+                ...patternLines.asMap().entries.map((entry) {
+                  final i = entry.key;
+                  final line = entry.value;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Row(children: [
+                      SizedBox(
+                        width: 22,
+                        child: Text('${i + 1}.',
+                            style: const TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.w600)),
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: line['gapCtrl'],
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          decoration: InputDecoration(
+                              labelText: 'Gap to next line',
+                              isDense: true,
+                              border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10))),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _unitDropdown(loc, line['unit'],
+                          (v) => setDialogState(() => line['unit'] = v)),
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle_outline,
+                            size: 20, color: Colors.red),
+                        onPressed: patternLines.length <= 2
+                            ? null // a cycle needs at least 2 lines
+                            : () =>
+                                setDialogState(() => patternLines.removeAt(i)),
+                      ),
+                    ]),
+                  );
+                }),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => setDialogState(() => patternLines.add(
+                        {'gapCtrl': TextEditingController(), 'unit': 'in'})),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add line'),
+                  ),
+                ),
               ],
             ]),
           ),
@@ -389,9 +460,47 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                             'inter_pair_distance_unit': interPairUnit,
                         }),
                       );
+                      Map<String, dynamic>? data;
+                      if (res.statusCode == 201) {
+                        data = jsonDecode(res.body);
+                        // 'sequence' mode: save the pattern lines in a
+                        // follow-up call, now that we have the new
+                        // plan's id. Every line uses the same
+                        // varietyId - this screen creates one crop at
+                        // a time, no per-line crop picker.
+                        if (rowArrangement == 'sequence') {
+                          final linesPayload = patternLines
+                              .map((l) => {
+                                    'crop_variety_id': varietyId,
+                                    'gap_to_next': double.tryParse(
+                                        (l['gapCtrl'] as TextEditingController)
+                                            .text
+                                            .trim()),
+                                    'gap_to_next_unit': l['unit'],
+                                  })
+                              .toList();
+                          final linesRes = await http.post(
+                            Uri.parse(
+                                '$baseUrl/agri/sowing-plans/${data!['id']}/pattern-lines'),
+                            headers: {...h, 'Content-Type': 'application/json'},
+                            body: jsonEncode({'lines': linesPayload}),
+                          );
+                          if (linesRes.statusCode != 201) {
+                            // Main plan WAS created successfully - only
+                            // the pattern lines failed. Say so plainly
+                            // rather than a generic failure message,
+                            // since the two are separate outcomes here.
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            _showSnack(
+                                'Sowing plan saved, but the pattern lines failed to save — edit the plan to re-enter them.',
+                                isError: true);
+                            await _loadAll();
+                            return;
+                          }
+                        }
+                      }
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (res.statusCode == 201) {
-                        final data = jsonDecode(res.body);
                         _showSnack(loc.agriScheduleGenerated);
                         await _loadAll();
                         if (mounted) {
@@ -400,13 +509,13 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                               MaterialPageRoute(
                                   builder: (_) => CropCalendarScreen(
                                       cycleType: 'seasonal',
-                                      cycleId: data['id'],
+                                      cycleId: data!['id'],
                                       title:
                                           '${tl(context, data['crop_variety_name'])} — ${tl(context, data['farm_name'])}')));
                         }
                       } else {
-                        final data = jsonDecode(res.body);
-                        _showSnack(data['error'] ?? loc.agriFailedSave,
+                        final errData = jsonDecode(res.body);
+                        _showSnack(errData['error'] ?? loc.agriFailedSave,
                             isError: true);
                       }
                     },
@@ -589,75 +698,78 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
           : RefreshIndicator(
               color: idaGreen,
               onRefresh: _loadAll,
-              child: combined.isEmpty
-                  ? ListView(children: [
-                      Padding(
-                          padding: const EdgeInsets.all(40),
-                          child: Center(
-                              child: Text(loc.agriNoCyclesYet,
-                                  style:
-                                      TextStyle(color: Colors.grey.shade500))))
-                    ])
-                  : ListView.separated(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: combined.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                      itemBuilder: (_, i) {
-                        final c = combined[i];
-                        final isSeasonal = c['_type'] == 'seasonal';
-                        return InkWell(
-                          borderRadius: BorderRadius.circular(12),
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => CropCalendarScreen(
-                                      cycleType: c['_type'],
-                                      cycleId: c['id'],
-                                      title:
-                                          '${tl(context, c['crop_variety_name'])} — ${tl(context, c['farm_name'])}',
-                                    )),
-                          ).then((_) => _loadAll()),
-                          child: Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                                border:
-                                    Border.all(color: const Color(0xFFE0E7D8))),
-                            child: Row(children: [
-                              Icon(isSeasonal ? Icons.grass : Icons.park,
-                                  color: idaGreen, size: 20),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                          '${tl(context, c['crop_variety_name'])} — ${tl(context, c['farm_name'])}',
-                                          style: const TextStyle(
-                                              fontSize: 13.5,
-                                              fontWeight: FontWeight.w600),
-                                          overflow: TextOverflow.ellipsis,
-                                          maxLines: 1),
-                                      const SizedBox(height: 3),
-                                      Text(
-                                        isSeasonal
-                                            ? '${c['season']} · sown ${c['sowing_date']}'
-                                            : 'Cycle ${c['cycle_year']}${c['bahar_name'] != null ? ' · ${c['bahar_name']}' : ''}',
-                                        style: TextStyle(
-                                            fontSize: 11.5,
-                                            color: Colors.grey.shade600),
-                                      ),
-                                    ]),
+              child: Responsive.constrainedContent(
+                  context,
+                  combined.isEmpty
+                      ? ListView(children: [
+                          Padding(
+                              padding: const EdgeInsets.all(40),
+                              child: Center(
+                                  child: Text(loc.agriNoCyclesYet,
+                                      style: TextStyle(
+                                          color: Colors.grey.shade500))))
+                        ])
+                      : ListView.separated(
+                          padding: const EdgeInsets.all(16),
+                          itemCount: combined.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 8),
+                          itemBuilder: (_, i) {
+                            final c = combined[i];
+                            final isSeasonal = c['_type'] == 'seasonal';
+                            return InkWell(
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => CropCalendarScreen(
+                                          cycleType: c['_type'],
+                                          cycleId: c['id'],
+                                          title:
+                                              '${tl(context, c['crop_variety_name'])} — ${tl(context, c['farm_name'])}',
+                                        )),
+                              ).then((_) => _loadAll()),
+                              child: Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                        color: const Color(0xFFE0E7D8))),
+                                child: Row(children: [
+                                  Icon(isSeasonal ? Icons.grass : Icons.park,
+                                      color: idaGreen, size: 20),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                              '${tl(context, c['crop_variety_name'])} — ${tl(context, c['farm_name'])}',
+                                              style: const TextStyle(
+                                                  fontSize: 13.5,
+                                                  fontWeight: FontWeight.w600),
+                                              overflow: TextOverflow.ellipsis,
+                                              maxLines: 1),
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            isSeasonal
+                                                ? '${c['season']} · sown ${c['sowing_date']}'
+                                                : 'Cycle ${c['cycle_year']}${c['bahar_name'] != null ? ' · ${c['bahar_name']}' : ''}',
+                                            style: TextStyle(
+                                                fontSize: 11.5,
+                                                color: Colors.grey.shade600),
+                                          ),
+                                        ]),
+                                  ),
+                                  const Icon(Icons.chevron_right,
+                                      color: Colors.grey, size: 20),
+                                ]),
                               ),
-                              const Icon(Icons.chevron_right,
-                                  color: Colors.grey, size: 20),
-                            ]),
-                          ),
-                        );
-                      },
-                    ),
+                            );
+                          },
+                        )),
             ),
     );
   }

@@ -9,6 +9,7 @@ import '../services/colored_date_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'factory_tractor_diesel_screen.dart';
+import '../services/responsive.dart';
 
 class TractorReadingScreen extends StatefulWidget {
   final String? returnedRecordId;
@@ -526,7 +527,7 @@ class _TractorReadingScreenState extends State<TractorReadingScreen> {
           Image.asset('assets/images/idalogo.png', height: 28),
           const SizedBox(width: 10),
           const Flexible(
-              child: Text('Factory Tractor',
+              child: Text('Factory Tractor Hours Reading',
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                       fontSize: 17,
@@ -552,577 +553,590 @@ class _TractorReadingScreenState extends State<TractorReadingScreen> {
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator(color: idaGreen))
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Correction banner
-                    if (widget.returnedRecordId != null) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFF8EC),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                              color: const Color(0xFFFFCC02), width: 1.5),
-                        ),
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Row(children: [
-                                Icon(Icons.assignment_return_rounded,
-                                    color: Color(0xFFF57C00), size: 16),
-                                SizedBox(width: 8),
-                                Text('Correction Required',
-                                    style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: Color(0xFFF57C00))),
-                              ]),
-                              if (widget.adminNote != null &&
-                                  widget.adminNote!.isNotEmpty) ...[
-                                const SizedBox(height: 6),
-                                Text(widget.adminNote!,
-                                    style: const TextStyle(
-                                        fontSize: 13,
-                                        color: Color(0xFF6B7280))),
-                              ],
-                              const SizedBox(height: 6),
-                              const Text(
-                                  'Please correct the reading below and resubmit.',
-                                  style: TextStyle(
-                                      fontSize: 12, color: Color(0xFF9CA3AF))),
-                            ]),
-                      ),
-                    ],
-                    // ── Summary cards ─────────────────────────────
-                    Row(children: [
-                      _summaryCard(
-                        icon: Icons.calendar_month,
-                        label: 'This month',
-                        value: '${monthlyHours.toStringAsFixed(1)} hrs',
-                        color: idaGreen,
-                      ),
-                      const SizedBox(width: 12),
-                      _summaryCard(
-                        icon: Icons.av_timer,
-                        label: 'Overall total',
-                        value: '${overallHours.toStringAsFixed(1)} hrs',
-                        color: amber,
-                      ),
-                    ]),
-
-                    const SizedBox(height: 16),
-
-                    // ── Previous reading ──────────────────────────
-                    previousReading != null
-                        ? _infoCard(
-                            icon: Icons.history,
-                            color: idaGreen,
-                            title: 'Previous reading',
-                            value: '${previousReading!.toStringAsFixed(1)} hrs',
-                            sub:
-                                'Recorded on ${_formatRecordedOn(previousDate, previousTime)}',
-                          )
-                        : _infoCard(
-                            icon: Icons.info_outline,
-                            color: amber,
-                            title: 'First record',
-                            value: 'No previous reading found',
-                            sub: 'This will be the opening reading',
+          : Responsive.constrainedContent(
+              context,
+              SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Correction banner
+                      if (widget.returnedRecordId != null) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF8EC),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                color: const Color(0xFFFFCC02), width: 1.5),
                           ),
-
-                    const SizedBox(height: 20),
-
-                    // ── Date & Time — locked for corrections ──────
-                    if (widget.returnedRecordId != null) ...[
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF4F7F2),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFE0E7D8)),
-                        ),
-                        child: Row(children: [
-                          const Icon(Icons.lock_outline,
-                              size: 16, color: Colors.grey),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text('Original record date (locked)',
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Row(children: [
+                                  Icon(Icons.assignment_return_rounded,
+                                      color: Color(0xFFF57C00), size: 16),
+                                  SizedBox(width: 8),
+                                  Text('Correction Required',
                                       style: TextStyle(
-                                          fontSize: 11, color: Colors.grey)),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    DateFormat('dd MMM yyyy')
-                                        .format(selectedDate),
-                                    style: const TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                        color: Color(0xFF1E4012)),
-                                  ),
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFFF57C00))),
                                 ]),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: Colors.grey.shade200,
-                              borderRadius: BorderRadius.circular(8),
+                                if (widget.adminNote != null &&
+                                    widget.adminNote!.isNotEmpty) ...[
+                                  const SizedBox(height: 6),
+                                  Text(widget.adminNote!,
+                                      style: const TextStyle(
+                                          fontSize: 13,
+                                          color: Color(0xFF6B7280))),
+                                ],
+                                const SizedBox(height: 6),
+                                const Text(
+                                    'Please correct the reading below and resubmit.',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFF9CA3AF))),
+                              ]),
+                        ),
+                      ],
+                      // ── Summary cards ─────────────────────────────
+                      Row(children: [
+                        _summaryCard(
+                          icon: Icons.calendar_month,
+                          label: 'This month',
+                          value: '${monthlyHours.toStringAsFixed(1)} hrs',
+                          color: idaGreen,
+                        ),
+                        const SizedBox(width: 12),
+                        _summaryCard(
+                          icon: Icons.av_timer,
+                          label: 'Overall total',
+                          value: '${overallHours.toStringAsFixed(1)} hrs',
+                          color: amber,
+                        ),
+                      ]),
+
+                      const SizedBox(height: 16),
+
+                      // ── Previous reading ──────────────────────────
+                      previousReading != null
+                          ? _infoCard(
+                              icon: Icons.history,
+                              color: idaGreen,
+                              title: 'Previous reading',
+                              value:
+                                  '${previousReading!.toStringAsFixed(1)} hrs',
+                              sub:
+                                  'Recorded on ${_formatRecordedOn(previousDate, previousTime)}',
+                            )
+                          : _infoCard(
+                              icon: Icons.info_outline,
+                              color: amber,
+                              title: 'First record',
+                              value: 'No previous reading found',
+                              sub: 'This will be the opening reading',
                             ),
-                            child: const Text('Updated at: now',
-                                style: TextStyle(
-                                    fontSize: 10, color: Colors.grey)),
+
+                      const SizedBox(height: 20),
+
+                      // ── Date & Time — locked for corrections ──────
+                      if (widget.returnedRecordId != null) ...[
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF4F7F2),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFE0E7D8)),
                           ),
+                          child: Row(children: [
+                            const Icon(Icons.lock_outline,
+                                size: 16, color: Colors.grey),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('Original record date (locked)',
+                                        style: TextStyle(
+                                            fontSize: 11, color: Colors.grey)),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      DateFormat('dd MMM yyyy')
+                                          .format(selectedDate),
+                                      style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF1E4012)),
+                                    ),
+                                  ]),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade200,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text('Updated at: now',
+                                  style: TextStyle(
+                                      fontSize: 10, color: Colors.grey)),
+                            ),
+                          ]),
+                        ),
+                      ] else ...[
+                        Row(children: [
+                          Expanded(
+                              child: _pickerTile(
+                            icon: Icons.calendar_today,
+                            label: 'Date',
+                            value:
+                                DateFormat('dd MMM yyyy').format(selectedDate),
+                            onTap: _pickDate,
+                          )),
+                          const SizedBox(width: 12),
+                          Expanded(
+                              child: _pickerTile(
+                            icon: Icons.access_time,
+                            label: 'Time',
+                            value: selectedTime.format(context),
+                            onTap: _pickTime,
+                          )),
                         ]),
+                      ],
+
+                      const SizedBox(height: 20),
+
+                      // ── Meter reading ─────────────────────────────
+                      _sectionLabel('TRACTOR METER READING (hrs)'),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: readingCtrl,
+                        enabled: !isDateLocked && existingRecordStatus == null,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w700,
+                            color: idaDark),
+                        decoration: InputDecoration(
+                          hintText: '0.0',
+                          hintStyle: TextStyle(
+                              color: Colors.grey.shade400, fontSize: 24),
+                          prefixIcon:
+                              const Icon(Icons.agriculture, color: idaGreen),
+                          suffix: const Text('hrs',
+                              style: TextStyle(
+                                  color: idaGreen,
+                                  fontWeight: FontWeight.w600)),
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide:
+                                  const BorderSide(color: Color(0xFFE0E7D8))),
+                          focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                  color: idaGreen, width: 1.5)),
+                          errorBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: Colors.red)),
+                          focusedErrorBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                  color: Colors.red, width: 1.5)),
+                          errorText: errorMessage,
+                        ),
                       ),
-                    ] else ...[
+
+                      // Live hours run preview
+                      if (hoursRun != null &&
+                          hoursRun! >= 0 &&
+                          errorMessage == null) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8F5E2),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(children: [
+                            const Icon(Icons.timelapse,
+                                color: idaGreen, size: 18),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Hours run today: ${hoursRun!.toStringAsFixed(1)} hrs',
+                              style: const TextStyle(
+                                  color: idaDark,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13),
+                            ),
+                          ]),
+                        ),
+                      ],
+
+                      const SizedBox(height: 20),
+
+                      // ── Auto-calculated totals (read-only) ────────
+                      _sectionLabel('AUTO-CALCULATED TOTALS'),
+                      const SizedBox(height: 8),
                       Row(children: [
                         Expanded(
-                            child: _pickerTile(
-                          icon: Icons.calendar_today,
-                          label: 'Date',
-                          value: DateFormat('dd MMM yyyy').format(selectedDate),
-                          onTap: _pickDate,
+                            child: _readonlyField(
+                          label: 'Monthly total',
+                          value: '${monthlyHours.toStringAsFixed(1)} hrs',
+                          icon: Icons.calendar_month,
                         )),
                         const SizedBox(width: 12),
                         Expanded(
-                            child: _pickerTile(
-                          icon: Icons.access_time,
-                          label: 'Time',
-                          value: selectedTime.format(context),
-                          onTap: _pickTime,
+                            child: _readonlyField(
+                          label: 'Overall total',
+                          value: '${overallHours.toStringAsFixed(1)} hrs',
+                          icon: Icons.av_timer,
                         )),
                       ]),
-                    ],
 
-                    const SizedBox(height: 20),
+                      const SizedBox(height: 20),
 
-                    // ── Meter reading ─────────────────────────────
-                    _sectionLabel('TRACTOR METER READING (hrs)'),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: readingCtrl,
-                      enabled: !isDateLocked && existingRecordStatus == null,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w700,
-                          color: idaDark),
-                      decoration: InputDecoration(
-                        hintText: '0.0',
-                        hintStyle: TextStyle(
-                            color: Colors.grey.shade400, fontSize: 24),
-                        prefixIcon:
-                            const Icon(Icons.agriculture, color: idaGreen),
-                        suffix: const Text('hrs',
-                            style: TextStyle(
-                                color: idaGreen, fontWeight: FontWeight.w600)),
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide:
-                                const BorderSide(color: Color(0xFFE0E7D8))),
-                        focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide:
-                                const BorderSide(color: idaGreen, width: 1.5)),
-                        errorBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: Colors.red)),
-                        focusedErrorBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(
-                                color: Colors.red, width: 1.5)),
-                        errorText: errorMessage,
-                      ),
-                    ),
-
-                    // Live hours run preview
-                    if (hoursRun != null &&
-                        hoursRun! >= 0 &&
-                        errorMessage == null) ...[
-                      const SizedBox(height: 10),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE8F5E2),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(children: [
-                          const Icon(Icons.timelapse,
-                              color: idaGreen, size: 18),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Hours run today: ${hoursRun!.toStringAsFixed(1)} hrs',
-                            style: const TextStyle(
-                                color: idaDark,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13),
-                          ),
-                        ]),
-                      ),
-                    ],
-
-                    const SizedBox(height: 20),
-
-                    // ── Auto-calculated totals (read-only) ────────
-                    _sectionLabel('AUTO-CALCULATED TOTALS'),
-                    const SizedBox(height: 8),
-                    Row(children: [
-                      Expanded(
-                          child: _readonlyField(
-                        label: 'Monthly total',
-                        value: '${monthlyHours.toStringAsFixed(1)} hrs',
-                        icon: Icons.calendar_month,
-                      )),
-                      const SizedBox(width: 12),
-                      Expanded(
-                          child: _readonlyField(
-                        label: 'Overall total',
-                        value: '${overallHours.toStringAsFixed(1)} hrs',
-                        icon: Icons.av_timer,
-                      )),
-                    ]),
-
-                    const SizedBox(height: 20),
-
-                    // ── Photo (required) ──────────────────────────
-                    Row(children: [
-                      _sectionLabel('METER PHOTO'),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                            color: Colors.grey.shade100,
-                            borderRadius: BorderRadius.circular(10)),
-                        child: const Text('Optional but recommended',
-                            style: TextStyle(fontSize: 10, color: Colors.grey)),
-                      ),
-                    ]),
-                    const SizedBox(height: 8),
-                    GestureDetector(
-                      onTap: (isDateLocked || existingRecordStatus != null)
-                          ? null
-                          : _pickPhoto,
-                      child: Container(
-                        width: double.infinity,
-                        height: (photoBytes != null || _lockedPhotoUrl != null)
-                            ? 200
-                            : 110,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color:
-                                (photoBytes != null || _lockedPhotoUrl != null)
-                                    ? idaGreen
-                                    : const Color(0xFFE0E7D8),
-                            width:
-                                (photoBytes != null || _lockedPhotoUrl != null)
-                                    ? 1.5
-                                    : 1,
-                          ),
-                        ),
-                        child: (isDateLocked || existingRecordStatus != null)
-                            ? (_lockedPhotoUrl != null
-                                ? ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Image.network(_lockedPhotoUrl!,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, __, ___) => Center(
-                                            child: Text('Photo unavailable',
-                                                style: TextStyle(
-                                                    color: Colors.grey.shade500,
-                                                    fontSize: 12)))),
-                                  )
-                                : Center(
-                                    child: Text('No photo for this entry',
-                                        style: TextStyle(
-                                            color: Colors.grey.shade500,
-                                            fontSize: 13))))
-                            : photoBytes != null
-                                ? ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Image.memory(photoBytes!,
-                                        fit: BoxFit.cover),
-                                  )
-                                : Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                        Icon(Icons.add_a_photo_outlined,
-                                            size: 32,
-                                            color: Colors.grey.shade400),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                            'Tap to attach photo (camera or gallery)',
-                                            style: TextStyle(
-                                                color: Colors.grey.shade500,
-                                                fontSize: 13)),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                            'Photo will be compressed automatically · Blurry images will be rejected',
-                                            style: TextStyle(
-                                                color: Colors.grey.shade400,
-                                                fontSize: 11)),
-                                      ]),
-                      ),
-                    ),
-                    if (!isDateLocked && photoBytes != null) ...[
-                      const SizedBox(height: 6),
+                      // ── Photo (required) ──────────────────────────
                       Row(children: [
-                        const Icon(Icons.check_circle,
-                            color: idaGreen, size: 14),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(photoName ?? 'Photo selected',
-                              style: const TextStyle(
-                                  fontSize: 12, color: idaGreen),
-                              overflow: TextOverflow.ellipsis),
-                        ),
-                        TextButton(
-                          onPressed: () => setState(() {
-                            photoBytes = null;
-                            photoName = null;
-                          }),
-                          style: TextButton.styleFrom(padding: EdgeInsets.zero),
-                          child: const Text('Remove',
+                        _sectionLabel('METER PHOTO'),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                              color: Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(10)),
+                          child: const Text('Optional but recommended',
                               style:
-                                  TextStyle(color: Colors.red, fontSize: 12)),
+                                  TextStyle(fontSize: 10, color: Colors.grey)),
                         ),
                       ]),
-                    ],
-
-                    const SizedBox(height: 20),
-
-                    // ── Notes ─────────────────────────────────────
-                    _sectionLabel('NOTES (OPTIONAL)'),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: notesCtrl,
-                      enabled: !isDateLocked && existingRecordStatus == null,
-                      maxLines: 3,
-                      decoration: InputDecoration(
-                        hintText: 'Any observations about the tractor...',
-                        hintStyle: TextStyle(
-                            color: Colors.grey.shade400, fontSize: 13),
-                        filled: true,
-                        fillColor: Colors.white,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide:
-                                const BorderSide(color: Color(0xFFE0E7D8))),
-                        focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide:
-                                const BorderSide(color: idaGreen, width: 1.5)),
-                      ),
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    // ── Success card ──────────────────────────────
-                    if (successMessage != null)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(16),
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE8F5E2),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFB8D99E)),
-                        ),
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Row(children: [
-                                Icon(Icons.check_circle,
-                                    color: idaGreen, size: 18),
-                                SizedBox(width: 8),
-                                Text('Reading submitted!',
-                                    style: TextStyle(
-                                        color: idaDark,
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 14)),
-                              ]),
-                              const SizedBox(height: 12),
-                              if (hoursRun != null)
-                                _resultRow('Hours run today',
-                                    '${hoursRun!.toStringAsFixed(1)} hrs'),
-                              _resultRow('Monthly total',
-                                  '${monthlyHours.toStringAsFixed(1)} hrs'),
-                              _resultRow('Overall total',
-                                  '${overallHours.toStringAsFixed(1)} hrs'),
-                              const SizedBox(height: 6),
-                              const Text('Pending admin review',
-                                  style: TextStyle(
-                                      color: Color(0xFF6B7280), fontSize: 11)),
-                            ]),
-                      ),
-
-                    // ── Photo-missing notice ──────────────────────
-                    // Photo is optional, so this never blocks saving —
-                    // it's just a clear heads-up that none was attached
-                    // this time. The upload field above stays open so a
-                    // photo can still be added on a correction later.
-                    if (photoMissingWarning)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFF8EC),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFFFCC02)),
-                        ),
-                        child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Icon(Icons.info_outline,
-                                  color: Color(0xFFF57C00), size: 18),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  'Photo not uploaded. Please upload a photo of the meter — '
-                                  'you can add one on a correction.',
-                                  style: TextStyle(
-                                      fontSize: 12.5,
-                                      color: Colors.grey.shade800),
-                                ),
-                              ),
-                            ]),
-                      ),
-
-                    // Existing-but-not-approved banner
-                    if (existingRecordStatus != null) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFF8EC),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFFFCC02)),
-                        ),
-                        child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Icon(Icons.info_outline,
-                                  color: Color(0xFFF57C00), size: 18),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  existingRecordStatus == 'returned'
-                                      ? 'A reading already exists for this date and was returned for correction. Open it from your returned records to edit it.'
-                                      : 'A reading already exists for this date and is pending admin review. It cannot be edited here right now.',
-                                  style: TextStyle(
-                                      fontSize: 12.5,
-                                      color: Colors.grey.shade800),
-                                ),
-                              ),
-                            ]),
-                      ),
-                    ],
-
-                    // ── Locked-date banner ────────────────────────
-                    if (isDateLocked) ...[
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE8F0FE),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                              color: const Color(0xFF1A73E8).withOpacity(0.3)),
-                        ),
-                        child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Icon(Icons.lock_outline,
-                                  size: 18, color: Color(0xFF1A73E8)),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Text('This date is locked',
-                                          style: TextStyle(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w700,
-                                              color: Color(0xFF1A73E8))),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        'This reading has already been approved by admin. '
-                                        'You can view it here, but only an admin can change it.',
-                                        style: TextStyle(
-                                            fontSize: 12,
-                                            color: Colors.grey.shade700),
-                                      ),
-                                    ]),
-                              ),
-                            ]),
-                      ),
-                    ],
-
-                    // ── Submit button ─────────────────────────────
-                    SizedBox(
-                      width: double.infinity,
-                      height: 54,
-                      child: ElevatedButton.icon(
-                        onPressed: (submitting ||
-                                isDateLocked ||
-                                existingRecordStatus != null)
+                      const SizedBox(height: 8),
+                      GestureDetector(
+                        onTap: (isDateLocked || existingRecordStatus != null)
                             ? null
-                            : _submit,
-                        icon: submitting
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                    color: Colors.white, strokeWidth: 2))
-                            : Icon(
-                                (isDateLocked || existingRecordStatus != null)
-                                    ? Icons.lock_outline
-                                    : Icons.send,
-                                color: Colors.white,
-                                size: 18),
-                        label: Text(
-                            submitting
-                                ? 'Submitting...'
-                                : isDateLocked
-                                    ? 'Locked — Approved'
-                                    : existingRecordStatus != null
-                                        ? 'Entry already exists for this date'
-                                        : (widget.returnedRecordId != null
-                                            ? 'Resubmit for Approval'
-                                            : 'Submit Reading'),
-                            style: const TextStyle(
-                                fontSize: 16,
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: idaGreen,
-                          disabledBackgroundColor: Colors.grey.shade300,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
+                            : _pickPhoto,
+                        child: Container(
+                          width: double.infinity,
+                          height:
+                              (photoBytes != null || _lockedPhotoUrl != null)
+                                  ? 200
+                                  : 110,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: (photoBytes != null ||
+                                      _lockedPhotoUrl != null)
+                                  ? idaGreen
+                                  : const Color(0xFFE0E7D8),
+                              width: (photoBytes != null ||
+                                      _lockedPhotoUrl != null)
+                                  ? 1.5
+                                  : 1,
+                            ),
+                          ),
+                          child: (isDateLocked || existingRecordStatus != null)
+                              ? (_lockedPhotoUrl != null
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Image.network(_lockedPhotoUrl!,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, __, ___) => Center(
+                                              child: Text('Photo unavailable',
+                                                  style: TextStyle(
+                                                      color:
+                                                          Colors.grey.shade500,
+                                                      fontSize: 12)))),
+                                    )
+                                  : Center(
+                                      child: Text('No photo for this entry',
+                                          style: TextStyle(
+                                              color: Colors.grey.shade500,
+                                              fontSize: 13))))
+                              : photoBytes != null
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Image.memory(photoBytes!,
+                                          fit: BoxFit.cover),
+                                    )
+                                  : Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                          Icon(Icons.add_a_photo_outlined,
+                                              size: 32,
+                                              color: Colors.grey.shade400),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                              'Tap to attach photo (camera or gallery)',
+                                              style: TextStyle(
+                                                  color: Colors.grey.shade500,
+                                                  fontSize: 13)),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                              'Photo will be compressed automatically · Blurry images will be rejected',
+                                              style: TextStyle(
+                                                  color: Colors.grey.shade400,
+                                                  fontSize: 11)),
+                                        ]),
                         ),
                       ),
-                    ),
+                      if (!isDateLocked && photoBytes != null) ...[
+                        const SizedBox(height: 6),
+                        Row(children: [
+                          const Icon(Icons.check_circle,
+                              color: idaGreen, size: 14),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(photoName ?? 'Photo selected',
+                                style: const TextStyle(
+                                    fontSize: 12, color: idaGreen),
+                                overflow: TextOverflow.ellipsis),
+                          ),
+                          TextButton(
+                            onPressed: () => setState(() {
+                              photoBytes = null;
+                              photoName = null;
+                            }),
+                            style:
+                                TextButton.styleFrom(padding: EdgeInsets.zero),
+                            child: const Text('Remove',
+                                style:
+                                    TextStyle(color: Colors.red, fontSize: 12)),
+                          ),
+                        ]),
+                      ],
 
-                    const SizedBox(height: 32),
-                  ]),
-            ),
+                      const SizedBox(height: 20),
+
+                      // ── Notes ─────────────────────────────────────
+                      _sectionLabel('NOTES (OPTIONAL)'),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: notesCtrl,
+                        enabled: !isDateLocked && existingRecordStatus == null,
+                        maxLines: 3,
+                        decoration: InputDecoration(
+                          hintText: 'Any observations about the tractor...',
+                          hintStyle: TextStyle(
+                              color: Colors.grey.shade400, fontSize: 13),
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide:
+                                  const BorderSide(color: Color(0xFFE0E7D8))),
+                          focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                  color: idaGreen, width: 1.5)),
+                        ),
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      // ── Success card ──────────────────────────────
+                      if (successMessage != null)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(16),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8F5E2),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFB8D99E)),
+                          ),
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Row(children: [
+                                  Icon(Icons.check_circle,
+                                      color: idaGreen, size: 18),
+                                  SizedBox(width: 8),
+                                  Text('Reading submitted!',
+                                      style: TextStyle(
+                                          color: idaDark,
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 14)),
+                                ]),
+                                const SizedBox(height: 12),
+                                if (hoursRun != null)
+                                  _resultRow('Hours run today',
+                                      '${hoursRun!.toStringAsFixed(1)} hrs'),
+                                _resultRow('Monthly total',
+                                    '${monthlyHours.toStringAsFixed(1)} hrs'),
+                                _resultRow('Overall total',
+                                    '${overallHours.toStringAsFixed(1)} hrs'),
+                                const SizedBox(height: 6),
+                                const Text('Pending admin review',
+                                    style: TextStyle(
+                                        color: Color(0xFF6B7280),
+                                        fontSize: 11)),
+                              ]),
+                        ),
+
+                      // ── Photo-missing notice ──────────────────────
+                      // Photo is optional, so this never blocks saving —
+                      // it's just a clear heads-up that none was attached
+                      // this time. The upload field above stays open so a
+                      // photo can still be added on a correction later.
+                      if (photoMissingWarning)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF8EC),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFFFCC02)),
+                          ),
+                          child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.info_outline,
+                                    color: Color(0xFFF57C00), size: 18),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    'Photo not uploaded. Please upload a photo of the meter — '
+                                    'you can add one on a correction.',
+                                    style: TextStyle(
+                                        fontSize: 12.5,
+                                        color: Colors.grey.shade800),
+                                  ),
+                                ),
+                              ]),
+                        ),
+
+                      // Existing-but-not-approved banner
+                      if (existingRecordStatus != null) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF8EC),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFFFCC02)),
+                          ),
+                          child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.info_outline,
+                                    color: Color(0xFFF57C00), size: 18),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    existingRecordStatus == 'returned'
+                                        ? 'A reading already exists for this date and was returned for correction. Open it from your returned records to edit it.'
+                                        : 'A reading already exists for this date and is pending admin review. It cannot be edited here right now.',
+                                    style: TextStyle(
+                                        fontSize: 12.5,
+                                        color: Colors.grey.shade800),
+                                  ),
+                                ),
+                              ]),
+                        ),
+                      ],
+
+                      // ── Locked-date banner ────────────────────────
+                      if (isDateLocked) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8F0FE),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                color:
+                                    const Color(0xFF1A73E8).withOpacity(0.3)),
+                          ),
+                          child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.lock_outline,
+                                    size: 18, color: Color(0xFF1A73E8)),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Text('This date is locked',
+                                            style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w700,
+                                                color: Color(0xFF1A73E8))),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'This reading has already been approved by admin. '
+                                          'You can view it here, but only an admin can change it.',
+                                          style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.grey.shade700),
+                                        ),
+                                      ]),
+                                ),
+                              ]),
+                        ),
+                      ],
+
+                      // ── Submit button ─────────────────────────────
+                      SizedBox(
+                        width: double.infinity,
+                        height: 54,
+                        child: ElevatedButton.icon(
+                          onPressed: (submitting ||
+                                  isDateLocked ||
+                                  existingRecordStatus != null)
+                              ? null
+                              : _submit,
+                          icon: submitting
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                      color: Colors.white, strokeWidth: 2))
+                              : Icon(
+                                  (isDateLocked || existingRecordStatus != null)
+                                      ? Icons.lock_outline
+                                      : Icons.send,
+                                  color: Colors.white,
+                                  size: 18),
+                          label: Text(
+                              submitting
+                                  ? 'Submitting...'
+                                  : isDateLocked
+                                      ? 'Locked — Approved'
+                                      : existingRecordStatus != null
+                                          ? 'Entry already exists for this date'
+                                          : (widget.returnedRecordId != null
+                                              ? 'Resubmit for Approval'
+                                              : 'Submit Reading'),
+                              style: const TextStyle(
+                                  fontSize: 16,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: idaGreen,
+                            disabledBackgroundColor: Colors.grey.shade300,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 32),
+                    ]),
+              )),
     );
   }
 

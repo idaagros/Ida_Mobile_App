@@ -12,14 +12,14 @@ const List<Map<String, String>> kModuleDefinitions = [
   // ── Working screens ──────────────────────────────────────────────────────
   {
     'key': 'electricity',
-    'label': 'Electricity Reading',
+    'label': 'Electricity Meter Reading',
     'description': 'Submit and view daily electricity meter readings',
     'route': '/electricity',
     'icon': 'electric_bolt',
   },
   {
     'key': 'tractor',
-    'label': 'Tractor Hours',
+    'label': 'Factory Tractor Hours Reading',
     'description': 'Submit daily tractor meter readings and hours',
     'route': '/tractor',
     'icon': 'agriculture',
@@ -70,7 +70,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'machine_pf',
-    'label': 'Machine PF Reading',
+    'label': 'Power Factor Reading',
     'description': 'Submit daily Power Factor (PF) meter readings',
     'route': '/machine-pf',
     'icon': 'bolt',

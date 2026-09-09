@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/responsive.dart';
 
 // ── Downtime reason options ───────────────────────────────
 const _reasonOptions = [
@@ -148,115 +149,117 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
           : RefreshIndicator(
               color: idaGreen,
               onRefresh: _loadData,
-              child: CustomScrollView(slivers: [
-                SliverToBoxAdapter(
-                    child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Date picker
-                        GestureDetector(
-                          onTap: _pickDate,
-                          child: Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                                color: idaDark,
-                                borderRadius: BorderRadius.circular(12)),
-                            child: Row(children: [
-                              const Icon(Icons.calendar_today,
-                                  color: Colors.white70, size: 18),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                  child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                    const Text('Viewing entries for',
-                                        style: TextStyle(
-                                            color: Colors.white54,
-                                            fontSize: 11)),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                        DateFormat('EEEE, d MMMM yyyy')
-                                            .format(selectedDate),
-                                        style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.w600)),
-                                  ])),
-                              const Icon(Icons.edit,
-                                  color: Colors.white54, size: 16),
-                            ]),
+              child: Responsive.constrainedContent(
+                context,
+                CustomScrollView(slivers: [
+                  SliverToBoxAdapter(
+                      child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Date picker
+                          GestureDetector(
+                            onTap: _pickDate,
+                            child: Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                  color: idaDark,
+                                  borderRadius: BorderRadius.circular(12)),
+                              child: Row(children: [
+                                const Icon(Icons.calendar_today,
+                                    color: Colors.white70, size: 18),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                    child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                      const Text('Viewing entries for',
+                                          style: TextStyle(
+                                              color: Colors.white54,
+                                              fontSize: 11)),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                          DateFormat('EEEE, d MMMM yyyy')
+                                              .format(selectedDate),
+                                          style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w600)),
+                                    ])),
+                                const Icon(Icons.edit,
+                                    color: Colors.white54, size: 16),
+                              ]),
+                            ),
                           ),
-                        ),
 
-                        const SizedBox(height: 16),
+                          const SizedBox(height: 16),
 
-                        // Summary cards
-                        Row(children: [
-                          _summaryCard(Icons.today, 'Today',
-                              summary['daily_display'] ?? '0h 0m', idaGreen),
-                          const SizedBox(width: 10),
-                          _summaryCard(Icons.calendar_month, 'This month',
-                              summary['monthly_display'] ?? '0h 0m', amber),
-                          const SizedBox(width: 10),
-                          _summaryCard(
-                              Icons.av_timer,
-                              'Overall',
-                              summary['overall_display'] ?? '0h 0m',
-                              const Color(0xFF5A9E40)),
-                        ]),
+                          // Summary cards
+                          Row(children: [
+                            _summaryCard(Icons.today, 'Today',
+                                summary['daily_display'] ?? '0h 0m', idaGreen),
+                            const SizedBox(width: 10),
+                            _summaryCard(Icons.calendar_month, 'This month',
+                                summary['monthly_display'] ?? '0h 0m', amber),
+                            const SizedBox(width: 10),
+                            _summaryCard(
+                                Icons.av_timer,
+                                'Overall',
+                                summary['overall_display'] ?? '0h 0m',
+                                const Color(0xFF5A9E40)),
+                          ]),
 
-                        const SizedBox(height: 20),
+                          const SizedBox(height: 20),
 
-                        Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                  '${entries.length} entr${entries.length == 1 ? 'y' : 'ies'}',
-                                  style: const TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600)),
-                              if (entries.isNotEmpty)
+                          Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
                                 Text(
-                                    'Total: ${summary['daily_display'] ?? '0h 0m'}',
+                                    '${entries.length} entr${entries.length == 1 ? 'y' : 'ies'}',
                                     style: const TextStyle(
                                         fontSize: 13,
-                                        color: idaGreen,
                                         fontWeight: FontWeight.w600)),
-                            ]),
-                        const SizedBox(height: 12),
-                      ]),
-                )),
-                entries.isEmpty
-                    ? SliverToBoxAdapter(
-                        child: Center(
-                            child: Padding(
-                        padding: const EdgeInsets.all(48),
-                        child: Column(children: [
-                          Icon(Icons.factory_outlined,
-                              size: 56, color: Colors.grey.shade300),
-                          const SizedBox(height: 16),
-                          Text('No entries for this date',
-                              style: TextStyle(
-                                  color: Colors.grey.shade500, fontSize: 15)),
-                          const SizedBox(height: 8),
-                          Text('Tap + Add Entry to get started',
-                              style: TextStyle(
-                                  color: Colors.grey.shade400, fontSize: 13)),
+                                if (entries.isNotEmpty)
+                                  Text(
+                                      'Total: ${summary['daily_display'] ?? '0h 0m'}',
+                                      style: const TextStyle(
+                                          fontSize: 13,
+                                          color: idaGreen,
+                                          fontWeight: FontWeight.w600)),
+                              ]),
+                          const SizedBox(height: 12),
                         ]),
-                      )))
-                    : SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-                        sliver: SliverList(
-                            delegate: SliverChildBuilderDelegate(
-                          (ctx, i) => _entryCard(entries[i], i + 1),
-                          childCount: entries.length,
-                        )),
-                      ),
-              ]),
-            ),
+                  )),
+                  entries.isEmpty
+                      ? SliverToBoxAdapter(
+                          child: Center(
+                              child: Padding(
+                          padding: const EdgeInsets.all(48),
+                          child: Column(children: [
+                            Icon(Icons.factory_outlined,
+                                size: 56, color: Colors.grey.shade300),
+                            const SizedBox(height: 16),
+                            Text('No entries for this date',
+                                style: TextStyle(
+                                    color: Colors.grey.shade500, fontSize: 15)),
+                            const SizedBox(height: 8),
+                            Text('Tap + Add Entry to get started',
+                                style: TextStyle(
+                                    color: Colors.grey.shade400, fontSize: 13)),
+                          ]),
+                        )))
+                      : SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                          sliver: SliverList(
+                              delegate: SliverChildBuilderDelegate(
+                            (ctx, i) => _entryCard(entries[i], i + 1),
+                            childCount: entries.length,
+                          )),
+                        ),
+                ]),
+              )),
     );
   }
 

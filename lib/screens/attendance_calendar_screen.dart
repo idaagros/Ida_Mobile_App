@@ -20,6 +20,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../localization/app_localizations.dart';
+import '../services/responsive.dart';
 
 class AttendanceCalendarScreen extends StatefulWidget {
   const AttendanceCalendarScreen({super.key});
@@ -165,73 +166,80 @@ class _AttendanceCalendarScreenState extends State<AttendanceCalendarScreen> {
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
-              child: Column(children: [
-                if (error != null)
-                  Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: Text(error!,
-                          style: const TextStyle(
-                              color: Colors.red, fontSize: 12.5))),
-                Row(
-                  children: dayLabels
-                      .map((d) => Expanded(
-                          child: Center(
-                              child: Text(d,
-                                  style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: Colors.grey.shade600)))))
-                      .toList(),
-                ),
-                const SizedBox(height: 8),
-                GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 7),
-                  itemCount: leadingBlanks + daysInMonth,
-                  itemBuilder: (ctx, i) {
-                    if (i < leadingBlanks) return const SizedBox.shrink();
-                    final day = i - leadingBlanks + 1;
-                    final date =
-                        DateTime(_visibleMonth.year, _visibleMonth.month, day);
-                    final dateStr = DateFormat('yyyy-MM-dd').format(date);
-                    final status = _statusByDate[dateStr];
-                    final fillColor = _colorFor(status);
-                    final isToday = DateUtils.isSameDay(date, DateTime.now());
+              child: Responsive.constrainedContent(
+                  context,
+                  Column(children: [
+                    if (error != null)
+                      Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Text(error!,
+                              style: const TextStyle(
+                                  color: Colors.red, fontSize: 12.5))),
+                    Row(
+                      children: dayLabels
+                          .map((d) => Expanded(
+                              child: Center(
+                                  child: Text(d,
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.grey.shade600)))))
+                          .toList(),
+                    ),
+                    const SizedBox(height: 8),
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 7),
+                      itemCount: leadingBlanks + daysInMonth,
+                      itemBuilder: (ctx, i) {
+                        if (i < leadingBlanks) return const SizedBox.shrink();
+                        final day = i - leadingBlanks + 1;
+                        final date = DateTime(
+                            _visibleMonth.year, _visibleMonth.month, day);
+                        final dateStr = DateFormat('yyyy-MM-dd').format(date);
+                        final status = _statusByDate[dateStr];
+                        final fillColor = _colorFor(status);
+                        final isToday =
+                            DateUtils.isSameDay(date, DateTime.now());
 
-                    return Padding(
-                      padding: const EdgeInsets.all(3),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(20),
-                        onTap: () => Navigator.pop(context, date),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: fillColor,
-                            border: fillColor == null
-                                ? Border.all(color: violet, width: 1.6)
-                                : (isToday
-                                    ? Border.all(color: idaDark, width: 1.6)
-                                    : null),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            '$day',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: fillColor != null ? Colors.white : idaDark,
+                        return Padding(
+                          padding: const EdgeInsets.all(3),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(20),
+                            onTap: () => Navigator.pop(context, date),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: fillColor,
+                                border: fillColor == null
+                                    ? Border.all(color: violet, width: 1.6)
+                                    : (isToday
+                                        ? Border.all(color: idaDark, width: 1.6)
+                                        : null),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                '$day',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: fillColor != null
+                                      ? Colors.white
+                                      : idaDark,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 20),
-                _legend(loc),
-              ]),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 20),
+                    _legend(loc),
+                  ]),
+                  maxWidth: 420),
             ),
           ),
       ]),

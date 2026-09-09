@@ -30,6 +30,7 @@ import 'machine_reading_screen.dart';
 import 'machine_pf_screen.dart';
 import 'tractor_screen.dart';
 import 'reading_reminder_settings_screen.dart';
+import '../services/responsive.dart';
 
 class NeedsAttentionScreen extends StatefulWidget {
   const NeedsAttentionScreen({super.key});
@@ -241,60 +242,67 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
           : RefreshIndicator(
               color: idaGreen,
               onRefresh: _load,
-              child: items.isEmpty
-                  ? ListView(children: [
-                      SizedBox(
-                        height: MediaQuery.of(context).size.height * 0.6,
-                        child: Center(
-                          child:
-                              Column(mainAxisSize: MainAxisSize.min, children: [
-                            Icon(Icons.check_circle_outline,
-                                size: 48, color: Colors.grey.shade400),
-                            const SizedBox(height: 12),
-                            Text(
-                              error ??
-                                  "You're all caught up — nothing needs a decision right now.",
-                              style: TextStyle(
-                                  color: Colors.grey.shade600, fontSize: 13.5),
-                              textAlign: TextAlign.center,
+              child: Responsive.constrainedContent(
+                  context,
+                  items.isEmpty
+                      ? ListView(children: [
+                          SizedBox(
+                            height: MediaQuery.of(context).size.height * 0.6,
+                            child: Center(
+                              child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.check_circle_outline,
+                                        size: 48, color: Colors.grey.shade400),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      error ??
+                                          "You're all caught up — nothing needs a decision right now.",
+                                      style: TextStyle(
+                                          color: Colors.grey.shade600,
+                                          fontSize: 13.5),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ]),
                             ),
-                          ]),
-                        ),
-                      ),
-                    ])
-                  : ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-                      children: [
-                        for (final sector in sectorOrder) ...[
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 10, top: 6),
-                            child: Row(children: [
-                              Text(_sectorLabels[sector] ?? sector,
-                                  style: const TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: Color(0xFF6B7280),
-                                      letterSpacing: 0.6)),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                    color: const Color(0xFFFEF3DC),
-                                    borderRadius: BorderRadius.circular(10)),
-                                child: Text('${bySector[sector]!.length}',
-                                    style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
-                                        color: Color(0xFF92600A))),
-                              ),
-                            ]),
                           ),
-                          ...bySector[sector]!.map((item) => _itemCard(item)),
-                          const SizedBox(height: 8),
-                        ],
-                      ],
-                    ),
+                        ])
+                      : ListView(
+                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                          children: [
+                            for (final sector in sectorOrder) ...[
+                              Padding(
+                                padding:
+                                    const EdgeInsets.only(bottom: 10, top: 6),
+                                child: Row(children: [
+                                  Text(_sectorLabels[sector] ?? sector,
+                                      style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFF6B7280),
+                                          letterSpacing: 0.6)),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(
+                                        color: const Color(0xFFFEF3DC),
+                                        borderRadius:
+                                            BorderRadius.circular(10)),
+                                    child: Text('${bySector[sector]!.length}',
+                                        style: const TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF92600A))),
+                                  ),
+                                ]),
+                              ),
+                              ...bySector[sector]!
+                                  .map((item) => _itemCard(item)),
+                              const SizedBox(height: 8),
+                            ],
+                          ],
+                        )),
             ),
     );
   }

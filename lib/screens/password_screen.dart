@@ -20,7 +20,8 @@ class PasswordScreen extends StatefulWidget {
 
 class _PasswordScreenState extends State<PasswordScreen> {
   static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
-  static const primaryColor = Color(0xFF1565C0); // matching the CCA blue
+  static const primaryColor =
+      Color(0xFF3B7A28); // matches the app's idaGreen theme
 
   List _categories = [];
   bool _loading = true;
@@ -96,7 +97,7 @@ class _PasswordScreenState extends State<PasswordScreen> {
       final base = Color(int.parse(val ?? '4279757248'));
       return [base, Color.lerp(base, Colors.black, 0.2)!];
     } catch (_) {
-      return [primaryColor, const Color(0xFF0D47A1)];
+      return [primaryColor, const Color(0xFF1E4012)];
     }
   }
 
@@ -334,8 +335,7 @@ class _PasswordScreenState extends State<PasswordScreen> {
         ],
       ),
       body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(color: Color(0xFF1565C0)))
+          ? const Center(child: CircularProgressIndicator(color: primaryColor))
           : _categories.isEmpty
               ? const Center(
                   child: Text('No categories yet.',
@@ -448,7 +448,8 @@ class OtpWaitScreen extends StatefulWidget {
 }
 
 class _OtpWaitScreenState extends State<OtpWaitScreen> {
-  static const primaryColor = Color(0xFF1565C0);
+  static const primaryColor =
+      Color(0xFF3B7A28); // matches the app's idaGreen theme
   String _status = 'pending';
   final _otpCtrl = TextEditingController();
   bool _verifying = false;
@@ -686,7 +687,7 @@ class _PasswordCategoryScreenState extends State<_PasswordCategoryScreen> {
                               color: widget.colors[0]))),
                   if (widget.isAdmin) ...[
                     IconButton(
-                        icon: const Icon(Icons.edit, color: Colors.blue),
+                        icon: const Icon(Icons.edit, color: Color(0xFF3B7A28)),
                         onPressed: () {
                           Navigator.pop(ctx);
                           _showEditDialog(entry);
@@ -746,7 +747,7 @@ class _PasswordCategoryScreenState extends State<_PasswordCategoryScreen> {
                           child: Text(value,
                               style: const TextStyle(
                                   fontSize: 15,
-                                  color: Colors.blue,
+                                  color: Color(0xFF3B7A28),
                                   decoration: TextDecoration.underline,
                                   fontWeight: FontWeight.w500)))
                       : isPassword
@@ -771,7 +772,8 @@ class _PasswordCategoryScreenState extends State<_PasswordCategoryScreen> {
                 ])),
             if (canCopy)
               IconButton(
-                  icon: const Icon(Icons.copy, size: 16, color: Colors.blue),
+                  icon: const Icon(Icons.copy,
+                      size: 16, color: Color(0xFF3B7A28)),
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: value));
                     ScaffoldMessenger.of(context)

@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/responsive.dart';
 
 enum ReviewFilter { needsAttention, allApproved, allRecords }
 
@@ -121,104 +122,112 @@ class _OutwardRegisterReviewListScreenState
           ),
         ),
         Expanded(
-          child: loading
-              ? const Center(child: CircularProgressIndicator(color: idaGreen))
-              : records.isEmpty
-                  ? Center(
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.check_circle_outline,
-                            size: 56, color: Colors.grey.shade300),
-                        const SizedBox(height: 14),
-                        Text(
-                          filter == ReviewFilter.needsAttention
-                              ? 'Nothing needs attention'
-                              : filter == ReviewFilter.allApproved
-                                  ? 'No fully approved records yet'
-                                  : 'No dispatch entries yet',
-                          style: const TextStyle(
-                              fontSize: 15, color: Colors.black54),
-                        ),
-                      ]),
-                    )
-                  : RefreshIndicator(
-                      color: idaGreen,
-                      onRefresh: _load,
-                      child: ListView.separated(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: records.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
-                        itemBuilder: (_, i) {
-                          final r = records[i];
-                          final date = DateTime.tryParse(
-                              r['dispatch_date']?.toString() ?? '');
-                          return GestureDetector(
-                            onTap: () async {
-                              await Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => OutwardRegisterReviewScreen(
-                                        recordId: r['id'])),
-                              );
-                              _load();
-                            },
-                            child: Container(
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                                border:
-                                    Border.all(color: const Color(0xFFE0E7D8)),
-                              ),
-                              child: Row(children: [
-                                Container(
-                                  width: 42,
-                                  height: 42,
-                                  decoration: BoxDecoration(
-                                      color: idaGreen.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(10)),
-                                  child: const Icon(Icons.local_shipping,
-                                      color: idaGreen, size: 20),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(r['truck_number'] ?? '—',
-                                            style: const TextStyle(
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w700)),
-                                        Text(
-                                            '${r['party_name'] ?? ''} → ${r['destination_name'] ?? ''} · ${r['submitted_by'] ?? ''}',
-                                            style: const TextStyle(
-                                                fontSize: 11.5,
-                                                color: Color(0xFF6B7280))),
-                                        Text(
-                                          date != null
-                                              ? DateFormat('dd-MMM-yyyy')
-                                                  .format(date)
-                                              : '',
-                                          style: TextStyle(
-                                              fontSize: 11,
-                                              color: Colors.grey.shade400),
-                                        ),
-                                      ]),
-                                ),
-                                Text(_summary(r),
-                                    style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: Color(0xFFB8860B))),
-                                const SizedBox(width: 4),
-                                const Icon(Icons.chevron_right,
-                                    color: Color(0xFF9CA3AF)),
-                              ]),
+          child: Responsive.constrainedContent(
+              context,
+              loading
+                  ? const Center(
+                      child: CircularProgressIndicator(color: idaGreen))
+                  : records.isEmpty
+                      ? Center(
+                          child:
+                              Column(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(Icons.check_circle_outline,
+                                size: 56, color: Colors.grey.shade300),
+                            const SizedBox(height: 14),
+                            Text(
+                              filter == ReviewFilter.needsAttention
+                                  ? 'Nothing needs attention'
+                                  : filter == ReviewFilter.allApproved
+                                      ? 'No fully approved records yet'
+                                      : 'No dispatch entries yet',
+                              style: const TextStyle(
+                                  fontSize: 15, color: Colors.black54),
                             ),
-                          );
-                        },
-                      ),
-                    ),
+                          ]),
+                        )
+                      : RefreshIndicator(
+                          color: idaGreen,
+                          onRefresh: _load,
+                          child: ListView.separated(
+                            padding: const EdgeInsets.all(16),
+                            itemCount: records.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (_, i) {
+                              final r = records[i];
+                              final date = DateTime.tryParse(
+                                  r['dispatch_date']?.toString() ?? '');
+                              return GestureDetector(
+                                onTap: () async {
+                                  await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) =>
+                                            OutwardRegisterReviewScreen(
+                                                recordId: r['id'])),
+                                  );
+                                  _load();
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                        color: const Color(0xFFE0E7D8)),
+                                  ),
+                                  child: Row(children: [
+                                    Container(
+                                      width: 42,
+                                      height: 42,
+                                      decoration: BoxDecoration(
+                                          color: idaGreen.withOpacity(0.1),
+                                          borderRadius:
+                                              BorderRadius.circular(10)),
+                                      child: const Icon(Icons.local_shipping,
+                                          color: idaGreen, size: 20),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(r['truck_number'] ?? '—',
+                                                style: const TextStyle(
+                                                    fontSize: 14,
+                                                    fontWeight:
+                                                        FontWeight.w700)),
+                                            Text(
+                                                '${r['party_name'] ?? ''} → ${r['destination_name'] ?? ''} · ${r['submitted_by'] ?? ''}',
+                                                style: const TextStyle(
+                                                    fontSize: 11.5,
+                                                    color: Color(0xFF6B7280))),
+                                            Text(
+                                              date != null
+                                                  ? DateFormat('dd-MMM-yyyy')
+                                                      .format(date)
+                                                  : '',
+                                              style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.grey.shade400),
+                                            ),
+                                          ]),
+                                    ),
+                                    Text(_summary(r),
+                                        style: const TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: Color(0xFFB8860B))),
+                                    const SizedBox(width: 4),
+                                    const Icon(Icons.chevron_right,
+                                        color: Color(0xFF9CA3AF)),
+                                  ]),
+                                ),
+                              );
+                            },
+                          ),
+                        )),
         ),
       ]),
     );
@@ -323,99 +332,101 @@ class _OutwardRegisterReviewScreenState
             record != null ? 'Dispatch #${record!['id']}' : 'Loading...',
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator(color: idaGreen))
-          : record == null
-              ? const Center(child: Text('Record not found'))
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _headerSummary(),
-                        const SizedBox(height: 16),
-                        const Text('SECTIONS',
-                            style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF9CA3AF),
-                                letterSpacing: 0.6)),
-                        const SizedBox(height: 10),
-                        _weighmentReviewCard(),
-                        const SizedBox(height: 10),
-                        _AdminSectionCard(
-                          sectionKey: 'bhada',
-                          title: 'A1 · Truck Bhada (Freight)',
-                          icon: Icons.local_shipping,
-                          section: sectionsByKey['bhada'],
-                          recordId: widget.recordId,
-                          baseUrl: baseUrl,
-                          headers: () => _headers,
-                          onChanged: _load,
-                          modeLabels: const {
-                            'fixed': 'Fixed Rate',
-                            'per_ton': 'Per Ton',
-                            'min_guarantee': 'Min. Guarantee + Per Ton'
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                        _AdminSectionCard(
-                          sectionKey: 'halting',
-                          title: 'A2 · Halting Charges',
-                          icon: Icons.access_time_filled,
-                          section: sectionsByKey['halting'],
-                          recordId: widget.recordId,
-                          baseUrl: baseUrl,
-                          headers: () => _headers,
-                          onChanged: _load,
-                          modeLabels: const {},
-                        ),
-                        const SizedBox(height: 10),
-                        _AdminSectionCard(
-                          sectionKey: 'invoice',
-                          title: 'B · Invoice / Taxable Value',
-                          icon: Icons.receipt_long,
-                          section: sectionsByKey['invoice'],
-                          recordId: widget.recordId,
-                          baseUrl: baseUrl,
-                          headers: () => _headers,
-                          onChanged: _load,
-                          modeLabels: const {
-                            'per_ton': 'Per Ton',
-                            'gcv': 'GCV Based'
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                        _AdminSectionCard(
-                          sectionKey: 'agent',
-                          title: 'C · Agent Commission',
-                          icon: Icons.handshake_outlined,
-                          section: sectionsByKey['agent'],
-                          recordId: widget.recordId,
-                          baseUrl: baseUrl,
-                          headers: () => _headers,
-                          onChanged: _load,
-                          modeLabels: const {
-                            'commission_per_ton': 'Per Ton',
-                            'fixed': 'Fixed',
-                            'no_commission': 'No Commission'
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                        _AdminSectionCard(
-                          sectionKey: 'deduction',
-                          title: 'E · Deduction',
-                          icon: Icons.remove_circle_outline,
-                          section: sectionsByKey['deduction'],
-                          recordId: widget.recordId,
-                          baseUrl: baseUrl,
-                          headers: () => _headers,
-                          onChanged: _load,
-                          modeLabels: const {},
-                        ),
-                        const SizedBox(height: 24),
-                      ]),
-                ),
+      body: Responsive.constrainedContent(
+          context,
+          loading
+              ? const Center(child: CircularProgressIndicator(color: idaGreen))
+              : record == null
+                  ? const Center(child: Text('Record not found'))
+                  : SingleChildScrollView(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _headerSummary(),
+                            const SizedBox(height: 16),
+                            const Text('SECTIONS',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF9CA3AF),
+                                    letterSpacing: 0.6)),
+                            const SizedBox(height: 10),
+                            _weighmentReviewCard(),
+                            const SizedBox(height: 10),
+                            _AdminSectionCard(
+                              sectionKey: 'bhada',
+                              title: 'A1 · Truck Bhada (Freight)',
+                              icon: Icons.local_shipping,
+                              section: sectionsByKey['bhada'],
+                              recordId: widget.recordId,
+                              baseUrl: baseUrl,
+                              headers: () => _headers,
+                              onChanged: _load,
+                              modeLabels: const {
+                                'fixed': 'Fixed Rate',
+                                'per_ton': 'Per Ton',
+                                'min_guarantee': 'Min. Guarantee + Per Ton'
+                              },
+                            ),
+                            const SizedBox(height: 10),
+                            _AdminSectionCard(
+                              sectionKey: 'halting',
+                              title: 'A2 · Halting Charges',
+                              icon: Icons.access_time_filled,
+                              section: sectionsByKey['halting'],
+                              recordId: widget.recordId,
+                              baseUrl: baseUrl,
+                              headers: () => _headers,
+                              onChanged: _load,
+                              modeLabels: const {},
+                            ),
+                            const SizedBox(height: 10),
+                            _AdminSectionCard(
+                              sectionKey: 'invoice',
+                              title: 'B · Invoice / Taxable Value',
+                              icon: Icons.receipt_long,
+                              section: sectionsByKey['invoice'],
+                              recordId: widget.recordId,
+                              baseUrl: baseUrl,
+                              headers: () => _headers,
+                              onChanged: _load,
+                              modeLabels: const {
+                                'per_ton': 'Per Ton',
+                                'gcv': 'GCV Based'
+                              },
+                            ),
+                            const SizedBox(height: 10),
+                            _AdminSectionCard(
+                              sectionKey: 'agent',
+                              title: 'C · Agent Commission',
+                              icon: Icons.handshake_outlined,
+                              section: sectionsByKey['agent'],
+                              recordId: widget.recordId,
+                              baseUrl: baseUrl,
+                              headers: () => _headers,
+                              onChanged: _load,
+                              modeLabels: const {
+                                'commission_per_ton': 'Per Ton',
+                                'fixed': 'Fixed',
+                                'no_commission': 'No Commission'
+                              },
+                            ),
+                            const SizedBox(height: 10),
+                            _AdminSectionCard(
+                              sectionKey: 'deduction',
+                              title: 'E · Deduction',
+                              icon: Icons.remove_circle_outline,
+                              section: sectionsByKey['deduction'],
+                              recordId: widget.recordId,
+                              baseUrl: baseUrl,
+                              headers: () => _headers,
+                              onChanged: _load,
+                              modeLabels: const {},
+                            ),
+                            const SizedBox(height: 24),
+                          ]),
+                    )),
     );
   }
 
