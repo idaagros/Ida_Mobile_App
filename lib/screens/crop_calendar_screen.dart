@@ -173,7 +173,7 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
     );
   }
 
-  void _showCompleteDialog(Map item) {
+  Future<void> _showCompleteDialog(Map item) async {
     final loc = AppLocalizations.of(context)!;
     DateTime operationDate = DateTime.now();
     final productCtrl = TextEditingController(text: item['label'] ?? '');
@@ -185,6 +185,33 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
     final costCtrl = TextEditingController();
     int? workerId;
     bool submitting = false;
+
+    // Brands already on file for this item's compound (item['label']
+    // holds the compound name, e.g. "Pendimethalin 38.7% CS" - see
+    // SELECT_BASE in cycleScheduleItems.js). Fetched once, before the
+    // dialog opens - not the earlier typeahead-as-you-type approach,
+    // since the compound is already known here, there's nothing to
+    // search for.
+    List<Map<String, dynamic>> knownBrands = [];
+    if (item['source_type'] == 'spray' || item['source_type'] == 'pruning') {
+      try {
+        final h = await _headers;
+        final res = await http.get(
+          Uri.parse(
+              '$baseUrl/agri/product-brands/for-compound/${Uri.encodeComponent(item['label'] ?? '')}'),
+          headers: h,
+        );
+        if (res.statusCode == 200) {
+          knownBrands = List<Map<String, dynamic>>.from(jsonDecode(res.body));
+        }
+      } catch (_) {
+        // A failed brand lookup shouldn't block marking the spray
+        // complete - falls through to manual entry either way.
+      }
+    }
+    // null = manual entry (the productCtrl TextField is shown/used).
+    // A real value = one of knownBrands was picked from the dropdown.
+    String? selectedBrand = null;
 
     showDialog(
       context: context,
@@ -216,13 +243,48 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
               ),
               if (item['source_type'] != 'stage') ...[
                 const SizedBox(height: 12),
-                TextField(
-                  controller: productCtrl,
-                  decoration: InputDecoration(
-                      labelText: 'Product used',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10))),
-                ),
+                if (knownBrands.isNotEmpty) ...[
+                  DropdownButtonFormField<String?>(
+                    value: selectedBrand,
+                    decoration: InputDecoration(
+                        labelText: 'Brand sprayed',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10))),
+                    items: [
+                      ...knownBrands.map((b) => DropdownMenuItem<String?>(
+                          value: b['brand_name'],
+                          child: Text(b['brand_name'],
+                              overflow: TextOverflow.ellipsis))),
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Other (enter manually)'),
+                      ),
+                    ],
+                    onChanged: (v) => setDialogState(() {
+                      selectedBrand = v;
+                      if (v != null) productCtrl.text = v;
+                    }),
+                  ),
+                  if (selectedBrand == null) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: productCtrl,
+                      decoration: InputDecoration(
+                          labelText: 'Product used',
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10))),
+                    ),
+                  ],
+                ] else
+                  // No brands on file yet for this compound - straight
+                  // to manual entry, same as before this change.
+                  TextField(
+                    controller: productCtrl,
+                    decoration: InputDecoration(
+                        labelText: 'Product used',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10))),
+                  ),
                 const SizedBox(height: 12),
                 Row(children: [
                   Expanded(

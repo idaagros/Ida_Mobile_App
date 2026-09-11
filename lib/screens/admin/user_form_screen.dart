@@ -26,8 +26,12 @@ class _UserFormScreenState extends State<UserFormScreen> {
   bool _isActive = true;
   bool _obscurePass = true;
   bool _saving = false;
-  // module key -> 'view' | 'edit'. Absent = no access.
-  Map<String, String> _perms = {};
+  // module key -> set of granted levels ('view'/'add'/'update'/'delete').
+  // Absent or empty set = no access. A module can hold multiple levels
+  // at once (e.g. {'view','add'} = can see and create, but not edit
+  // or delete existing records) - confirmed directly as the target
+  // granularity everywhere, not just a single view-or-edit choice.
+  Map<String, Set<String>> _perms = {};
 
   bool get _isEdit => widget.existingUser != null;
 
@@ -39,7 +43,21 @@ class _UserFormScreenState extends State<UserFormScreen> {
       _nameCtrl.text = u.displayName;
       _userCtrl.text = u.username;
       _isActive = u.isActive;
-      _perms = {for (final p in u.permissions) p.module: p.level};
+      // Group by module, since a user can now hold multiple
+      // {module, level} entries for the same module (one per granted
+      // level) - a plain map keyed by module would silently drop all
+      // but the last one.
+      _perms = {};
+      for (final p in u.permissions) {
+        // Backward compatibility with the old combined 'edit' level:
+        // expand it into all three mutation levels, matching exactly
+        // what the backend's _hasLevel already does - someone with
+        // old-format 'edit' access keeps seeing add+update+delete
+        // checked, not silently losing two of the three.
+        final levels =
+            p.level == 'edit' ? ['add', 'update', 'delete'] : [p.level];
+        _perms.putIfAbsent(p.module, () => {}).addAll(levels);
+      }
     }
   }
 
@@ -66,7 +84,8 @@ class _UserFormScreenState extends State<UserFormScreen> {
         'username': _userCtrl.text.trim(),
         'is_active': _isActive,
         'permissions': _perms.entries
-            .map((e) => {'module': e.key, 'level': e.value})
+            .expand((e) =>
+                e.value.map((level) => {'module': e.key, 'level': level}))
             .toList(),
         if (!_isEdit || _passCtrl.text.isNotEmpty) 'password': _passCtrl.text,
       };
@@ -279,7 +298,7 @@ class _UserFormScreenState extends State<UserFormScreen> {
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                       onPressed: () => setState(() => _perms = {
                             for (final m in kModuleDefinitions)
-                              m['key']!: 'view',
+                              m['key']!: {'view'},
                           }),
                       child: const Text('Select all (view)',
                           style: TextStyle(fontSize: 13)),
@@ -297,17 +316,25 @@ class _UserFormScreenState extends State<UserFormScreen> {
                   ]),
                   const Divider(height: 20),
 
-                  // Module rows — 3-way: no access / view / edit.
+                  // Module rows — 4 independent toggles: view / add /
+                  // update / delete. Each can be on or off separately.
                   ...kModuleDefinitions.map((mod) {
-                    final level = _perms[mod['key']]; // null | 'view' | 'edit'
+                    final levels = _perms[mod['key']] ?? {};
                     return _ModuleRow(
                       mod: mod,
-                      level: level,
-                      onChanged: (newLevel) => setState(() {
-                        if (newLevel == null) {
+                      levels: levels,
+                      onToggle: (level, isOn) => setState(() {
+                        final current =
+                            Set<String>.from(_perms[mod['key']] ?? {});
+                        if (isOn) {
+                          current.add(level);
+                        } else {
+                          current.remove(level);
+                        }
+                        if (current.isEmpty) {
                           _perms.remove(mod['key']!);
                         } else {
-                          _perms[mod['key']!] = newLevel;
+                          _perms[mod['key']!] = current;
                         }
                       }),
                     );
@@ -435,16 +462,16 @@ IconData _moduleIcon(String key) {
 
 class _ModuleRow extends StatelessWidget {
   final Map<String, String> mod;
-  final String? level; // null | 'view' | 'edit'
-  final ValueChanged<String?> onChanged;
+  final Set<String> levels; // subset of {'view','add','update','delete'}
+  final void Function(String level, bool isOn) onToggle;
   const _ModuleRow(
-      {required this.mod, required this.level, required this.onChanged});
+      {required this.mod, required this.levels, required this.onToggle});
 
   static const idaGreen = Color(0xFF3B7A28);
 
   @override
   Widget build(BuildContext context) {
-    final enabled = level != null;
+    final enabled = levels.isNotEmpty;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -482,24 +509,26 @@ class _ModuleRow extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(left: 50),
           child: Wrap(spacing: 6, children: [
-            _levelChip(context, 'No access', null),
-            _levelChip(context, 'View', 'view'),
-            _levelChip(context, 'Add / Edit', 'edit'),
+            _levelToggle(context, 'View', 'view'),
+            _levelToggle(context, 'Add', 'add'),
+            _levelToggle(context, 'Update', 'update'),
+            _levelToggle(context, 'Delete', 'delete'),
           ]),
         ),
       ]),
     );
   }
 
-  Widget _levelChip(BuildContext context, String label, String? value) {
-    final selected = level == value;
-    return ChoiceChip(
+  Widget _levelToggle(BuildContext context, String label, String value) {
+    final selected = levels.contains(value);
+    return FilterChip(
       label: Text(label, style: const TextStyle(fontSize: 12)),
       selected: selected,
-      selectedColor: value == 'edit' ? idaGreen : idaGreen.withOpacity(0.35),
+      selectedColor: value == 'delete' ? Colors.red.shade400 : idaGreen,
+      checkmarkColor: Colors.white,
       backgroundColor: Colors.grey.shade100,
       labelStyle: TextStyle(color: selected ? Colors.white : Colors.black87),
-      onSelected: (_) => onChanged(value),
+      onSelected: (isOn) => onToggle(value, isOn),
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       visualDensity: VisualDensity.compact,
     );

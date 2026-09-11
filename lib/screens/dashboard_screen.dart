@@ -39,6 +39,7 @@ import '../localization/app_locale.dart';
 import '../services/api_service.dart';
 import 'transport_screen.dart';
 import 'password_screen.dart';
+import 'admin/app_settings_screen.dart';
 import 'otp_approvals_screen.dart';
 
 // ── Returned record model ─────────────────────────────────────────────────────
@@ -853,6 +854,19 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 context,
                                 MaterialPageRoute(
                                     builder: (_) => const PasswordScreen())),
+                          ),
+                        if (_isAdmin)
+                          _tile(
+                            icon: Icons.tune,
+                            label: 'App Settings',
+                            sub:
+                                'Face login sensitivity and other app-wide settings',
+                            iconBg: const Color(0xFFE0F2E9),
+                            iconColor: idaGreen,
+                            onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const AppSettingsScreen())),
                           ),
                       ]),
                     ],

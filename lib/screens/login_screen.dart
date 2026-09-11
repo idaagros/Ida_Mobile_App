@@ -21,6 +21,13 @@ class _LoginScreenState extends State<LoginScreen>
   final _passCtrl = TextEditingController();
   bool _loading = false;
   bool _obscure = true;
+  // Password form starts collapsed - face login is the primary,
+  // default path (confirmed directly: "no typing needed at all" for
+  // the typical user). Tapping "Sign in with password instead"
+  // reveals it, for the fallback cases where someone genuinely needs
+  // it (a device without face enrollment yet, or repeated face-match
+  // failures).
+  bool _showPasswordForm = false;
 
   late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
@@ -146,99 +153,20 @@ class _LoginScreenState extends State<LoginScreen>
                               fontWeight: FontWeight.w700,
                               color: idaDark)),
                       const SizedBox(height: 4),
-                      Text(loc.enterCredentials,
-                          key: ValueKey(
-                              'signin_subtitle_${loc.enterCredentials}'),
+                      Text('Look at the camera to sign in',
+                          key: const ValueKey('signin_subtitle_face_first'),
                           style: const TextStyle(
                               fontSize: 13, color: Colors.grey)),
                       const SizedBox(height: 28),
 
-                      // Username / email field
-                      TextFormField(
-                        controller: _userCtrl,
-                        textInputAction: TextInputAction.next,
-                        autocorrect: false,
-                        keyboardType: TextInputType.emailAddress,
-                        decoration: _inputDeco(
-                          label: loc.usernameLabel,
-                          icon: Icons.person_outline_rounded,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Password field
-                      TextFormField(
-                        controller: _passCtrl,
-                        obscureText: _obscure,
-                        textInputAction: TextInputAction.done,
-                        onFieldSubmitted: (_) => _login(),
-                        decoration: _inputDeco(
-                          label: loc.passwordLabel,
-                          icon: Icons.lock_outline_rounded,
-                        ).copyWith(
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscure
-                                  ? Icons.visibility_off_outlined
-                                  : Icons.visibility_outlined,
-                              size: 20,
-                            ),
-                            onPressed: () =>
-                                setState(() => _obscure = !_obscure),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 28),
-
-                      // Sign in button
+                      // Face login — the primary, default path. No
+                      // typing required, confirmed directly as the
+                      // priority for village managers who find typing
+                      // a username/password difficult.
                       SizedBox(
                         width: double.infinity,
-                        height: 52,
-                        child: ElevatedButton(
-                          onPressed: _loading ? null : _login,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: idaGreen,
-                            disabledBackgroundColor: idaGreen.withOpacity(0.6),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14)),
-                            elevation: 0,
-                          ),
-                          child: _loading
-                              ? const SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child: CircularProgressIndicator(
-                                      color: Colors.white, strokeWidth: 2),
-                                )
-                              : Text(loc.signIn,
-                                  key: ValueKey('signin_btn_${loc.signIn}'),
-                                  style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.white)),
-                        ),
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      // "or" divider + face login option - additional
-                      // way to sign in, password above still works
-                      // exactly as before.
-                      Row(children: [
-                        Expanded(child: Divider(color: Colors.grey.shade300)),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Text('or',
-                              style: TextStyle(
-                                  color: Colors.grey.shade500, fontSize: 12)),
-                        ),
-                        Expanded(child: Divider(color: Colors.grey.shade300)),
-                      ]),
-                      const SizedBox(height: 20),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 52,
-                        child: OutlinedButton.icon(
+                        height: 56,
+                        child: ElevatedButton.icon(
                           onPressed: _loading
                               ? null
                               : () => Navigator.push(
@@ -248,20 +176,112 @@ class _LoginScreenState extends State<LoginScreen>
                                             const FaceLoginScreen()),
                                   ),
                           icon: const Icon(Icons.face_outlined,
-                              color: idaDark, size: 22),
+                              color: Colors.white, size: 24),
                           label: const Text('Sign In With Face',
                               style: TextStyle(
-                                  fontSize: 15,
+                                  fontSize: 16,
                                   fontWeight: FontWeight.w600,
-                                  color: idaDark)),
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(
-                                color: Color(0xFFDDE8D8), width: 1.5),
+                                  color: Colors.white)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: idaGreen,
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(14)),
+                            elevation: 0,
                           ),
                         ),
                       ),
+
+                      const SizedBox(height: 20),
+                      Center(
+                        child: TextButton(
+                          onPressed: () => setState(
+                              () => _showPasswordForm = !_showPasswordForm),
+                          child: Text(
+                            _showPasswordForm
+                                ? 'Hide password sign in'
+                                : 'Sign in with password instead',
+                            style: const TextStyle(
+                                fontSize: 13,
+                                color: idaDark,
+                                fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                      ),
+
+                      if (_showPasswordForm) ...[
+                        const SizedBox(height: 12),
+                        Row(children: [
+                          Expanded(child: Divider(color: Colors.grey.shade300)),
+                        ]),
+                        const SizedBox(height: 20),
+
+                        // Username / email field
+                        TextFormField(
+                          controller: _userCtrl,
+                          textInputAction: TextInputAction.next,
+                          autocorrect: false,
+                          keyboardType: TextInputType.emailAddress,
+                          decoration: _inputDeco(
+                            label: loc.usernameLabel,
+                            icon: Icons.person_outline_rounded,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Password field
+                        TextFormField(
+                          controller: _passCtrl,
+                          obscureText: _obscure,
+                          textInputAction: TextInputAction.done,
+                          onFieldSubmitted: (_) => _login(),
+                          decoration: _inputDeco(
+                            label: loc.passwordLabel,
+                            icon: Icons.lock_outline_rounded,
+                          ).copyWith(
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscure
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
+                                size: 20,
+                              ),
+                              onPressed: () =>
+                                  setState(() => _obscure = !_obscure),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Sign in button
+                        SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: ElevatedButton(
+                            onPressed: _loading ? null : _login,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: idaGreen,
+                              disabledBackgroundColor:
+                                  idaGreen.withOpacity(0.6),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
+                              elevation: 0,
+                            ),
+                            child: _loading
+                                ? const SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                        color: Colors.white, strokeWidth: 2),
+                                  )
+                                : Text(loc.signIn,
+                                    key: ValueKey('signin_btn_${loc.signIn}'),
+                                    style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.white)),
+                          ),
+                        ),
+                      ],
 
                       const SizedBox(height: 32),
                       Center(

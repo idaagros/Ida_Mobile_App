@@ -188,7 +188,7 @@ const List<String> kAgricultureModuleKeys = [
 // instead.
 class PermissionEntry {
   final String module;
-  final String level; // 'view' | 'edit'
+  final String level; // 'view' | 'add' | 'update' | 'delete' | (legacy) 'edit'
   const PermissionEntry(this.module, this.level);
 
   Map<String, String> toJson() => {'module': module, 'level': level};
@@ -210,8 +210,27 @@ List<PermissionEntry> parsePermissions(dynamic raw) {
 bool hasModuleAccess(List<PermissionEntry> perms, String moduleKey) =>
     perms.any((p) => p.module == moduleKey);
 
+// True if the user holds ANY mutation-level access to this module -
+// the old combined 'edit' level, or any of the three new granular
+// levels (add/update/delete). Matches the backend's _hasEditAccess
+// exactly, so a screen still using this broad check (not yet migrated
+// to the specific hasAddAccess/hasUpdateAccess/hasDeleteAccess below)
+// behaves consistently with what the backend will actually allow.
 bool hasEditAccess(List<PermissionEntry> perms, String moduleKey) =>
-    perms.any((p) => p.module == moduleKey && p.level == 'edit');
+    perms.any((p) =>
+        p.module == moduleKey &&
+        ['edit', 'add', 'update', 'delete'].contains(p.level));
+
+bool hasAddAccess(List<PermissionEntry> perms, String moduleKey) => perms.any(
+    (p) => p.module == moduleKey && (p.level == 'add' || p.level == 'edit'));
+
+bool hasUpdateAccess(List<PermissionEntry> perms, String moduleKey) =>
+    perms.any((p) =>
+        p.module == moduleKey && (p.level == 'update' || p.level == 'edit'));
+
+bool hasDeleteAccess(List<PermissionEntry> perms, String moduleKey) =>
+    perms.any((p) =>
+        p.module == moduleKey && (p.level == 'delete' || p.level == 'edit'));
 
 class AppUser {
   final String? id;
@@ -261,6 +280,15 @@ class AppUser {
 
   bool canEdit(String moduleKey) =>
       isAdmin || hasEditAccess(permissions, moduleKey);
+
+  bool canAdd(String moduleKey) =>
+      isAdmin || hasAddAccess(permissions, moduleKey);
+
+  bool canUpdate(String moduleKey) =>
+      isAdmin || hasUpdateAccess(permissions, moduleKey);
+
+  bool canDelete(String moduleKey) =>
+      isAdmin || hasDeleteAccess(permissions, moduleKey);
 
   AppUser copyWith({
     String? username,

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -25,7 +26,10 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
   List log = [];
   double odometer = 0;
   bool loading = true;
-  String? userRole;
+  // Matches the backend's ACTUAL authorization model (is_admin flag OR
+  // a per-module permissions array with edit-level access) - NOT a
+  // crude role-string comparison, same fix as machine_maintenance_screen.dart.
+  bool canEdit = false;
 
   @override
   void initState() {
@@ -43,7 +47,6 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
 
   Future<Map<String, String>> get _headers async {
     final p = await SharedPreferences.getInstance();
-    userRole ??= p.getString('role');
     return {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer ${p.getString('token') ?? ''}',
@@ -51,9 +54,27 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
     };
   }
 
+  Future<void> _refreshCanEdit() async {
+    final p = await SharedPreferences.getInstance();
+    final isAdmin = p.getBool('is_admin') ?? false;
+    if (isAdmin) {
+      canEdit = true;
+      return;
+    }
+    try {
+      final perms = List<Map<String, dynamic>>.from(
+          jsonDecode(p.getString('permissions') ?? '[]'));
+      canEdit = perms.any((perm) =>
+          perm['module'] == 'tractor_maintenance' && perm['level'] == 'edit');
+    } catch (_) {
+      canEdit = false;
+    }
+  }
+
   Future<void> _loadAll() async {
     setState(() => loading = true);
     try {
+      await _refreshCanEdit();
       final h = await _headers;
       final results = await Future.wait([
         http.get(Uri.parse('$baseUrl/maintenance/activities'), headers: h),
@@ -131,24 +152,58 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
 
     if (confirmed != true) return;
 
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(children: [
+            SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white)),
+            SizedBox(width: 12),
+            Text('Logging maintenance…'),
+          ]),
+          duration: Duration(seconds: 30),
+        ),
+      );
+    }
+
     try {
       final h = await _headers;
-      final res = await http.post(
-        Uri.parse('$baseUrl/maintenance/log'),
-        headers: h,
-        body: jsonEncode({
-          'activity_id': activity['id'],
-          'notes': notesCtrl.text.trim(),
-          'done_date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
-        }),
-      );
-      final data = jsonDecode(res.body);
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/maintenance/log'),
+            headers: h,
+            body: jsonEncode({
+              'activity_id': activity['id'],
+              'notes': notesCtrl.text.trim(),
+              'done_date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+            }),
+          )
+          .timeout(const Duration(seconds: 20));
+
+      if (mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+      Map<String, dynamic> data;
+      try {
+        data = jsonDecode(res.body);
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(
+                  'Unexpected response from server (status ${res.statusCode})'),
+              backgroundColor: red));
+        }
+        return;
+      }
+
       if (res.statusCode == 200) {
         _loadAll();
         if (mounted)
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(
-                '✅ ${activity['name']} logged — next due at ${data['next_due_at']} hrs'),
+                '✅ ${activity['name']} logged — awaiting approval (it will keep showing as overdue until then)'),
             backgroundColor: idaGreen,
           ));
       } else {
@@ -158,19 +213,61 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
             backgroundColor: red,
           ));
       }
+    } on TimeoutException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content:
+                Text('Request timed out — check your connection and try again'),
+            backgroundColor: red));
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Error: $e'), backgroundColor: red));
+      }
     }
   }
 
   Future<void> _acknowledgeAlert(int alertId) async {
-    final h = await _headers;
-    await http.patch(
-        Uri.parse('$baseUrl/maintenance/alerts/$alertId/acknowledge'),
-        headers: h);
-    _loadAll();
+    try {
+      final h = await _headers;
+      final res = await http
+          .patch(Uri.parse('$baseUrl/maintenance/alerts/$alertId/acknowledge'),
+              headers: h)
+          .timeout(const Duration(seconds: 20));
+      if (res.statusCode == 200) {
+        _loadAll();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Alert acknowledged'), backgroundColor: idaGreen));
+        }
+      } else {
+        if (mounted) {
+          Map<String, dynamic> data = {};
+          try {
+            data = jsonDecode(res.body);
+          } catch (_) {}
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(data['error'] ??
+                  'Failed to acknowledge (status ${res.statusCode})'),
+              backgroundColor: red));
+        }
+      }
+    } on TimeoutException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content:
+                Text('Request timed out — check your connection and try again'),
+            backgroundColor: red));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: red));
+      }
+    }
   }
 
   Future<void> _updateThreshold(Map activity) async {
@@ -219,13 +316,46 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
   }
 
   Future<void> _approveLog(int logId, String status) async {
-    final h = await _headers;
-    await http.patch(
-      Uri.parse('$baseUrl/maintenance/log/$logId/status'),
-      headers: h,
-      body: jsonEncode({'status': status}),
-    );
-    _loadAll();
+    try {
+      final h = await _headers;
+      final res = await http
+          .patch(
+            Uri.parse('$baseUrl/maintenance/log/$logId/status'),
+            headers: h,
+            body: jsonEncode({'status': status}),
+          )
+          .timeout(const Duration(seconds: 20));
+      if (res.statusCode == 200) {
+        _loadAll();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Maintenance $status'), backgroundColor: idaGreen));
+        }
+      } else {
+        if (mounted) {
+          Map<String, dynamic> data = {};
+          try {
+            data = jsonDecode(res.body);
+          } catch (_) {}
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(data['error'] ??
+                  'Failed to update (status ${res.statusCode})'),
+              backgroundColor: red));
+        }
+      }
+    } on TimeoutException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content:
+                Text('Request timed out — check your connection and try again'),
+            backgroundColor: red));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: red));
+      }
+    }
   }
 
   @override
@@ -415,7 +545,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
                           fontWeight: FontWeight.w700,
                           color: statusColor)),
                 ),
-                if (userRole == 'admin') ...[
+                if (canEdit) ...[
                   const SizedBox(height: 4),
                   GestureDetector(
                     onTap: () => _updateThreshold(a),
@@ -640,8 +770,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
                         fontSize: 12, color: Color(0xFF6B7280))),
               ],
               // Approve/reject for admin/office
-              if ((userRole == 'admin' || userRole == 'office') &&
-                  entry['status'] == 'pending') ...[
+              if (canEdit && entry['status'] == 'pending') ...[
                 const SizedBox(height: 10),
                 Row(children: [
                   Expanded(
