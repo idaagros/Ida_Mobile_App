@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_service.dart';
 
 class MaintenanceScreen extends StatefulWidget {
   final int? initialTabIndex;
@@ -30,6 +31,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
   // a per-module permissions array with edit-level access) - NOT a
   // crude role-string comparison, same fix as machine_maintenance_screen.dart.
   bool canEdit = false;
+  bool canAdd = false;
 
   @override
   void initState() {
@@ -55,20 +57,12 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
   }
 
   Future<void> _refreshCanEdit() async {
-    final p = await SharedPreferences.getInstance();
-    final isAdmin = p.getBool('is_admin') ?? false;
-    if (isAdmin) {
-      canEdit = true;
-      return;
-    }
-    try {
-      final perms = List<Map<String, dynamic>>.from(
-          jsonDecode(p.getString('permissions') ?? '[]'));
-      canEdit = perms.any((perm) =>
-          perm['module'] == 'tractor_maintenance' && perm['level'] == 'edit');
-    } catch (_) {
-      canEdit = false;
-    }
+    // Was a custom, inline implementation that only matched the exact
+    // legacy 'edit' string - missed anyone granted the newer granular
+    // levels (add/update/delete). ApiService.canEdit/canAdd already
+    // handle this correctly.
+    canEdit = await ApiService.canEdit('tractor_maintenance');
+    canAdd = await ApiService.canAdd('tractor_maintenance');
   }
 
   Future<void> _loadAll() async {
@@ -612,12 +606,13 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
             child: SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: () => _markDone(a),
+                onPressed: canAdd ? () => _markDone(a) : null,
                 icon: const Icon(Icons.check_circle_outline,
                     size: 16, color: Colors.white),
-                label: const Text('Mark as Done',
-                    style: TextStyle(color: Colors.white, fontSize: 13)),
+                label: Text(canAdd ? 'Mark as Done' : 'No permission',
+                    style: const TextStyle(color: Colors.white, fontSize: 13)),
                 style: ElevatedButton.styleFrom(
+                  disabledBackgroundColor: Colors.grey.shade300,
                   backgroundColor: isOverdue ? red : idaGreen,
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   shape: RoundedRectangleBorder(

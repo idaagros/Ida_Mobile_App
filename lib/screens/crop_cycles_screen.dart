@@ -17,6 +17,7 @@ import 'crop_calendar_screen.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
+import '../services/api_service.dart';
 
 class CropCyclesScreen extends StatefulWidget {
   const CropCyclesScreen({super.key});
@@ -35,10 +36,14 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
   List seasonalVarieties = [];
   List orchardBlocks = [];
   bool loading = true;
+  bool canAdd = false;
 
   @override
   void initState() {
     super.initState();
+    ApiService.canAdd('agri').then((v) {
+      if (mounted) setState(() => canAdd = v);
+    });
     _loadAll();
   }
 
@@ -688,11 +693,13 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
         title: Text(loc.agriCyclesTitle,
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: idaGreen,
-        onPressed: _showAddMenu,
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
+      floatingActionButton: !canAdd
+          ? null
+          : FloatingActionButton(
+              backgroundColor: idaGreen,
+              onPressed: _showAddMenu,
+              child: const Icon(Icons.add, color: Colors.white),
+            ),
       body: loading
           ? const Center(child: CircularProgressIndicator(color: idaGreen))
           : RefreshIndicator(

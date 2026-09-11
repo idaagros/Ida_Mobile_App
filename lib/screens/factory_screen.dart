@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
+import '../services/api_service.dart';
 
 // ── Downtime reason options ───────────────────────────────
 const _reasonOptions = [
@@ -30,10 +31,14 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
   List entries = [];
   Map summary = {};
   bool loading = true;
+  bool canAdd = false;
 
   @override
   void initState() {
     super.initState();
+    ApiService.canAdd('factory').then((v) {
+      if (mounted) setState(() => canAdd = v);
+    });
     _loadData();
   }
 
@@ -137,13 +142,16 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
         ],
         elevation: 0,
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openAddForm,
-        backgroundColor: idaGreen,
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text('Add Entry',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-      ),
+      floatingActionButton: canAdd
+          ? FloatingActionButton.extended(
+              onPressed: _openAddForm,
+              backgroundColor: idaGreen,
+              icon: const Icon(Icons.add, color: Colors.white),
+              label: const Text('Add Entry',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w600)),
+            )
+          : null,
       body: loading
           ? const Center(child: CircularProgressIndicator(color: idaGreen))
           : RefreshIndicator(

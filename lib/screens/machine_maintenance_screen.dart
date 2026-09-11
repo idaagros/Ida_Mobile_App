@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_service.dart';
 
 class MachineMaintScreen extends StatefulWidget {
   // 0=Activities, 1=Alerts, 2=History - the review-with-approve/reject
@@ -36,6 +37,7 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
   // anything the backend actually checks, and could hide the
   // approve/reject buttons from someone who genuinely has edit access.
   bool canEdit = false;
+  bool canAdd = false;
 
   @override
   void initState() {
@@ -61,20 +63,13 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
   }
 
   Future<void> _refreshCanEdit() async {
-    final p = await SharedPreferences.getInstance();
-    final isAdmin = p.getBool('is_admin') ?? false;
-    if (isAdmin) {
-      canEdit = true;
-      return;
-    }
-    try {
-      final perms = List<Map<String, dynamic>>.from(
-          jsonDecode(p.getString('permissions') ?? '[]'));
-      canEdit = perms.any((perm) =>
-          perm['module'] == 'machine_maintenance' && perm['level'] == 'edit');
-    } catch (_) {
-      canEdit = false;
-    }
+    // Was a custom, inline implementation that only matched the exact
+    // legacy 'edit' string - missed anyone granted the newer granular
+    // levels (add/update/delete), incorrectly denying them access they
+    // actually have. ApiService.canEdit/canAdd already handle this
+    // correctly (matches any mutation level, not just legacy 'edit').
+    canEdit = await ApiService.canEdit('machine_maintenance');
+    canAdd = await ApiService.canAdd('machine_maintenance');
   }
 
   Future<void> _loadAll() async {
@@ -639,12 +634,13 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
             child: SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: () => _markDone(a),
+                onPressed: canAdd ? () => _markDone(a) : null,
                 icon: const Icon(Icons.check_circle_outline,
                     size: 16, color: Colors.white),
-                label: const Text('Mark as Done',
-                    style: TextStyle(color: Colors.white, fontSize: 13)),
+                label: Text(canAdd ? 'Mark as Done' : 'No permission',
+                    style: const TextStyle(color: Colors.white, fontSize: 13)),
                 style: ElevatedButton.styleFrom(
+                  disabledBackgroundColor: Colors.grey.shade300,
                   backgroundColor: isOverdue ? red : idaGreen,
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   shape: RoundedRectangleBorder(

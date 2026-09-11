@@ -12,6 +12,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'outward_register_screen.dart';
 import '../services/responsive.dart';
+import '../services/api_service.dart';
 
 class OutwardRegisterListScreen extends StatefulWidget {
   const OutwardRegisterListScreen({super.key});
@@ -28,10 +29,14 @@ class _OutwardRegisterListScreenState extends State<OutwardRegisterListScreen> {
   List records = [];
   bool loading = true;
   String? error;
+  bool canAdd = false;
 
   @override
   void initState() {
     super.initState();
+    ApiService.canAdd('outward_register').then((v) {
+      if (mounted) setState(() => canAdd = v);
+    });
     _load();
   }
 
@@ -87,17 +92,22 @@ class _OutwardRegisterListScreenState extends State<OutwardRegisterListScreen> {
         title: const Text('Outward Sales Register',
             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: idaGreen,
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text('New Dispatch',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-        onPressed: () async {
-          await Navigator.push(context,
-              MaterialPageRoute(builder: (_) => const OutwardRegisterScreen()));
-          _load();
-        },
-      ),
+      floatingActionButton: canAdd
+          ? FloatingActionButton.extended(
+              backgroundColor: idaGreen,
+              icon: const Icon(Icons.add, color: Colors.white),
+              label: const Text('New Dispatch',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w600)),
+              onPressed: () async {
+                await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const OutwardRegisterScreen()));
+                _load();
+              },
+            )
+          : null,
       body: loading
           ? const Center(child: CircularProgressIndicator(color: idaGreen))
           : error != null

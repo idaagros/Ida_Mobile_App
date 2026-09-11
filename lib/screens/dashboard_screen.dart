@@ -871,51 +871,70 @@ class _DashboardScreenState extends State<DashboardScreen>
                       ]),
                     ],
 
-                    // ── Masters (admin only) ────────────────────────────────────
-                    if (_isAdmin) ...[
+                    // ── Masters ──────────────────────────────────────────────
+                    // Not purely admin-only: "Manage Users" genuinely is, but
+                    // Parties/Destinations/Labour each have their own grantable
+                    // module now (confirmed directly: destinations/parties were
+                    // deliberately split out from outward_register specifically
+                    // so a non-admin "authorized person" could be granted just
+                    // that, without needing full admin). The outer gate covers
+                    // anyone who can see AT LEAST ONE tile inside; each tile
+                    // then has its own specific check.
+                    if (_isAdmin ||
+                        _can('parties') ||
+                        _can('destinations') ||
+                        _can('labour') ||
+                        _can('transport')) ...[
                       const SizedBox(height: 20),
                       _sectionHeader('Masters'),
                       const SizedBox(height: 12),
                       _tileGrid(context, [
-                        _tile(
-                          icon: Icons.manage_accounts_outlined,
-                          label: 'Manage Users',
-                          sub: 'Create accounts and assign module access',
-                          onTap: () =>
-                              Navigator.pushNamed(context, '/admin/users'),
-                        ),
-                        _tile(
-                          icon: Icons.business_outlined,
-                          label: 'Manage Parties',
-                          sub: 'Buyer list used in the Outward Sales Register',
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const PartiesScreen())),
-                        ),
-                        _tile(
-                          icon: Icons.flag_outlined,
-                          label: 'Manage Destinations',
-                          sub:
-                              'Destination list used in the Outward Sales Register',
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const DestinationsScreen())),
-                        ),
-                        _tile(
-                          icon: Icons.people,
-                          label: AppLocalizations.of(context)!
-                              .moduleLabel('labour', 'Labour Management'),
-                          sub: AppLocalizations.of(context)!.moduleDescription(
-                              'labour', 'Add, edit and view labour records'),
-                          hasPending: _returned.any(
-                              (r) => r.module == 'labour' && !r.acknowledged),
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const LabourScreen())),
-                        ),
+                        if (_isAdmin)
+                          _tile(
+                            icon: Icons.manage_accounts_outlined,
+                            label: 'Manage Users',
+                            sub: 'Create accounts and assign module access',
+                            onTap: () =>
+                                Navigator.pushNamed(context, '/admin/users'),
+                          ),
+                        if (_can('parties'))
+                          _tile(
+                            icon: Icons.business_outlined,
+                            label: 'Manage Parties',
+                            sub:
+                                'Buyer list used in the Outward Sales Register',
+                            onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const PartiesScreen())),
+                          ),
+                        if (_can('destinations'))
+                          _tile(
+                            icon: Icons.flag_outlined,
+                            label: 'Manage Destinations',
+                            sub:
+                                'Destination list used in the Outward Sales Register',
+                            onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) =>
+                                        const DestinationsScreen())),
+                          ),
+                        if (_can('labour'))
+                          _tile(
+                            icon: Icons.people,
+                            label: AppLocalizations.of(context)!
+                                .moduleLabel('labour', 'Labour Management'),
+                            sub: AppLocalizations.of(context)!
+                                .moduleDescription('labour',
+                                    'Add, edit and view labour records'),
+                            hasPending: _returned.any(
+                                (r) => r.module == 'labour' && !r.acknowledged),
+                            onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const LabourScreen())),
+                          ),
                         if (_can('transport'))
                           _tile(
                             icon: Icons.local_shipping_outlined,

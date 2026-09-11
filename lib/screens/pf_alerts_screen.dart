@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
+import '../services/api_service.dart';
 
 class PfAlertsScreen extends StatefulWidget {
   const PfAlertsScreen({super.key});
@@ -26,10 +27,14 @@ class _PfAlertsScreenState extends State<PfAlertsScreen> {
   List _alerts = [];
   bool _loading = true;
   String? _error;
+  bool _canUpdate = false;
 
   @override
   void initState() {
     super.initState();
+    ApiService.canUpdate('machine_pf').then((v) {
+      if (mounted) setState(() => _canUpdate = v);
+    });
     _fetchAlerts();
   }
 
@@ -223,8 +228,9 @@ class _PfAlertsScreenState extends State<PfAlertsScreen> {
                                           Align(
                                             alignment: Alignment.centerRight,
                                             child: OutlinedButton(
-                                              onPressed: () =>
-                                                  _acknowledge(a['id']),
+                                              onPressed: _canUpdate
+                                                  ? () => _acknowledge(a['id'])
+                                                  : null,
                                               style: OutlinedButton.styleFrom(
                                                 foregroundColor: idaGreen,
                                                 side: const BorderSide(

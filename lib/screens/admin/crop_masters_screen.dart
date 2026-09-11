@@ -31,6 +31,8 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
   List varieties = [];
   bool loading = true;
   bool _canEditAgri = false;
+  bool _canAddAgri = false;
+  bool _canUpdateAgri = false;
 
   @override
   void initState() {
@@ -38,6 +40,12 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
     _loadAll();
     ApiService.canEdit('agri').then((v) {
       if (mounted) setState(() => _canEditAgri = v);
+    });
+    ApiService.canAdd('agri').then((v) {
+      if (mounted) setState(() => _canAddAgri = v);
+    });
+    ApiService.canUpdate('agri').then((v) {
+      if (mounted) setState(() => _canUpdateAgri = v);
     });
   }
 
@@ -129,7 +137,8 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
                 onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-              onPressed: submitting
+              onPressed: (submitting ||
+                      (crop == null ? !_canAddAgri : !_canUpdateAgri))
                   ? null
                   : () async {
                       if (nameCtrl.text.trim().isEmpty) return;
@@ -268,7 +277,8 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
                 onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-              onPressed: submitting
+              onPressed: (submitting ||
+                      (variety == null ? !_canAddAgri : !_canUpdateAgri))
                   ? null
                   : () async {
                       if (cropId == null || nameCtrl.text.trim().isEmpty)

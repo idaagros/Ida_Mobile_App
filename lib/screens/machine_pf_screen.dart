@@ -8,6 +8,7 @@ import '../services/colored_date_picker.dart';
 import '../services/responsive.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_service.dart';
 
 class MachinePfScreen extends StatefulWidget {
   final String? returnedRecordId;
@@ -62,10 +63,14 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
   }
 
   Map<String, dynamic>? _returnedRecord;
+  bool canAdd = false;
 
   @override
   void initState() {
     super.initState();
+    ApiService.canAdd('machine_pf').then((v) {
+      if (mounted) setState(() => canAdd = v);
+    });
     pfCtrl.addListener(_onPfChanged);
     if (widget.returnedRecordId != null) {
       _fetchReturnedRecord();
@@ -946,7 +951,8 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
                         child: ElevatedButton.icon(
                           onPressed: (submitting ||
                                   isDateLocked ||
-                                  existingRecordStatus != null)
+                                  existingRecordStatus != null ||
+                                  !canAdd)
                               ? null
                               : _submit,
                           icon: submitting
@@ -968,9 +974,11 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
                                     ? 'Locked — Approved'
                                     : existingRecordStatus != null
                                         ? 'Entry already exists for this date'
-                                        : (widget.returnedRecordId != null
-                                            ? 'Resubmit for Approval'
-                                            : 'Submit PF Reading'),
+                                        : !canAdd
+                                            ? 'No permission to submit'
+                                            : (widget.returnedRecordId != null
+                                                ? 'Resubmit for Approval'
+                                                : 'Submit PF Reading'),
                             style: const TextStyle(
                                 fontSize: 16,
                                 color: Colors.white,

@@ -83,6 +83,22 @@ const List<Map<String, String>> kModuleDefinitions = [
     'icon': 'local_shipping',
   },
   {
+    'key': 'destinations',
+    'label': 'Destinations',
+    'description':
+        'Master list of dispatch destinations - kept separate from Outward Register so adding new ones needs a specifically-authorized person',
+    'route': '/destinations',
+    'icon': 'place',
+  },
+  {
+    'key': 'parties',
+    'label': 'Parties',
+    'description':
+        'Master list of dispatch buyers - kept separate from Outward Register so adding new ones needs a specifically-authorized person',
+    'route': '/parties',
+    'icon': 'groups',
+  },
+  {
     'key': 'machine_maintenance',
     'label': 'Machine Maintenance',
     'description': 'Machine maintenance schedule, alerts & history',
@@ -135,6 +151,35 @@ const List<Map<String, String>> kModuleDefinitions = [
     'icon': 'vpn_key',
   },
 ];
+
+// ─── Section-scoped modules ──────────────────────────────────────────────
+//
+// Some modules have distinct sections/stages that need independently
+// grantable access (confirmed directly, using dispatch and farm
+// attendance as the named examples). Only 'update' level is meaningful
+// for a section grant — sections are about editing a specific part of
+// an existing record, not separately add/delete-able.
+//
+// A scoped grant is a permission entry like:
+//   {module: 'outward_register', scope: 'bhada', level: 'update'}
+// which restricts to ONLY that section. An unscoped module-level grant
+// (no 'scope' field) continues to cover every section — scoping is an
+// additional restriction someone opts into, never an automatic new
+// limit on existing whole-module grants.
+const kSectionedModules = <String, List<Map<String, String>>>{
+  'outward_register': [
+    {'key': 'bhada', 'label': 'Bhada'},
+    {'key': 'halting', 'label': 'Halting'},
+    {'key': 'invoice', 'label': 'Invoice'},
+    {'key': 'agent', 'label': 'Agent'},
+    {'key': 'weighment', 'label': 'Weighment'},
+    {'key': 'deduction', 'label': 'Deduction'},
+  ],
+  'farm_attendance': [
+    {'key': 'attendance', 'label': 'Stage A: Attendance Marking'},
+    {'key': 'allocation', 'label': 'Stage B: Work Allocation'},
+  ],
+};
 
 // ─── Sector categorization ──────────────────────────────────────────────
 //
@@ -189,9 +234,14 @@ const List<String> kAgricultureModuleKeys = [
 class PermissionEntry {
   final String module;
   final String level; // 'view' | 'add' | 'update' | 'delete' | (legacy) 'edit'
-  const PermissionEntry(this.module, this.level);
+  // Optional - restricts this grant to one section/stage of the module
+  // (e.g. 'bhada' for outward_register). Null means "applies to every
+  // section" - see kSectionedModules for which modules have sections.
+  final String? scope;
+  const PermissionEntry(this.module, this.level, [this.scope]);
 
-  Map<String, String> toJson() => {'module': module, 'level': level};
+  Map<String, String> toJson() =>
+      {'module': module, 'level': level, if (scope != null) 'scope': scope!};
 }
 
 List<PermissionEntry> parsePermissions(dynamic raw) {
@@ -200,7 +250,8 @@ List<PermissionEntry> parsePermissions(dynamic raw) {
       .map<PermissionEntry?>((p) {
         if (p is String) return PermissionEntry(p, 'view');
         if (p is Map)
-          return PermissionEntry('${p['module']}', '${p['level'] ?? 'view'}');
+          return PermissionEntry('${p['module']}', '${p['level'] ?? 'view'}',
+              p['scope'] as String?);
         return null;
       })
       .whereType<PermissionEntry>()

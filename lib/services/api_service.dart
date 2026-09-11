@@ -72,6 +72,42 @@ class ApiService {
     return hasEditAccess(perms, moduleKey);
   }
 
+  /// The three granular mutation checks — use these instead of canEdit
+  /// when a specific action (not "any edit right at all") is what
+  /// actually gates a button, e.g. a Delete icon should check
+  /// canDelete, not the broader canEdit.
+  static Future<bool> canAdd(String moduleKey) async {
+    if (await isAdmin()) return true;
+    final perms = await getPermissions();
+    return hasAddAccess(perms, moduleKey);
+  }
+
+  static Future<bool> canUpdate(String moduleKey) async {
+    if (await isAdmin()) return true;
+    final perms = await getPermissions();
+    return hasUpdateAccess(perms, moduleKey);
+  }
+
+  static Future<bool> canDelete(String moduleKey) async {
+    if (await isAdmin()) return true;
+    final perms = await getPermissions();
+    return hasDeleteAccess(perms, moduleKey);
+  }
+
+  /// Section-scoped check, for workflow modules with independently
+  /// grantable sections (see kSectionedModules in user_model.dart) -
+  /// e.g. canUpdateSection('outward_register', 'bhada'). An unscoped
+  /// module-level grant still passes this for every section, matching
+  /// the backend's _hasScopedLevel exactly.
+  static Future<bool> canUpdateSection(String moduleKey, String scope) async {
+    if (await isAdmin()) return true;
+    final perms = await getPermissions();
+    return perms.any((p) =>
+        p.module == moduleKey &&
+        (p.level == 'update' || p.level == 'edit') &&
+        (p.scope == null || p.scope == scope));
+  }
+
   static Future<void> clearSession() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();

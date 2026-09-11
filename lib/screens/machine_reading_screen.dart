@@ -8,6 +8,7 @@ import '../services/colored_date_picker.dart';
 import '../services/responsive.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_service.dart';
 
 class MachineReadingScreen extends StatefulWidget {
   final String? returnedRecordId;
@@ -66,10 +67,14 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
   }
 
   Map<String, dynamic>? _returnedRecord;
+  bool canAdd = false;
 
   @override
   void initState() {
     super.initState();
+    ApiService.canAdd('machine').then((v) {
+      if (mounted) setState(() => canAdd = v);
+    });
     readingCtrl.addListener(_validateReading);
     if (widget.returnedRecordId != null) {
       _fetchReturnedRecord();
@@ -1046,7 +1051,8 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
                         child: ElevatedButton.icon(
                           onPressed: (submitting ||
                                   isDateLocked ||
-                                  existingRecordStatus != null)
+                                  existingRecordStatus != null ||
+                                  !canAdd)
                               ? null
                               : _submit,
                           icon: submitting
@@ -1068,9 +1074,11 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
                                     ? 'Locked — Approved'
                                     : existingRecordStatus != null
                                         ? 'Entry already exists for this date'
-                                        : (widget.returnedRecordId != null
-                                            ? 'Resubmit for Approval'
-                                            : 'Submit Reading'),
+                                        : !canAdd
+                                            ? 'No permission to submit'
+                                            : (widget.returnedRecordId != null
+                                                ? 'Resubmit for Approval'
+                                                : 'Submit Reading'),
                             style: const TextStyle(
                                 fontSize: 16,
                                 color: Colors.white,

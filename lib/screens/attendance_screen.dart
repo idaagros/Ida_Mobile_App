@@ -62,10 +62,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   List<Map<String, dynamic>> presentWorkers = [];
 
   bool decidingAttendance = false;
+  // Stage A (attendance marking) specific access - separate from the
+  // existing isAdmin check above, which only gates the admin
+  // approve/reject decision, not the day-to-day marking itself.
+  bool canUpdateStageA = false;
 
   @override
   void initState() {
     super.initState();
+    ApiService.canUpdateSection('farm_attendance', 'attendance').then((v) {
+      if (mounted) setState(() => canUpdateStageA = v);
+    });
     _init();
   }
 
@@ -180,7 +187,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   bool get _canEditHeadcount =>
-      attendanceStatus == null || attendanceStatus == 'returned';
+      canUpdateStageA &&
+      (attendanceStatus == null || attendanceStatus == 'returned');
 
   Future<void> _saveHeadcount() async {
     final male = int.tryParse(maleCountCtrl.text.trim());

@@ -13,6 +13,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
+import '../services/api_service.dart';
 
 enum ReviewFilter { needsAttention, allApproved, allRecords }
 
@@ -623,6 +624,16 @@ class _AdminSectionCardState extends State<_AdminSectionCard> {
 
   bool expanded = true; // sections needing review default open
   bool saving = false;
+  bool canUpdate = false;
+
+  @override
+  void initState() {
+    super.initState();
+    ApiService.canUpdateSection('outward_register', widget.sectionKey)
+        .then((v) {
+      if (mounted) setState(() => canUpdate = v);
+    });
+  }
 
   String get status => widget.section == null
       ? 'not_started'
@@ -820,7 +831,8 @@ class _AdminSectionCardState extends State<_AdminSectionCard> {
                     child: SizedBox(
                       height: 40,
                       child: OutlinedButton(
-                        onPressed: saving ? null : _showReturnDialog,
+                        onPressed:
+                            (saving || !canUpdate) ? null : _showReturnDialog,
                         style: OutlinedButton.styleFrom(
                           foregroundColor: const Color(0xFFB23A3A),
                           side: const BorderSide(color: Color(0xFFB23A3A)),
@@ -838,9 +850,12 @@ class _AdminSectionCardState extends State<_AdminSectionCard> {
                     child: SizedBox(
                       height: 40,
                       child: ElevatedButton(
-                        onPressed: saving ? null : () => _setStatus('approved'),
+                        onPressed: (saving || !canUpdate)
+                            ? null
+                            : () => _setStatus('approved'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: idaGreen,
+                          disabledBackgroundColor: Colors.grey.shade300,
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8)),
                         ),
@@ -850,8 +865,8 @@ class _AdminSectionCardState extends State<_AdminSectionCard> {
                                 height: 14,
                                 child: CircularProgressIndicator(
                                     strokeWidth: 2, color: Colors.white))
-                            : const Text('Approve',
-                                style: TextStyle(
+                            : Text(canUpdate ? 'Approve' : 'No permission',
+                                style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 12.5,
                                     fontWeight: FontWeight.w700)),

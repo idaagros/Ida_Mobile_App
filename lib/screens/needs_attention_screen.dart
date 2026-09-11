@@ -44,6 +44,7 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
   static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
 
   bool loading = true;
+  bool _isAdmin = false;
   String? error;
   List<Map<String, dynamic>> items = [];
 
@@ -64,7 +65,13 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
   @override
   void initState() {
     super.initState();
+    _loadIsAdmin();
     _load();
+  }
+
+  Future<void> _loadIsAdmin() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) setState(() => _isAdmin = prefs.getBool('is_admin') ?? false);
   }
 
   Future<void> _load() async {
@@ -224,17 +231,18 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
         title: const Text('Needs Attention',
             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Reminder Settings',
-            onPressed: () async {
-              await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => const ReadingReminderSettingsScreen()));
-              _load();
-            },
-          ),
+          if (_isAdmin)
+            IconButton(
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: 'Reminder Settings',
+              onPressed: () async {
+                await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const ReadingReminderSettingsScreen()));
+                _load();
+              },
+            ),
         ],
       ),
       body: loading

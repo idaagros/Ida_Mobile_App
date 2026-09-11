@@ -68,12 +68,18 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
   double? expectedTotalWage;
 
   final List<_TaskGroup> groups = [];
+  // Stage B (work allocation) specific access - separate from isAdmin,
+  // which only gates the admin approve/reject decision.
+  bool canUpdateStageB = false;
 
   String get _dateStr => DateFormat('yyyy-MM-dd').format(widget.attendanceDate);
 
   @override
   void initState() {
     super.initState();
+    ApiService.canUpdateSection('farm_attendance', 'allocation').then((v) {
+      if (mounted) setState(() => canUpdateStageB = v);
+    });
     _init();
   }
 
@@ -161,7 +167,8 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
       .toList();
 
   bool get _canBuild =>
-      allocationStatus == null || allocationStatus == 'returned';
+      canUpdateStageB &&
+      (allocationStatus == null || allocationStatus == 'returned');
 
   // ── Draft persistence ────────────────────────────────────────────
   //

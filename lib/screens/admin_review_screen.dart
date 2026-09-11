@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
+import '../services/api_service.dart';
 
 class AdminReviewScreen extends StatefulWidget {
   // Optional initial status filter — 'pending', 'approved', or 'returned'.
@@ -48,6 +49,34 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
   DateTime? _fromDate;
   DateTime? _toDate;
 
+  // module (this screen's own naming, e.g. 'machine-pf') -> whether the
+  // user can approve/reject/return records for it. Each tab needs its
+  // own check, not one blanket permission - someone could have edit
+  // rights on electricity but not tractor.
+  Map<String, bool> _canUpdatePerModule = {};
+
+  // This screen's internal module strings mostly match the backend's
+  // permission module keys directly, EXCEPT 'machine-pf' (hyphen here)
+  // vs 'machine_pf' (underscore in kModuleDefinitions/the backend) -
+  // checked directly against the actual code rather than assumed.
+  String _permissionKeyFor(String screenModule) =>
+      screenModule == 'machine-pf' ? 'machine_pf' : screenModule;
+
+  Future<void> _loadUpdatePermissions() async {
+    const modules = [
+      'electricity',
+      'tractor',
+      'factory',
+      'machine',
+      'machine-pf'
+    ];
+    final results = await Future.wait(
+        modules.map((m) => ApiService.canUpdate(_permissionKeyFor(m))));
+    if (mounted) {
+      setState(() => _canUpdatePerModule = Map.fromIterables(modules, results));
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -55,6 +84,7 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
     _tabs = TabController(
         length: 5, vsync: this, initialIndex: widget.initialTabIndex ?? 0);
     _tabs.addListener(() => setState(() {}));
+    _loadUpdatePermissions();
     _fetchAll();
     _fetchCounts();
   }
@@ -417,41 +447,53 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
             ],
             const SizedBox(height: 24),
             if ((record['status'] ?? 'pending') == 'pending') ...[
-              Row(children: [
-                Expanded(
-                    child: OutlinedButton.icon(
-                  icon: const Icon(Icons.undo_rounded, size: 18),
-                  label: const Text('Return'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: amber,
-                    side: BorderSide(color: amber),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _showReturnDialog(module, record['id']);
-                  },
-                )),
-                const SizedBox(width: 10),
-                Expanded(
-                    child: ElevatedButton.icon(
-                  icon: const Icon(Icons.check_rounded, size: 18),
-                  label: const Text('Approve'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: idaGreen,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _updateStatus(module, record['id'], 'approved');
-                  },
-                )),
-              ]),
+              if (!(_canUpdatePerModule[module] ?? false)) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(10)),
+                  child: const Text(
+                      'You don\'t have permission to approve or return this record.',
+                      style: TextStyle(fontSize: 12.5, color: Colors.grey)),
+                ),
+              ] else
+                Row(children: [
+                  Expanded(
+                      child: OutlinedButton.icon(
+                    icon: const Icon(Icons.undo_rounded, size: 18),
+                    label: const Text('Return'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: amber,
+                      side: BorderSide(color: amber),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _showReturnDialog(module, record['id']);
+                    },
+                  )),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: ElevatedButton.icon(
+                    icon: const Icon(Icons.check_rounded, size: 18),
+                    label: const Text('Approve'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: idaGreen,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _updateStatus(module, record['id'], 'approved');
+                    },
+                  )),
+                ]),
             ] else if ((record['status'] ?? '') == 'approved' &&
                 ['tractor', 'electricity', 'machine', 'machine-pf']
                     .contains(module)) ...[

@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
+import '../services/api_service.dart';
 
 class ElectricityBillProjectionScreen extends StatefulWidget {
   const ElectricityBillProjectionScreen({super.key});
@@ -313,10 +314,14 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
   final contractDemandCtrl = TextEditingController();
   final dutyCtrl = TextEditingController();
   String readingType = 'kwh';
+  bool canUpdate = false;
 
   @override
   void initState() {
     super.initState();
+    ApiService.canUpdate('electricity').then((v) {
+      if (mounted) setState(() => canUpdate = v);
+    });
     _load();
   }
 
@@ -487,7 +492,7 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
                       style: ElevatedButton.styleFrom(
                           backgroundColor: idaGreen,
                           padding: const EdgeInsets.symmetric(vertical: 14)),
-                      onPressed: saving ? null : _save,
+                      onPressed: (saving || !canUpdate) ? null : _save,
                       child: saving
                           ? const SizedBox(
                               height: 18,

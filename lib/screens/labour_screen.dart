@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
+import '../services/api_service.dart';
 
 class LabourScreen extends StatefulWidget {
   const LabourScreen({super.key});
@@ -23,10 +24,18 @@ class _LabourScreenState extends State<LabourScreen> {
   Map summary = {};
   bool loading = true;
   String filterStatus = 'all';
+  bool canAdd = false;
+  bool canUpdate = false;
 
   @override
   void initState() {
     super.initState();
+    ApiService.canAdd('labour').then((v) {
+      if (mounted) setState(() => canAdd = v);
+    });
+    ApiService.canUpdate('labour').then((v) {
+      if (mounted) setState(() => canUpdate = v);
+    });
     _loadData();
   }
 
@@ -138,13 +147,16 @@ class _LabourScreenState extends State<LabourScreen> {
         ],
         elevation: 0,
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openAddSheet,
-        backgroundColor: idaGreen,
-        icon: const Icon(Icons.person_add, color: Colors.white),
-        label: const Text('Add Labour',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-      ),
+      floatingActionButton: canAdd
+          ? FloatingActionButton.extended(
+              onPressed: _openAddSheet,
+              backgroundColor: idaGreen,
+              icon: const Icon(Icons.person_add, color: Colors.white),
+              label: const Text('Add Labour',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w600)),
+            )
+          : null,
       body: loading
           ? const Center(child: CircularProgressIndicator(color: idaGreen))
           : RefreshIndicator(
@@ -326,26 +338,27 @@ class _LabourScreenState extends State<LabourScreen> {
                   child: _detailItem(Icons.payments_outlined, 'Pay type',
                       labour['pay_type'].toString().toUpperCase())),
             // Edit button
-            GestureDetector(
-              onTap: () => _openEditSheet(Map.from(labour)),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE8F5E2),
-                  borderRadius: BorderRadius.circular(8),
+            if (canUpdate)
+              GestureDetector(
+                onTap: () => _openEditSheet(Map.from(labour)),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F5E2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.edit_outlined, size: 14, color: idaGreen),
+                    SizedBox(width: 4),
+                    Text('Edit',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: idaGreen,
+                            fontWeight: FontWeight.w600)),
+                  ]),
                 ),
-                child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.edit_outlined, size: 14, color: idaGreen),
-                  SizedBox(width: 4),
-                  Text('Edit',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: idaGreen,
-                          fontWeight: FontWeight.w600)),
-                ]),
               ),
-            ),
           ]),
         ),
       ]),

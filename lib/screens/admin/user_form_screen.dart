@@ -32,6 +32,10 @@ class _UserFormScreenState extends State<UserFormScreen> {
   // or delete existing records) - confirmed directly as the target
   // granularity everywhere, not just a single view-or-edit choice.
   Map<String, Set<String>> _perms = {};
+  // "module::scope" -> granted (e.g. "outward_register::bhada"). Only
+  // 'update' is meaningful for a section grant (see kSectionedModules),
+  // so a presence-only Set is enough - no need for a level per entry.
+  Set<String> _sectionPerms = {};
 
   bool get _isEdit => widget.existingUser != null;
 
@@ -48,7 +52,15 @@ class _UserFormScreenState extends State<UserFormScreen> {
       // level) - a plain map keyed by module would silently drop all
       // but the last one.
       _perms = {};
+      _sectionPerms = {};
       for (final p in u.permissions) {
+        if (p.scope != null) {
+          // Scoped entries are tracked separately - they don't count
+          // toward the whole-module toggles above, which only reflect
+          // unscoped ("applies everywhere") grants.
+          _sectionPerms.add('${p.module}::${p.scope}');
+          continue;
+        }
         // Backward compatibility with the old combined 'edit' level:
         // expand it into all three mutation levels, matching exactly
         // what the backend's _hasLevel already does - someone with
@@ -83,10 +95,14 @@ class _UserFormScreenState extends State<UserFormScreen> {
         'display_name': _nameCtrl.text.trim(),
         'username': _userCtrl.text.trim(),
         'is_active': _isActive,
-        'permissions': _perms.entries
-            .expand((e) =>
-                e.value.map((level) => {'module': e.key, 'level': level}))
-            .toList(),
+        'permissions': [
+          ..._perms.entries.expand(
+              (e) => e.value.map((level) => {'module': e.key, 'level': level})),
+          ..._sectionPerms.map((key) {
+            final parts = key.split('::');
+            return {'module': parts[0], 'scope': parts[1], 'level': 'update'};
+          }),
+        ],
         if (!_isEdit || _passCtrl.text.isNotEmpty) 'password': _passCtrl.text,
       };
 
@@ -318,8 +334,11 @@ class _UserFormScreenState extends State<UserFormScreen> {
 
                   // Module rows — 4 independent toggles: view / add /
                   // update / delete. Each can be on or off separately.
+                  // Modules with sections (see kSectionedModules) also
+                  // get an expandable per-section grant list.
                   ...kModuleDefinitions.map((mod) {
                     final levels = _perms[mod['key']] ?? {};
+                    final sections = kSectionedModules[mod['key']];
                     return _ModuleRow(
                       mod: mod,
                       levels: levels,
@@ -335,6 +354,17 @@ class _UserFormScreenState extends State<UserFormScreen> {
                           _perms.remove(mod['key']!);
                         } else {
                           _perms[mod['key']!] = current;
+                        }
+                      }),
+                      sections: sections,
+                      sectionGranted: (sectionKey) =>
+                          _sectionPerms.contains('${mod['key']}::$sectionKey'),
+                      onToggleSection: (sectionKey, isOn) => setState(() {
+                        final key = '${mod['key']}::$sectionKey';
+                        if (isOn) {
+                          _sectionPerms.add(key);
+                        } else {
+                          _sectionPerms.remove(key);
                         }
                       }),
                     );
@@ -464,8 +494,19 @@ class _ModuleRow extends StatelessWidget {
   final Map<String, String> mod;
   final Set<String> levels; // subset of {'view','add','update','delete'}
   final void Function(String level, bool isOn) onToggle;
-  const _ModuleRow(
-      {required this.mod, required this.levels, required this.onToggle});
+  // Present only for modules with sections (kSectionedModules) - null
+  // for every other module, which renders no section list at all.
+  final List<Map<String, String>>? sections;
+  final bool Function(String sectionKey)? sectionGranted;
+  final void Function(String sectionKey, bool isOn)? onToggleSection;
+  const _ModuleRow({
+    required this.mod,
+    required this.levels,
+    required this.onToggle,
+    this.sections,
+    this.sectionGranted,
+    this.onToggleSection,
+  });
 
   static const idaGreen = Color(0xFF3B7A28);
 
@@ -515,6 +556,51 @@ class _ModuleRow extends StatelessWidget {
             _levelToggle(context, 'Delete', 'delete'),
           ]),
         ),
+        if (sections != null) ...[
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.only(left: 50),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade200),
+              ),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                        'Or grant update access to specific sections only, instead of the whole module:',
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey.shade600)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: sections!.map((s) {
+                        final granted = sectionGranted!(s['key']!);
+                        return FilterChip(
+                          label: Text(s['label']!,
+                              style: const TextStyle(fontSize: 11.5)),
+                          selected: granted,
+                          selectedColor: idaGreen,
+                          checkmarkColor: Colors.white,
+                          backgroundColor: Colors.white,
+                          labelStyle: TextStyle(
+                              color: granted ? Colors.white : Colors.black87),
+                          onSelected: (isOn) =>
+                              onToggleSection!(s['key']!, isOn),
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                        );
+                      }).toList(),
+                    ),
+                  ]),
+            ),
+          ),
+        ],
       ]),
     );
   }

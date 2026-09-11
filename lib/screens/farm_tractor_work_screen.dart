@@ -19,6 +19,7 @@ import 'farm_tractor_diesel_screen.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
+import '../services/api_service.dart';
 
 class FarmTractorWorkScreen extends StatefulWidget {
   const FarmTractorWorkScreen({super.key});
@@ -39,10 +40,14 @@ class _FarmTractorWorkScreenState extends State<FarmTractorWorkScreen> {
   bool loadingMasters = true;
   bool loadingEntries = false;
   String? error;
+  bool canAdd = false;
 
   @override
   void initState() {
     super.initState();
+    ApiService.canAdd('farm_tractor').then((v) {
+      if (mounted) setState(() => canAdd = v);
+    });
     _init();
   }
 
@@ -428,15 +433,16 @@ class _FarmTractorWorkScreenState extends State<FarmTractorWorkScreen> {
                 MaterialPageRoute(
                     builder: (_) => const FarmTractorDieselScreen())),
           ),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: loc.ftSetupTooltip,
-            onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const FarmTractorMasterScreen()))
-                .then((_) => _loadMasters()),
-          ),
+          if (canAdd)
+            IconButton(
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: loc.ftSetupTooltip,
+              onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const FarmTractorMasterScreen()))
+                  .then((_) => _loadMasters()),
+            ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -444,9 +450,10 @@ class _FarmTractorWorkScreenState extends State<FarmTractorWorkScreen> {
         icon: const Icon(Icons.add, color: Colors.white),
         label:
             Text(loc.ftAssignWork, style: const TextStyle(color: Colors.white)),
-        onPressed: (tractors.isEmpty || farms.isEmpty || workTypes.isEmpty)
-            ? null
-            : _showAssignDialog,
+        onPressed:
+            (tractors.isEmpty || farms.isEmpty || workTypes.isEmpty || !canAdd)
+                ? null
+                : _showAssignDialog,
       ),
       body: loadingMasters
           ? const Center(child: CircularProgressIndicator(color: idaGreen))

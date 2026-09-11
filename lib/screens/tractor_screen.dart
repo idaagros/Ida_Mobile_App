@@ -8,6 +8,7 @@ import '../services/image_helper.dart';
 import '../services/colored_date_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_service.dart';
 import 'factory_tractor_diesel_screen.dart';
 import '../services/responsive.dart';
 
@@ -59,6 +60,9 @@ class _TractorReadingScreenState extends State<TractorReadingScreen> {
   bool isDateLocked = false;
   Map<String, dynamic>? lockedRecord;
   String? existingRecordStatus;
+  // Submitting a reading is an 'add' operation. Starts false (safe
+  // default) until the async check resolves.
+  bool canAdd = false;
 
   // photo_url from the DB is a relative path like '/uploads/tractor/x.jpg'
   // served from the API host root (not under /api), so strip the trailing
@@ -77,6 +81,9 @@ class _TractorReadingScreenState extends State<TractorReadingScreen> {
   @override
   void initState() {
     super.initState();
+    ApiService.canAdd('tractor').then((v) {
+      if (mounted) setState(() => canAdd = v);
+    });
     readingCtrl.addListener(_validateReading);
     if (widget.returnedRecordId != null) {
       _fetchReturnedRecord();
@@ -1096,7 +1103,8 @@ class _TractorReadingScreenState extends State<TractorReadingScreen> {
                         child: ElevatedButton.icon(
                           onPressed: (submitting ||
                                   isDateLocked ||
-                                  existingRecordStatus != null)
+                                  existingRecordStatus != null ||
+                                  !canAdd)
                               ? null
                               : _submit,
                           icon: submitting
@@ -1118,9 +1126,11 @@ class _TractorReadingScreenState extends State<TractorReadingScreen> {
                                       ? 'Locked — Approved'
                                       : existingRecordStatus != null
                                           ? 'Entry already exists for this date'
-                                          : (widget.returnedRecordId != null
-                                              ? 'Resubmit for Approval'
-                                              : 'Submit Reading'),
+                                          : !canAdd
+                                              ? 'No permission to submit'
+                                              : (widget.returnedRecordId != null
+                                                  ? 'Resubmit for Approval'
+                                                  : 'Submit Reading'),
                               style: const TextStyle(
                                   fontSize: 16,
                                   color: Colors.white,

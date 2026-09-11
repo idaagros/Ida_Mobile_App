@@ -9,6 +9,7 @@ import '../services/colored_date_picker.dart';
 import '../services/responsive.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_service.dart';
 
 class ElectricityReadingScreen extends StatefulWidget {
   final String? returnedRecordId;
@@ -55,6 +56,12 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
 
   bool loading = false;
   bool submitting = false;
+  // Submitting a reading is an 'add' operation (a new record each
+  // time - there's no in-place edit of an existing one from this
+  // screen). Starts false (safe default) until the async check
+  // resolves - SharedPreferences reads are fast, so this is a brief
+  // window, not a visible loading state of its own.
+  bool canAdd = false;
 
   double? previousReading;
   String? previousDate;
@@ -93,6 +100,9 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
   @override
   void initState() {
     super.initState();
+    ApiService.canAdd('electricity').then((v) {
+      if (mounted) setState(() => canAdd = v);
+    });
     readingCtrl.addListener(_validateReading);
     if (widget.returnedRecordId != null) {
       _fetchReturnedRecord();
@@ -1095,7 +1105,8 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
                         child: ElevatedButton.icon(
                           onPressed: (submitting ||
                                   isDateLocked ||
-                                  existingRecordStatus != null)
+                                  existingRecordStatus != null ||
+                                  !canAdd)
                               ? null
                               : _submit,
                           icon: submitting
@@ -1117,9 +1128,11 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
                                     ? 'Locked — Approved'
                                     : existingRecordStatus != null
                                         ? 'Entry already exists for this date'
-                                        : (widget.returnedRecordId != null
-                                            ? 'Resubmit for Approval'
-                                            : 'Submit Reading'),
+                                        : !canAdd
+                                            ? 'No permission to submit'
+                                            : (widget.returnedRecordId != null
+                                                ? 'Resubmit for Approval'
+                                                : 'Submit Reading'),
                             style: const TextStyle(
                                 fontSize: 16,
                                 color: Colors.white,

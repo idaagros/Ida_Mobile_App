@@ -27,6 +27,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
+import '../services/api_service.dart';
 
 class CropCalendarScreen extends StatefulWidget {
   final String cycleType; // 'seasonal' | 'orchard'
@@ -55,10 +56,18 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
   // for display and as the pre-populated starting point when editing.
   Map<String, dynamic>? mainPlanDetails;
   List patternLines = [];
+  bool canAdd = false;
+  bool canUpdate = false;
 
   @override
   void initState() {
     super.initState();
+    ApiService.canAdd('agri').then((v) {
+      if (mounted) setState(() => canAdd = v);
+    });
+    ApiService.canUpdate('agri').then((v) {
+      if (mounted) setState(() => canUpdate = v);
+    });
     _load();
   }
 
@@ -339,8 +348,10 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
             TextButton(
                 onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-              onPressed: submitting
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: idaGreen,
+                  disabledBackgroundColor: Colors.grey.shade300),
+              onPressed: (submitting || !canAdd)
                   ? null
                   : () async {
                       setDialogState(() => submitting = true);
@@ -419,8 +430,9 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
                 onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange.shade700),
-              onPressed: submitting
+                  backgroundColor: Colors.orange.shade700,
+                  disabledBackgroundColor: Colors.grey.shade300),
+              onPressed: (submitting || !canUpdate)
                   ? null
                   : () async {
                       setDialogState(() => submitting = true);
@@ -1418,42 +1430,47 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
             overflow: TextOverflow.ellipsis,
             maxLines: 1),
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: idaGreen,
-        onPressed: () => showModalBottomSheet(
-          context: context,
-          shape: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-          builder: (_) => SafeArea(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              ListTile(
-                  leading: const Icon(Icons.people_outline, color: idaGreen),
-                  title: Text(loc.agriLogLabor),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _showLogLaborDialog();
-                  }),
-              ListTile(
-                  leading:
-                      const Icon(Icons.agriculture_outlined, color: idaGreen),
-                  title: Text(loc.agriLogHarvest),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _showLogHarvestDialog();
-                  }),
-              if (widget.cycleType == 'seasonal')
-                ListTile(
-                    leading: const Icon(Icons.grass_outlined, color: idaGreen),
-                    title: Text(loc.agriAddIntercropButton),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _showAddIntercropDialog();
-                    }),
-            ]),
-          ),
-        ),
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
+      floatingActionButton: !canAdd
+          ? null
+          : FloatingActionButton(
+              backgroundColor: idaGreen,
+              onPressed: () => showModalBottomSheet(
+                context: context,
+                shape: const RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.vertical(top: Radius.circular(20))),
+                builder: (_) => SafeArea(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    ListTile(
+                        leading:
+                            const Icon(Icons.people_outline, color: idaGreen),
+                        title: Text(loc.agriLogLabor),
+                        onTap: () {
+                          Navigator.pop(context);
+                          _showLogLaborDialog();
+                        }),
+                    ListTile(
+                        leading: const Icon(Icons.agriculture_outlined,
+                            color: idaGreen),
+                        title: Text(loc.agriLogHarvest),
+                        onTap: () {
+                          Navigator.pop(context);
+                          _showLogHarvestDialog();
+                        }),
+                    if (widget.cycleType == 'seasonal')
+                      ListTile(
+                          leading:
+                              const Icon(Icons.grass_outlined, color: idaGreen),
+                          title: Text(loc.agriAddIntercropButton),
+                          onTap: () {
+                            Navigator.pop(context);
+                            _showAddIntercropDialog();
+                          }),
+                  ]),
+                ),
+              ),
+              child: const Icon(Icons.add, color: Colors.white),
+            ),
       body: loading
           ? const Center(child: CircularProgressIndicator(color: idaGreen))
           : RefreshIndicator(
@@ -1486,14 +1503,15 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
                                             fontSize: 13,
                                             fontWeight: FontWeight.w700)),
                                   ),
-                                  TextButton(
-                                    style: TextButton.styleFrom(
-                                        padding: EdgeInsets.zero,
-                                        minimumSize: const Size(50, 30)),
-                                    onPressed: _showEditPatternLinesDialog,
-                                    child: const Text('Edit',
-                                        style: TextStyle(fontSize: 12.5)),
-                                  ),
+                                  if (canAdd)
+                                    TextButton(
+                                      style: TextButton.styleFrom(
+                                          padding: EdgeInsets.zero,
+                                          minimumSize: const Size(50, 30)),
+                                      onPressed: _showEditPatternLinesDialog,
+                                      child: const Text('Edit',
+                                          style: TextStyle(fontSize: 12.5)),
+                                    ),
                                 ]),
                                 const SizedBox(height: 8),
                                 if (patternLines.isEmpty)

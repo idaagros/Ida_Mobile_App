@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
+import '../services/api_service.dart';
 
 class FarmTractorDieselScreen extends StatefulWidget {
   const FarmTractorDieselScreen({super.key});
@@ -32,10 +33,14 @@ class _FarmTractorDieselScreenState extends State<FarmTractorDieselScreen> {
   List logs = [];
   Map? average;
   bool loading = true;
+  bool canAdd = false;
 
   @override
   void initState() {
     super.initState();
+    ApiService.canAdd('farm_tractor').then((v) {
+      if (mounted) setState(() => canAdd = v);
+    });
     _loadTractors();
   }
 
@@ -210,7 +215,8 @@ class _FarmTractorDieselScreenState extends State<FarmTractorDieselScreen> {
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: idaGreen,
-        onPressed: selectedTractorId == null ? null : _showAddLogDialog,
+        onPressed:
+            (selectedTractorId == null || !canAdd) ? null : _showAddLogDialog,
         child: const Icon(Icons.add, color: Colors.white),
       ),
       body: tractors.isEmpty && !loading

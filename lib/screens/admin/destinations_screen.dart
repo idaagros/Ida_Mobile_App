@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/responsive.dart';
+import '../../services/api_service.dart';
 
 class DestinationsScreen extends StatefulWidget {
   const DestinationsScreen({super.key});
@@ -23,10 +24,18 @@ class _DestinationsScreenState extends State<DestinationsScreen> {
 
   List destinations = [];
   bool loading = true;
+  bool canAdd = false;
+  bool canUpdate = false;
 
   @override
   void initState() {
     super.initState();
+    ApiService.canAdd('destinations').then((v) {
+      if (mounted) setState(() => canAdd = v);
+    });
+    ApiService.canUpdate('destinations').then((v) {
+      if (mounted) setState(() => canUpdate = v);
+    });
     _load();
   }
 
@@ -144,11 +153,13 @@ class _DestinationsScreenState extends State<DestinationsScreen> {
         title: const Text('Manage Destinations',
             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: idaGreen,
-        onPressed: _showAddDialog,
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
+      floatingActionButton: canAdd
+          ? FloatingActionButton(
+              backgroundColor: idaGreen,
+              onPressed: _showAddDialog,
+              child: const Icon(Icons.add, color: Colors.white),
+            )
+          : null,
       body: Responsive.constrainedContent(
           context,
           loading
@@ -186,7 +197,8 @@ class _DestinationsScreenState extends State<DestinationsScreen> {
                             trailing: Switch(
                               value: active,
                               activeColor: idaGreen,
-                              onChanged: (_) => _toggleActive(p),
+                              onChanged:
+                                  canUpdate ? (_) => _toggleActive(p) : null,
                             ),
                           ),
                         );

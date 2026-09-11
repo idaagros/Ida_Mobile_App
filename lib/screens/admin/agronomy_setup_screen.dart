@@ -55,6 +55,9 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
   List productBrands = [];
   bool loading = true;
   bool _canEditAgri = false;
+  bool _canDeleteAgri = false;
+  bool _canAddAgri = false;
+  bool _canUpdateAgri = false;
 
   List get perennialVarieties =>
       varieties.where((v) => v['crop_type'] == 'perennial').toList();
@@ -65,6 +68,15 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
     _loadAll();
     ApiService.canEdit('agri').then((v) {
       if (mounted) setState(() => _canEditAgri = v);
+    });
+    ApiService.canDelete('agri').then((v) {
+      if (mounted) setState(() => _canDeleteAgri = v);
+    });
+    ApiService.canAdd('agri').then((v) {
+      if (mounted) setState(() => _canAddAgri = v);
+    });
+    ApiService.canUpdate('agri').then((v) {
+      if (mounted) setState(() => _canUpdateAgri = v);
     });
   }
 
@@ -279,7 +291,8 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
                 onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-              onPressed: submitting
+              onPressed: (submitting ||
+                      (block == null ? !_canAddAgri : !_canUpdateAgri))
                   ? null
                   : () async {
                       setDialogState(() => submitting = true);
@@ -461,7 +474,8 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
                 onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-              onPressed: submitting
+              onPressed: (submitting ||
+                      (template == null ? !_canAddAgri : !_canUpdateAgri))
                   ? null
                   : () async {
                       if (stageNameCtrl.text.trim().isEmpty ||
@@ -697,7 +711,8 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
                   onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-                onPressed: submitting
+                onPressed: (submitting ||
+                        (template == null ? !_canAddAgri : !_canUpdateAgri))
                     ? null
                     : () async {
                         if (daysCtrl.text.trim().isEmpty) return;
@@ -1040,18 +1055,19 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
                         Expanded(
                             child: Text(b['brand_name'],
                                 style: const TextStyle(fontSize: 13))),
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline,
-                              size: 18, color: Colors.red),
-                          onPressed: () async {
-                            final h = await _headers;
-                            await http.delete(
-                                Uri.parse(
-                                    '$baseUrl/agri/product-brands/${b['id']}'),
-                                headers: h);
-                            setDialogState(() => existingBrands.remove(b));
-                          },
-                        ),
+                        if (_canDeleteAgri)
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline,
+                                size: 18, color: Colors.red),
+                            onPressed: () async {
+                              final h = await _headers;
+                              await http.delete(
+                                  Uri.parse(
+                                      '$baseUrl/agri/product-brands/${b['id']}'),
+                                  headers: h);
+                              setDialogState(() => existingBrands.remove(b));
+                            },
+                          ),
                       ]),
                     )),
                 const SizedBox(height: 8),
