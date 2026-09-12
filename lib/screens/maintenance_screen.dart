@@ -32,6 +32,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
   // crude role-string comparison, same fix as machine_maintenance_screen.dart.
   bool canEdit = false;
   bool canAdd = false;
+  bool canApprove = false;
 
   @override
   void initState() {
@@ -63,6 +64,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
     // handle this correctly.
     canEdit = await ApiService.canEdit('tractor_maintenance');
     canAdd = await ApiService.canAdd('tractor_maintenance');
+    canApprove = await ApiService.canApprove('tractor_maintenance');
   }
 
   Future<void> _loadAll() async {
@@ -765,7 +767,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
                         fontSize: 12, color: Color(0xFF6B7280))),
               ],
               // Approve/reject for admin/office
-              if (canEdit && entry['status'] == 'pending') ...[
+              if (canApprove && entry['status'] == 'pending') ...[
                 const SizedBox(height: 10),
                 Row(children: [
                   Expanded(

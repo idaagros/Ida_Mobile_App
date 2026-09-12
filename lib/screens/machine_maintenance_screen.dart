@@ -38,6 +38,7 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
   // approve/reject buttons from someone who genuinely has edit access.
   bool canEdit = false;
   bool canAdd = false;
+  bool canApprove = false;
 
   @override
   void initState() {
@@ -70,6 +71,7 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
     // correctly (matches any mutation level, not just legacy 'edit').
     canEdit = await ApiService.canEdit('machine_maintenance');
     canAdd = await ApiService.canAdd('machine_maintenance');
+    canApprove = await ApiService.canApprove('machine_maintenance');
   }
 
   Future<void> _loadAll() async {
@@ -793,7 +795,7 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
                         fontSize: 12, color: Color(0xFF6B7280))),
               ],
               // Approve/reject for admin/office
-              if (canEdit && entry['status'] == 'pending') ...[
+              if (canApprove && entry['status'] == 'pending') ...[
                 const SizedBox(height: 10),
                 Row(children: [
                   Expanded(

@@ -161,15 +161,15 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
         break;
       case 'factory':
         screen = const AdminReviewScreen(
-            initialFilter: 'pending', initialTabIndex: 3);
+            initialFilter: 'pending', initialTabIndex: 2);
         break;
       case 'machine':
         screen = const AdminReviewScreen(
-            initialFilter: 'pending', initialTabIndex: 4);
+            initialFilter: 'pending', initialTabIndex: 3);
         break;
       case 'machine_pf':
         screen = const AdminReviewScreen(
-            initialFilter: 'pending', initialTabIndex: 5);
+            initialFilter: 'pending', initialTabIndex: 4);
         break;
       // Same reasoning - the approve/reject list lives in the History
       // tab (index 2), not the default Activities tab.

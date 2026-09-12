@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import '../services/image_helper.dart';
+import '../services/ocr_helper.dart';
 import '../services/colored_date_picker.dart';
 import '../services/responsive.dart';
 import 'package:intl/intl.dart';
@@ -32,6 +33,8 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
 
   Uint8List? photoBytes;
   String? photoName;
+  bool _ocrRunning = false;
+  bool _ocrPrefilled = false;
 
   bool loading = false;
   bool submitting = false;
@@ -72,6 +75,9 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
       if (mounted) setState(() => canAdd = v);
     });
     pfCtrl.addListener(_onPfChanged);
+    pfCtrl.addListener(() {
+      if (_ocrPrefilled) setState(() => _ocrPrefilled = false);
+    });
     if (widget.returnedRecordId != null) {
       _fetchReturnedRecord();
     } else {
@@ -298,6 +304,18 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
         photoBytes = result.bytes;
         photoName = result.name;
       });
+      if (pfCtrl.text.trim().isEmpty) {
+        setState(() => _ocrRunning = true);
+        final lines = await OcrHelper.recognizeLines(result.originalBytes);
+        final reading = OcrHelper.extractMeterReading(lines);
+        if (mounted) {
+          setState(() => _ocrRunning = false);
+          if (reading != null) {
+            pfCtrl.text = reading;
+            setState(() => _ocrPrefilled = true);
+          }
+        }
+      }
     }
   }
 
@@ -619,6 +637,43 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
                           errorText: errorMessage,
                         ),
                       ),
+
+                      if (_ocrRunning) ...[
+                        const SizedBox(height: 8),
+                        Row(children: [
+                          const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: idaGreen)),
+                          const SizedBox(width: 8),
+                          Text('Reading the meter photo…',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey.shade600)),
+                        ]),
+                      ],
+                      if (_ocrPrefilled) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: amber.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(children: [
+                            Icon(Icons.auto_awesome, size: 14, color: amber),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                  'Filled from the photo — please check it\'s correct',
+                                  style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: amber.withOpacity(0.9))),
+                            ),
+                          ]),
+                        ),
+                      ],
 
                       if (showPfBanner) ...[
                         const SizedBox(height: 10),

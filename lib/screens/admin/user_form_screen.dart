@@ -24,6 +24,7 @@ class _UserFormScreenState extends State<UserFormScreen> {
   final _passCtrl = TextEditingController();
 
   bool _isActive = true;
+  bool _isAdmin = false;
   bool _obscurePass = true;
   bool _saving = false;
   // module key -> set of granted levels ('view'/'add'/'update'/'delete').
@@ -47,6 +48,7 @@ class _UserFormScreenState extends State<UserFormScreen> {
       _nameCtrl.text = u.displayName;
       _userCtrl.text = u.username;
       _isActive = u.isActive;
+      _isAdmin = u.isAdmin;
       // Group by module, since a user can now hold multiple
       // {module, level} entries for the same module (one per granted
       // level) - a plain map keyed by module would silently drop all
@@ -95,6 +97,7 @@ class _UserFormScreenState extends State<UserFormScreen> {
         'display_name': _nameCtrl.text.trim(),
         'username': _userCtrl.text.trim(),
         'is_active': _isActive,
+        'is_admin': _isAdmin,
         'permissions': [
           ..._perms.entries.expand(
               (e) => e.value.map((level) => {'module': e.key, 'level': level})),
@@ -259,6 +262,29 @@ class _UserFormScreenState extends State<UserFormScreen> {
                       return null;
                     },
                   ),
+                  const SizedBox(height: 14),
+                  const Divider(height: 1),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    const Expanded(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Admin',
+                                style: TextStyle(
+                                    fontSize: 14, fontWeight: FontWeight.w500)),
+                            Text(
+                                'Full access to everything, including managing other users. Module access below is ignored for admins.',
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.grey)),
+                          ]),
+                    ),
+                    Switch.adaptive(
+                      value: _isAdmin,
+                      onChanged: (v) => setState(() => _isAdmin = v),
+                      activeColor: Colors.red.shade700,
+                    ),
+                  ]),
                   if (_isEdit) ...[
                     const SizedBox(height: 14),
                     const Divider(height: 1),
@@ -492,7 +518,8 @@ IconData _moduleIcon(String key) {
 
 class _ModuleRow extends StatelessWidget {
   final Map<String, String> mod;
-  final Set<String> levels; // subset of {'view','add','update','delete'}
+  final Set<String>
+      levels; // subset of {'view','add','update','delete','approve'}
   final void Function(String level, bool isOn) onToggle;
   // Present only for modules with sections (kSectionedModules) - null
   // for every other module, which renders no section list at all.
@@ -549,12 +576,25 @@ class _ModuleRow extends StatelessWidget {
         const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsets.only(left: 50),
-          child: Wrap(spacing: 6, children: [
-            _levelToggle(context, 'View', 'view'),
-            _levelToggle(context, 'Add', 'add'),
-            _levelToggle(context, 'Update', 'update'),
-            _levelToggle(context, 'Delete', 'delete'),
-          ]),
+          child: Builder(builder: (context) {
+            // Not every module supports every level (e.g. electricity
+            // has no delete route at all) - only show chips for levels
+            // this module's backend actually has wired up, so granting
+            // one never looks like it did something when it can't.
+            final supported = moduleSupportedLevels(mod['key']!);
+            return Wrap(spacing: 6, children: [
+              if (supported.contains('view'))
+                _levelToggle(context, 'View', 'view'),
+              if (supported.contains('add'))
+                _levelToggle(context, 'Add', 'add'),
+              if (supported.contains('update'))
+                _levelToggle(context, 'Update', 'update'),
+              if (supported.contains('delete'))
+                _levelToggle(context, 'Delete', 'delete'),
+              if (supported.contains('approve'))
+                _levelToggle(context, 'Approve', 'approve'),
+            ]);
+          }),
         ),
         if (sections != null) ...[
           const SizedBox(height: 10),
@@ -610,7 +650,11 @@ class _ModuleRow extends StatelessWidget {
     return FilterChip(
       label: Text(label, style: const TextStyle(fontSize: 12)),
       selected: selected,
-      selectedColor: value == 'delete' ? Colors.red.shade400 : idaGreen,
+      selectedColor: value == 'delete'
+          ? Colors.red.shade400
+          : value == 'approve'
+              ? Colors.blue.shade600
+              : idaGreen,
       checkmarkColor: Colors.white,
       backgroundColor: Colors.grey.shade100,
       labelStyle: TextStyle(color: selected ? Colors.white : Colors.black87),

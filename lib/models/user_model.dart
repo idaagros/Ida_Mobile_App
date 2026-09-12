@@ -12,6 +12,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   // ── Working screens ──────────────────────────────────────────────────────
   {
     'key': 'electricity',
+    'levels': 'view,add,update,approve',
     'label': 'Electricity Meter Reading',
     'description': 'Submit and view daily electricity meter readings',
     'route': '/electricity',
@@ -19,6 +20,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'tractor',
+    'levels': 'view,add,update,approve',
     'label': 'Factory Tractor Hours Reading',
     'description': 'Submit daily tractor meter readings and hours',
     'route': '/tractor',
@@ -26,6 +28,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'labour',
+    'levels': 'view,add,update,delete',
     'label': 'Labour Management',
     'description': 'Add, edit and view labour attendance records',
     'route': '/labour',
@@ -33,6 +36,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'factory',
+    'levels': 'view,add,delete,approve',
     'label': 'Factory Run Hours',
     'description': 'Log machine start/stop times and downtime',
     'route': '/factory',
@@ -40,6 +44,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'farm_attendance',
+    'levels': 'view,add,update,delete,approve',
     'label': 'Farm Attendance',
     'description': 'Record daily attendance and wages for farm field workers',
     'route': '/farm-attendance',
@@ -47,6 +52,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'farm_tractor',
+    'levels': 'view,add,update',
     'label': 'Farm Tractor',
     'description':
         'Assign tractor field work and log hours, diesel and billing',
@@ -55,6 +61,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'agri',
+    'levels': 'view,add,update,delete',
     'label': 'Crop Planning',
     'description':
         'Manage crop masters, orchard blocks and agronomy schedule templates',
@@ -63,6 +70,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'machine',
+    'levels': 'view,add,update,approve',
     'label': 'Machine Hours Reading',
     'description': 'Submit daily machine meter readings',
     'route': '/machine',
@@ -70,6 +78,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'machine_pf',
+    'levels': 'view,add,update,approve',
     'label': 'Power Factor Reading',
     'description': 'Submit daily Power Factor (PF) meter readings',
     'route': '/machine-pf',
@@ -77,6 +86,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'outward_register',
+    'levels': 'view,add,update',
     'label': 'Outward Sales Register',
     'description': 'Log truck dispatches: weighment, bhada, invoice & agent',
     'route': '/outward-register',
@@ -84,6 +94,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'destinations',
+    'levels': 'view,add,update',
     'label': 'Destinations',
     'description':
         'Master list of dispatch destinations - kept separate from Outward Register so adding new ones needs a specifically-authorized person',
@@ -92,6 +103,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'parties',
+    'levels': 'view,add,update',
     'label': 'Parties',
     'description':
         'Master list of dispatch buyers - kept separate from Outward Register so adding new ones needs a specifically-authorized person',
@@ -100,6 +112,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'machine_maintenance',
+    'levels': 'view,add,update,approve',
     'label': 'Machine Maintenance',
     'description': 'Machine maintenance schedule, alerts & history',
     'route': '/machine-maintenance',
@@ -107,6 +120,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'tractor_maintenance',
+    'levels': 'view,add,update,approve',
     'label': 'Tractor Maintenance',
     'description': 'Maintenance schedule, alerts & history',
     'route': '/tractor-maintenance',
@@ -115,6 +129,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   // ── Planned screens (visible to admin, grantable in advance) ─────────────
   {
     'key': 'daily_report',
+    'levels': 'view',
     'label': 'Daily Reports',
     'description': 'Submit and review daily field activity logs',
     'route': '/reports',
@@ -122,6 +137,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'reports_analytics',
+    'levels': 'view',
     'label': 'Reports & Analytics',
     'description': 'View charts, summaries, and data exports',
     'route': '/analytics',
@@ -129,6 +145,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'payroll',
+    'levels': 'view',
     'label': 'Payroll',
     'description': 'Manage worker wages and deductions',
     'route': '/payroll',
@@ -137,6 +154,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   // ── Administrative modules ─────────────────────────────────────────────
   {
     'key': 'transport',
+    'levels': 'view,add,update',
     'label': 'Transport Directory',
     'description': 'View and manage the transporter contact directory',
     'route': '/transport',
@@ -144,6 +162,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'passwords',
+    'levels': 'view',
     'label': 'Password Manager',
     'description':
         'Access the secure credential store (OTP required for non-admins)',
@@ -180,6 +199,25 @@ const kSectionedModules = <String, List<Map<String, String>>>{
     {'key': 'allocation', 'label': 'Stage B: Work Allocation'},
   ],
 };
+
+// ─── Per-module supported levels ────────────────────────────────────────
+//
+// Not every module supports every mutation level - confirmed directly
+// against each module's actual backend routes (e.g. electricity has no
+// delete route at all; readings get corrected via update, not removed,
+// for audit-trail reasons). Returns the set of levels this module's
+// screens/backend actually have wired up, so the user form only shows
+// chips that would do something if granted. Always includes 'view'
+// even if the 'levels' field is missing or malformed.
+Set<String> moduleSupportedLevels(String moduleKey) {
+  final def = kModuleDefinitions.firstWhere(
+    (m) => m['key'] == moduleKey,
+    orElse: () => const {},
+  );
+  final raw = def['levels'];
+  if (raw == null || raw.isEmpty) return {'view'};
+  return raw.split(',').map((s) => s.trim()).toSet();
+}
 
 // ─── Sector categorization ──────────────────────────────────────────────
 //
@@ -233,7 +271,8 @@ const List<String> kAgricultureModuleKeys = [
 // instead.
 class PermissionEntry {
   final String module;
-  final String level; // 'view' | 'add' | 'update' | 'delete' | (legacy) 'edit'
+  final String
+      level; // 'view' | 'add' | 'update' | 'delete' | 'approve' | (legacy) 'edit'
   // Optional - restricts this grant to one section/stage of the module
   // (e.g. 'bhada' for outward_register). Null means "applies to every
   // section" - see kSectionedModules for which modules have sections.
@@ -282,6 +321,17 @@ bool hasUpdateAccess(List<PermissionEntry> perms, String moduleKey) =>
 bool hasDeleteAccess(List<PermissionEntry> perms, String moduleKey) =>
     perms.any((p) =>
         p.module == moduleKey && (p.level == 'delete' || p.level == 'edit'));
+
+// 'approve' is deliberately its own, narrower privilege - NOT folded
+// into hasEditAccess above, matching the backend's _hasApproveAccess
+// exactly. Someone granted only approval rights (to sign off on
+// submitted daily entries) shouldn't thereby count as able to edit
+// regular records too. Legacy 'edit' still grants it, same as add/
+// update/delete, since 'edit' has always meant "full access" from
+// before this granular system existed.
+bool hasApproveAccess(List<PermissionEntry> perms, String moduleKey) =>
+    perms.any((p) =>
+        p.module == moduleKey && (p.level == 'approve' || p.level == 'edit'));
 
 class AppUser {
   final String? id;
@@ -340,6 +390,9 @@ class AppUser {
 
   bool canDelete(String moduleKey) =>
       isAdmin || hasDeleteAccess(permissions, moduleKey);
+
+  bool canApprove(String moduleKey) =>
+      isAdmin || hasApproveAccess(permissions, moduleKey);
 
   AppUser copyWith({
     String? username,

@@ -41,8 +41,7 @@ class ImageHelper {
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Container(
-              width: 40,
-              height: 4,
+              width: 40, height: 4,
               margin: const EdgeInsets.only(bottom: 12),
               decoration: BoxDecoration(
                   color: Colors.grey.shade300,
@@ -93,8 +92,7 @@ class ImageHelper {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-              'Could not open ${source == ImageSource.camera ? 'camera' : 'gallery'}: $e'),
+          content: Text('Could not open ${source == ImageSource.camera ? 'camera' : 'gallery'}: $e'),
           backgroundColor: Colors.red.shade700,
         ));
       }
@@ -115,8 +113,8 @@ class ImageHelper {
         final retry = await showDialog<bool>(
           context: context,
           builder: (_) => AlertDialog(
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
             title: const Row(children: [
               Icon(Icons.blur_on, color: Color(0xFFF5A623)),
               SizedBox(width: 10),
@@ -184,7 +182,7 @@ class ImageHelper {
       // Sample a grid of bytes from the middle 50% of the file
       // (header bytes skew the result so we skip them)
       final start = bytes.length ~/ 4;
-      final end = (bytes.length * 3) ~/ 4;
+      final end   = (bytes.length * 3) ~/ 4;
       if (end - start < 100) return 999.0; // too small to assess
 
       final sampleSize = math.min(2000, end - start);
@@ -277,8 +275,7 @@ class _SourceBtn extends StatelessWidget {
         onTap: onTap,
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(
-            width: 72,
-            height: 72,
+            width: 72, height: 72,
             decoration: BoxDecoration(
               color: const Color(0xFFE8F5E2),
               borderRadius: BorderRadius.circular(16),
@@ -287,8 +284,8 @@ class _SourceBtn extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(label,
-              style:
-                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+              style: const TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w500)),
         ]),
       );
 }

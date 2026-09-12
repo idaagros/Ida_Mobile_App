@@ -53,7 +53,15 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
   // user can approve/reject/return records for it. Each tab needs its
   // own check, not one blanket permission - someone could have edit
   // rights on electricity but not tractor.
-  Map<String, bool> _canUpdatePerModule = {};
+  Map<String, bool> _canApprovePerModule = {};
+  // Separate from the above - the "Edit (Admin)" post-approval
+  // correction button below uses the broader requireEdit on the
+  // backend (PUT /:id/admin-edit), not the specific approve level,
+  // since fixing a mistake after approval is a different action from
+  // approving in the first place. Was previously shown to anyone who
+  // could open this screen at all, regardless of their actual mutation
+  // rights - a real gap, now closed.
+  Map<String, bool> _canEditPerModule = {};
 
   // This screen's internal module strings mostly match the backend's
   // permission module keys directly, EXCEPT 'machine-pf' (hyphen here)
@@ -62,7 +70,7 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
   String _permissionKeyFor(String screenModule) =>
       screenModule == 'machine-pf' ? 'machine_pf' : screenModule;
 
-  Future<void> _loadUpdatePermissions() async {
+  Future<void> _loadApprovePermissions() async {
     const modules = [
       'electricity',
       'tractor',
@@ -70,10 +78,15 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
       'machine',
       'machine-pf'
     ];
-    final results = await Future.wait(
-        modules.map((m) => ApiService.canUpdate(_permissionKeyFor(m))));
+    final approveResults = await Future.wait(
+        modules.map((m) => ApiService.canApprove(_permissionKeyFor(m))));
+    final editResults = await Future.wait(
+        modules.map((m) => ApiService.canEdit(_permissionKeyFor(m))));
     if (mounted) {
-      setState(() => _canUpdatePerModule = Map.fromIterables(modules, results));
+      setState(() {
+        _canApprovePerModule = Map.fromIterables(modules, approveResults);
+        _canEditPerModule = Map.fromIterables(modules, editResults);
+      });
     }
   }
 
@@ -84,7 +97,7 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
     _tabs = TabController(
         length: 5, vsync: this, initialIndex: widget.initialTabIndex ?? 0);
     _tabs.addListener(() => setState(() {}));
-    _loadUpdatePermissions();
+    _loadApprovePermissions();
     _fetchAll();
     _fetchCounts();
   }
@@ -447,7 +460,7 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
             ],
             const SizedBox(height: 24),
             if ((record['status'] ?? 'pending') == 'pending') ...[
-              if (!(_canUpdatePerModule[module] ?? false)) ...[
+              if (!(_canApprovePerModule[module] ?? false)) ...[
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
@@ -496,7 +509,8 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
                 ]),
             ] else if ((record['status'] ?? '') == 'approved' &&
                 ['tractor', 'electricity', 'machine', 'machine-pf']
-                    .contains(module)) ...[
+                    .contains(module) &&
+                (_canEditPerModule[module] ?? false)) ...[
               // Approved meter readings are locked for field users, but
               // admin retains the right to fix mistakes after approval.
               SizedBox(
@@ -1063,6 +1077,8 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
                                           module, r['id'], 'approved'),
                                       onReturn: () =>
                                           _showReturnDialog(module, r['id']),
+                                      canApprove:
+                                          _canApprovePerModule[module] ?? false,
                                     ))
                                 .toList()),
                       ),
@@ -1109,6 +1125,7 @@ class _RecordCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onApprove;
   final VoidCallback onReturn;
+  final bool canApprove;
 
   const _RecordCard({
     required this.record,
@@ -1116,6 +1133,7 @@ class _RecordCard extends StatelessWidget {
     required this.onTap,
     required this.onApprove,
     required this.onReturn,
+    required this.canApprove,
   });
 
   static const idaGreen = Color(0xFF3B7A28);
@@ -1211,7 +1229,7 @@ class _RecordCard extends StatelessWidget {
                 ]),
               ),
             ],
-            if (_isPending) ...[
+            if (_isPending && canApprove) ...[
               const SizedBox(height: 12),
               Row(children: [
                 _ActionBtn(

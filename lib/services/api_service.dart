@@ -94,6 +94,28 @@ class ApiService {
     return hasDeleteAccess(perms, moduleKey);
   }
 
+  /// A deliberately distinct privilege from the mutation checks above -
+  /// for modules with an approval workflow (e.g. daily entries needing
+  /// admin sign-off), so someone can be granted the ability to approve
+  /// without also being able to add/edit/delete regular records.
+  static Future<bool> canApprove(String moduleKey) async {
+    if (await isAdmin()) return true;
+    final perms = await getPermissions();
+    return hasApproveAccess(perms, moduleKey);
+  }
+
+  /// Section-scoped approve check, for the same sectioned modules as
+  /// canUpdateSection (e.g. farm_attendance's two stages) - matches the
+  /// backend's requireFixedSection(module, scope, 'approve') exactly.
+  static Future<bool> canApproveSection(String moduleKey, String scope) async {
+    if (await isAdmin()) return true;
+    final perms = await getPermissions();
+    return perms.any((p) =>
+        p.module == moduleKey &&
+        (p.level == 'approve' || p.level == 'edit') &&
+        (p.scope == null || p.scope == scope));
+  }
+
   /// Section-scoped check, for workflow modules with independently
   /// grantable sections (see kSectionedModules in user_model.dart) -
   /// e.g. canUpdateSection('outward_register', 'bhada'). An unscoped

@@ -66,12 +66,19 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   // existing isAdmin check above, which only gates the admin
   // approve/reject decision, not the day-to-day marking itself.
   bool canUpdateStageA = false;
+  // The actual admin approve/reject decision - now its own distinct
+  // 'approve' permission rather than the plain isAdmin boolean, so a
+  // non-admin can be granted specifically this without full admin.
+  bool canApproveStageA = false;
 
   @override
   void initState() {
     super.initState();
     ApiService.canUpdateSection('farm_attendance', 'attendance').then((v) {
       if (mounted) setState(() => canUpdateStageA = v);
+    });
+    ApiService.canApproveSection('farm_attendance', 'attendance').then((v) {
+      if (mounted) setState(() => canApproveStageA = v);
     });
     _init();
   }
@@ -817,7 +824,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   style: TextStyle(
                       color: fg, fontWeight: FontWeight.w600, fontSize: 13))),
         ]),
-        if (attendanceStatus == 'pending' && isAdmin) ...[
+        if (attendanceStatus == 'pending' && canApproveStageA) ...[
           const SizedBox(height: 12),
           Row(children: [
             Expanded(
