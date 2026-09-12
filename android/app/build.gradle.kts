@@ -40,10 +40,30 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // R8 minification was already running by default on this
+            // release build (confirmed directly from the build error)
+            // but with no custom keep rules wired in - added here so
+            // the ML Kit plugin classes it needs aren't stripped.
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // google_mlkit_text_recognition's Dart-side TextRecognitionScript
+    // parameter alone does not pull in anything beyond Latin script -
+    // confirmed directly from the package's own documentation: "By
+    // default, this package only supports recognition of Latin
+    // characters. If you need to recognize other languages, you need
+    // to manually add dependencies." This app now uses
+    // TextRecognitionScript.devanagari for Marathi handwritten notes,
+    // so the native Devanagari model is added explicitly here.
+    implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
 }

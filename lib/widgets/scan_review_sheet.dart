@@ -10,6 +10,7 @@
 import 'package:flutter/material.dart';
 import '../services/ocr_helper.dart';
 import '../services/fuzzy_match.dart';
+import '../localization/transliterate.dart';
 
 class ScanEntry {
   final String rawLine;
@@ -28,7 +29,13 @@ class ScanEntry {
 }
 
 class ScanReviewSheet extends StatefulWidget {
-  final List<({String rawLine, String namePart, String? amount})> parsedLines;
+  final List<
+      ({
+        String rawLine,
+        String namePart,
+        String? amount,
+        bool isDevanagari
+      })> parsedLines;
   final List<Map<String, dynamic>> candidateWorkers;
   final Color idaGreen;
   // Callers use different key names for id/name in their worker maps
@@ -63,12 +70,26 @@ class _ScanReviewSheetState extends State<ScanReviewSheet> {
   void initState() {
     super.initState();
     entries = widget.parsedLines.map((p) {
+      // A line read by the Devanagari recognizer needs candidate
+      // names converted to Devanagari before comparing - the stored
+      // worker names are Latin script, so "अमर" vs "Amar" would
+      // otherwise share no characters at all despite being the same
+      // name. Uses the app's own existing Roman->Devanagari
+      // transliteration (built for displaying the UI in Marathi),
+      // just applied here for matching instead of display.
+      final nameOfForMatching = p.isDevanagari
+          ? (Map<String, dynamic> w) =>
+              transliterateToDevanagari(widget.nameOf(w))
+          : widget.nameOf;
       final match = FuzzyMatch.bestMatch(
-          p.namePart, widget.candidateWorkers, widget.nameOf);
+          p.namePart, widget.candidateWorkers, nameOfForMatching);
       // Confidence bar set deliberately conservative (0.55) given how
       // unreliable handwriting OCR is - below this, default to "no
       // match" and let the person pick manually rather than risk a
-      // wrong auto-assignment going unnoticed.
+      // wrong auto-assignment going unnoticed. Kept the same for
+      // Devanagari matches, even though transliteration adds its own
+      // extra source of mismatch on top of the OCR itself - this is
+      // deliberately cautious, not loosened for the harder case.
       final autoMatch = (match != null && match.score >= 0.55)
           ? widget.idOf(match.candidate)
           : null;
@@ -114,15 +135,20 @@ class _ScanReviewSheetState extends State<ScanReviewSheet> {
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
             child: Row(children: [
               Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(widget.title,
-                      style: const TextStyle(
-                          fontSize: 17, fontWeight: FontWeight.w700, color: idaDark)),
-                  const SizedBox(height: 2),
-                  Text(
-                      '${entries.length} line${entries.length == 1 ? '' : 's'} found — check each match before confirming',
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                ]),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(widget.title,
+                          style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                              color: idaDark)),
+                      const SizedBox(height: 2),
+                      Text(
+                          '${entries.length} line${entries.length == 1 ? '' : 's'} found — check each match before confirming',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade600)),
+                    ]),
               ),
               IconButton(
                 icon: const Icon(Icons.close),
@@ -140,10 +166,16 @@ class _ScanReviewSheetState extends State<ScanReviewSheet> {
             ),
           ),
           Container(
-            padding: EdgeInsets.fromLTRB(16, 12, 16, 12 + MediaQuery.of(context).padding.bottom),
+            padding: EdgeInsets.fromLTRB(
+                16, 12, 16, 12 + MediaQuery.of(context).padding.bottom),
             decoration: BoxDecoration(
               color: Colors.white,
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, -2))],
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withOpacity(0.06),
+                    blurRadius: 8,
+                    offset: const Offset(0, -2))
+              ],
             ),
             child: SizedBox(
               width: double.infinity,
@@ -151,11 +183,13 @@ class _ScanReviewSheetState extends State<ScanReviewSheet> {
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
                     backgroundColor: widget.idaGreen,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12))),
                 onPressed: () => Navigator.pop(context, entries),
                 child: Text(
                     'Confirm ${entries.where((e) => e.selectedWorkerId != null).length} of ${entries.length}',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                    style: const TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w700)),
               ),
             ),
           ),
@@ -170,7 +204,9 @@ class _ScanReviewSheetState extends State<ScanReviewSheet> {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: entry.selectedWorkerId == null ? Colors.grey.shade50 : const Color(0xFFF4F7F2),
+        color: entry.selectedWorkerId == null
+            ? Colors.grey.shade50
+            : const Color(0xFFF4F7F2),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
             color: lowConfidence && entry.selectedWorkerId == null
@@ -179,12 +215,17 @@ class _ScanReviewSheetState extends State<ScanReviewSheet> {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Icon(Icons.text_snippet_outlined, size: 14, color: Colors.grey.shade500),
+          Icon(Icons.text_snippet_outlined,
+              size: 14, color: Colors.grey.shade500),
           const SizedBox(width: 6),
           Expanded(
             child: Text('Detected: "${entry.rawLine}"',
-                style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
-                maxLines: 1, overflow: TextOverflow.ellipsis),
+                style: TextStyle(
+                    fontSize: 11.5,
+                    color: Colors.grey.shade600,
+                    fontStyle: FontStyle.italic),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
           ),
         ]),
         const SizedBox(height: 8),
@@ -193,16 +234,21 @@ class _ScanReviewSheetState extends State<ScanReviewSheet> {
           isExpanded: true,
           decoration: InputDecoration(
             isDense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             filled: true,
             fillColor: Colors.white,
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
                 borderSide: const BorderSide(color: Color(0xFFE0E7D8))),
           ),
-          hint: const Text('No match — skip this line', style: TextStyle(fontSize: 13)),
+          hint: const Text('No match — skip this line',
+              style: TextStyle(fontSize: 13)),
           items: [
-            const DropdownMenuItem<int?>(value: null, child: Text('Skip this line', style: TextStyle(fontSize: 13, color: Colors.grey))),
+            const DropdownMenuItem<int?>(
+                value: null,
+                child: Text('Skip this line',
+                    style: TextStyle(fontSize: 13, color: Colors.grey))),
             ...widget.candidateWorkers.map((w) {
               final id = widget.idOf(w);
               final alreadyClaimedElsewhere =
@@ -211,8 +257,15 @@ class _ScanReviewSheetState extends State<ScanReviewSheet> {
                 value: id,
                 enabled: !alreadyClaimedElsewhere,
                 child: Text(
-                    widget.nameOf(w) + (alreadyClaimedElsewhere ? ' (already matched above)' : ''),
-                    style: TextStyle(fontSize: 13, color: alreadyClaimedElsewhere ? Colors.grey : Colors.black87)),
+                    widget.nameOf(w) +
+                        (alreadyClaimedElsewhere
+                            ? ' (already matched above)'
+                            : ''),
+                    style: TextStyle(
+                        fontSize: 13,
+                        color: alreadyClaimedElsewhere
+                            ? Colors.grey
+                            : Colors.black87)),
               );
             }),
           ],
@@ -231,7 +284,8 @@ class _ScanReviewSheetState extends State<ScanReviewSheet> {
           decoration: InputDecoration(
             isDense: true,
             labelText: 'Rate ₹',
-            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             filled: true,
             fillColor: Colors.white,
             border: OutlineInputBorder(

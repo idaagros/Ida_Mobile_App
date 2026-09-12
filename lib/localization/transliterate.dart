@@ -53,6 +53,17 @@ String tl(BuildContext context, String? text) {
   return _transliterateWord(text);
 }
 
+/// Same underlying phonetic conversion as tl() above, but WITHOUT the
+/// BuildContext/current-locale check - always converts, regardless of
+/// what language the UI is currently displayed in. For matching a
+/// handwritten Devanagari name against a Latin-script stored name
+/// (OCR use case), not for display. Same accuracy caveats as tl()
+/// apply: a phonetic heuristic, not a dictionary lookup.
+String transliterateToDevanagari(String? text) {
+  if (text == null || text.isEmpty) return text ?? '';
+  return _transliterateWord(text);
+}
+
 // Longest-match-first tables. Order within each list matters — longer
 // sequences must come before their prefixes (e.g. "chh" before "ch"
 // before "c") or the shorter one would always win.
