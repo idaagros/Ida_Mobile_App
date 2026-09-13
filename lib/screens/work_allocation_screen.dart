@@ -24,6 +24,8 @@ import '../services/responsive.dart';
 import '../services/image_helper.dart';
 import '../services/ocr_helper.dart';
 import '../widgets/scan_review_sheet.dart';
+import '../services/grouped_scan_parser.dart';
+import '../widgets/grouped_scan_review_sheet.dart';
 
 class WorkAllocationScreen extends StatefulWidget {
   final DateTime attendanceDate;
@@ -260,6 +262,128 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
     final group = _TaskGroup()..isTask1 = true;
     _showGroupBuilder(group,
         isNew: true, prefillRate: true, restrictToWorkerId: null);
+  }
+
+  // Scans a full handwritten list that may contain MULTIPLE Farm +
+  // Work Type sections (confirmed directly: real notes are grouped
+  // this way, not a flat name list) - splits it into sections using
+  // the actual Farm/Work Type masters as the classification signal,
+  // then opens one review sheet covering every section at once.
+  // Never applies anything automatically: every section's Farm/Work
+  // Type and every worker match stays editable, and confirming is
+  // what actually creates the tasks.
+  Future<void> _scanFullList() async {
+    final result = await ImageHelper.pickWithSheet(context);
+    if (result == null) return;
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) =>
+          const Center(child: CircularProgressIndicator(color: idaGreen)),
+    );
+
+    final lines = await OcrHelper.recognizeLines(result.originalBytes);
+
+    if (mounted) Navigator.pop(context); // close the loading spinner
+
+    if (lines.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text(
+              'Could not read anything from that photo. Try a clearer, well-lit shot.'),
+          backgroundColor: Colors.orange.shade700,
+        ));
+      }
+      return;
+    }
+
+    final generalFarm = farms.firstWhere(
+        (f) => (f['name'] ?? '').toString().trim().toLowerCase() == 'general',
+        orElse: () => {});
+    final generalWorkType = workTypes.firstWhere(
+        (w) => (w['name'] ?? '').toString().trim().toLowerCase() == 'general',
+        orElse: () => {});
+
+    if (generalFarm.isEmpty || generalWorkType.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'A "General" Farm and Work Type are needed for this feature - please add them in Farm/Work Type Master first.'),
+          backgroundColor: Colors.red,
+        ));
+      }
+      return;
+    }
+
+    final result2 = GroupedScanParser.parse(
+      lines: lines,
+      farms: farms.cast<Map<String, dynamic>>(),
+      workTypes: workTypes.cast<Map<String, dynamic>>(),
+      workers: _unallocated,
+      workerIdOf: (w) => w['worker_id'] as int,
+      workerNameOf: (w) => (w['name'] ?? '').toString(),
+      generalFarmId: generalFarm['id'] as int,
+      generalFarmLabel: (generalFarm['name'] ?? 'General').toString(),
+      generalWorkTypeId: generalWorkType['id'] as int,
+      generalWorkTypeLabel: (generalWorkType['name'] ?? 'General').toString(),
+    );
+
+    if (result2.sections.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text(
+              'Could not match any workers from that photo against today\'s present list.'),
+          backgroundColor: Colors.orange.shade700,
+        ));
+      }
+      return;
+    }
+
+    if (!mounted) return;
+    final confirmed = await showModalBottomSheet<List<ConfirmedSection>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => GroupedScanReviewSheet(
+        sections: result2.sections,
+        unclassified: result2.unclassified,
+        candidateWorkers: _unallocated,
+        farms: farms.cast<Map<String, dynamic>>(),
+        workTypes: workTypes.cast<Map<String, dynamic>>(),
+        idaGreen: idaGreen,
+        workerIdOf: (w) => w['worker_id'] as int,
+        workerNameOf: (w) => (w['name'] ?? '').toString(),
+        fallbackRateOf: (w) =>
+            w['morning_amount']?.toString() ?? w['daily_wage']?.toString(),
+      ),
+    );
+
+    if (confirmed == null) return; // cancelled
+
+    setState(() {
+      for (final section in confirmed) {
+        final confirmedEntries =
+            section.entries.where((e) => e.selectedWorkerId != null).toList();
+        if (confirmedEntries.isEmpty)
+          continue; // nothing chosen in this section
+
+        final group = _TaskGroup()
+          ..isTask1 = true
+          ..farmId = section.farmId
+          ..workTypeId = section.workTypeId;
+        for (final entry in confirmedEntries) {
+          final id = entry.selectedWorkerId!;
+          group.workerIds.add(id);
+          final amount = entry.amountCtrl.text.trim();
+          group.rateCtrls[id] = TextEditingController(text: amount);
+          group.noteCtrls[id] = TextEditingController();
+        }
+        groups.add(group);
+      }
+    });
+    _saveDraft();
   }
 
   void _editGroup(_TaskGroup group) {
@@ -743,6 +867,22 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
                   side: const BorderSide(color: idaGreen),
                   padding: const EdgeInsets.symmetric(vertical: 13)),
               onPressed: _addSingleTask,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.document_scanner_outlined,
+                  size: 18, color: idaGreen),
+              label: const Text('Scan Full List',
+                  style:
+                      TextStyle(color: idaGreen, fontWeight: FontWeight.w700)),
+              style: OutlinedButton.styleFrom(
+                  foregroundColor: idaGreen,
+                  side: const BorderSide(color: idaGreen),
+                  padding: const EdgeInsets.symmetric(vertical: 13)),
+              onPressed: _scanFullList,
             ),
           ),
         ],
@@ -2196,6 +2336,18 @@ class _TaskGroupSheetState extends State<_TaskGroupSheet> {
   // directly that handwriting quality here varies and isn't always
   // neat).
   Future<void> _scanList() async {
+    // Work type is set once for the whole task, not per scanned line -
+    // block scanning until Farm + Work Type are actually chosen, so
+    // confirmed workers never end up added to an incomplete task.
+    if (widget.group.farmId == null || widget.group.workTypeId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content:
+            Text('Pick a Farm and Work Type above first, then scan the list.'),
+        backgroundColor: Colors.orange,
+      ));
+      return;
+    }
+
     final result = await ImageHelper.pickWithSheet(context);
     if (result == null) return;
     if (!mounted) return;
@@ -2229,6 +2381,13 @@ class _TaskGroupSheetState extends State<_TaskGroupSheet> {
         .where((w) => !widget.group.workerIds.contains(w['worker_id']))
         .toList();
 
+    final farmName = widget.farms.firstWhere(
+        (f) => f['id'] == widget.group.farmId,
+        orElse: () => {})['name'];
+    final workTypeName = widget.workTypes.firstWhere(
+        (w) => w['id'] == widget.group.workTypeId,
+        orElse: () => {})['name'];
+
     if (!mounted) return;
     final confirmed = await showModalBottomSheet<List<ScanEntry>>(
       context: context,
@@ -2240,6 +2399,14 @@ class _TaskGroupSheetState extends State<_TaskGroupSheet> {
         idaGreen: widget.idaGreen,
         idOf: (w) => w['worker_id'] as int,
         nameOf: (w) => (w['name'] ?? '').toString(),
+        taskContextLabel: (farmName != null && workTypeName != null)
+            ? '${tl(context, farmName)} · ${tl(context, workTypeName)}'
+            : null,
+        // Same default a manually-added worker would get - shown here
+        // so the review sheet's rate field never looks blank/broken
+        // for a matched worker when OCR just didn't catch an amount.
+        fallbackRateOf: (w) =>
+            w['morning_amount']?.toString() ?? w['daily_wage']?.toString(),
       ),
     );
 

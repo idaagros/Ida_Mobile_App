@@ -43,6 +43,18 @@ class ScanReviewSheet extends StatefulWidget {
   final int Function(Map<String, dynamic>) idOf;
   final String Function(Map<String, dynamic>) nameOf;
   final String title;
+  // When OCR found a name but no trailing amount on that line, the
+  // rate field would otherwise show blank even though confirming the
+  // row would still apply a sensible default behind the scenes (the
+  // matched worker's usual rate) - shown here explicitly instead, so
+  // what the sheet displays matches what actually happens on confirm.
+  // Optional: if not provided, unmatched-amount rows just stay blank.
+  final String? Function(Map<String, dynamic>)? fallbackRateOf;
+  // Shown as a reminder header - which Farm + Work Type these
+  // confirmed workers are being added to. Work type itself is set
+  // once for the whole task (not per scanned line), so this exists
+  // purely to keep that context visible while reviewing matches.
+  final String? taskContextLabel;
 
   const ScanReviewSheet({
     super.key,
@@ -52,6 +64,8 @@ class ScanReviewSheet extends StatefulWidget {
     required this.idOf,
     required this.nameOf,
     this.title = 'Review Scanned List',
+    this.fallbackRateOf,
+    this.taskContextLabel,
   });
 
   @override
@@ -94,10 +108,20 @@ class _ScanReviewSheetState extends State<ScanReviewSheet> {
           ? widget.idOf(match.candidate)
           : null;
       if (autoMatch != null) _claimedIds.add(autoMatch);
+      // If OCR found a name but no amount on this line, and a worker
+      // was matched, show what confirming would actually apply -
+      // that worker's usual rate - rather than leaving the field
+      // blank as if nothing will happen.
+      String initialAmount = p.amount ?? '';
+      if (initialAmount.isEmpty &&
+          autoMatch != null &&
+          widget.fallbackRateOf != null) {
+        initialAmount = widget.fallbackRateOf!(match!.candidate) ?? '';
+      }
       return ScanEntry(
         rawLine: p.rawLine,
         selectedWorkerId: autoMatch,
-        initialAmount: p.amount ?? '',
+        initialAmount: initialAmount,
         matchScore: match?.score ?? 0.0,
       );
     }).toList();
@@ -115,7 +139,20 @@ class _ScanReviewSheetState extends State<ScanReviewSheet> {
         _claimedIds.remove(entry.selectedWorkerId);
       }
       entry.selectedWorkerId = newId;
-      if (newId != null) _claimedIds.add(newId);
+      if (newId != null) {
+        _claimedIds.add(newId);
+        if (entry.amountCtrl.text.trim().isEmpty &&
+            widget.fallbackRateOf != null) {
+          final worker = widget.candidateWorkers
+              .firstWhere((w) => widget.idOf(w) == newId, orElse: () => {});
+          if (worker.isNotEmpty) {
+            final fallback = widget.fallbackRateOf!(worker);
+            if (fallback != null && fallback.isNotEmpty) {
+              entry.amountCtrl.text = fallback;
+            }
+          }
+        }
+      }
     });
   }
 
@@ -156,6 +193,30 @@ class _ScanReviewSheetState extends State<ScanReviewSheet> {
               ),
             ]),
           ),
+          if (widget.taskContextLabel != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: widget.idaGreen.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(children: [
+                  Icon(Icons.work_outline, size: 14, color: widget.idaGreen),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                        'Adding confirmed workers to: ${widget.taskContextLabel}',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: widget.idaGreen)),
+                  ),
+                ]),
+              ),
+            ),
           const Divider(height: 1),
           Expanded(
             child: ListView.builder(
