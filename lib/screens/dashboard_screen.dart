@@ -989,7 +989,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 MaterialPageRoute(
                                     builder: (_) => const CropMastersScreen())),
                           ),
-                        if (_isAdmin)
+                        if (_can('farm_masters'))
                           _tile(
                             icon: Icons.agriculture_outlined,
                             label: 'Farm Attendance Setup',

@@ -51,6 +51,15 @@ const List<Map<String, String>> kModuleDefinitions = [
     'icon': 'payments',
   },
   {
+    'key': 'farm_masters',
+    'levels': 'view,add,update',
+    'label': 'Farm Masters',
+    'description':
+        'Manage the farm master list (add, rename, deactivate, land details) - separate from marking daily attendance',
+    'route': '/farm-masters',
+    'icon': 'agriculture',
+  },
+  {
     'key': 'farm_tractor',
     'levels': 'view,add,update',
     'label': 'Farm Tractor',
