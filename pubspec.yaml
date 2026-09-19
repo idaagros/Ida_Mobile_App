@@ -26,6 +26,13 @@ dependencies:
   google_mlkit_face_detection: any
   google_mlkit_text_recognition: any
   flutter_litert: any
+  # Precision agriculture: farm boundary drawing/viewing + satellite
+  # imagery. flutter_map is the Flutter equivalent of the Leaflet
+  # library already used on the web app - same tile source (Esri World
+  # Imagery, free, no API key), same general approach.
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  fl_chart: ^0.69.0
 
 dev_dependencies:
   flutter_test:

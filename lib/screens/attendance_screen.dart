@@ -60,6 +60,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   String? allocationStatus;
   double? confirmedExpectedTotal; // last submitted total, once locked
   List<Map<String, dynamic>> presentWorkers = [];
+  bool permanentAutoSuggested =
+      false; // present_workers came from permanent-worker suggestions, not an actual saved submission
 
   bool decidingAttendance = false;
   // Stage A (attendance marking) specific access - separate from the
@@ -147,6 +149,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           attendanceStatus = data['attendance_status'];
           attendanceAdminNote = data['attendance_admin_note'];
           allocationStatus = data['allocation_status'];
+          permanentAutoSuggested = data['permanent_auto_suggested'] == true;
+
           presentWorkers =
               List<Map<String, dynamic>>.from(data['present_workers'] ?? []);
           presentWorkers.sort((a, b) => (a['name'] ?? '')
@@ -1048,6 +1052,27 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     ? Colors.red
                     : Colors.grey.shade600,
                 fontWeight: FontWeight.w600)),
+        if (permanentAutoSuggested && _canEditHeadcount) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF7E6),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFF5D48A)),
+            ),
+            child: const Row(children: [
+              Icon(Icons.push_pin, size: 15, color: Color(0xFFB8860B)),
+              SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Permanent workers are pre-selected below — uncheck anyone absent today, then submit.',
+                  style: TextStyle(fontSize: 11.5, color: Color(0xFF8A6D1F)),
+                ),
+              ),
+            ]),
+          ),
+        ],
         const SizedBox(height: 10),
         if (_canEditHeadcount) ...[
           _genderFilterToggle(loc),
@@ -1259,6 +1284,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       chip(loc.faMaleFull, 'M'),
       const SizedBox(width: 6),
       chip(loc.faFemaleFull, 'F'),
+      const SizedBox(width: 6),
+      // Permanent workers already show up pre-selected on a fresh day
+      // (server-suggested - see attendance.js's GET /day/:date), so this
+      // chip is mainly for finding one to double-check or re-add after
+      // an accidental uncheck, not the everyday path.
+      chip('📌 Permanent', 'P'),
     ]);
   }
 }
@@ -1297,8 +1328,13 @@ class _WorkerPickerState extends State<_WorkerPicker> {
     final loc = AppLocalizations.of(context)!;
     final filtered = widget.workers.where((w) {
       if (widget.excludeIds.contains(w['id'])) return false;
-      if (widget.genderFilter != 'All' && w['gender'] != widget.genderFilter)
+      final isPermanent = w['is_permanent'] == 1 || w['is_permanent'] == true;
+      if (widget.genderFilter == 'P') {
+        if (!isPermanent) return false;
+      } else if (widget.genderFilter != 'All' &&
+          w['gender'] != widget.genderFilter) {
         return false;
+      }
       if (_query.isEmpty) return true;
       return (w['name'] ?? '')
           .toString()
@@ -1342,6 +1378,9 @@ class _WorkerPickerState extends State<_WorkerPicker> {
                 itemBuilder: (_, i) {
                   final w = filtered[i];
                   final gender = w['gender'] as String?;
+                  final isPermanent =
+                      w['is_permanent'] == 1 || w['is_permanent'] == true;
+
                   return InkWell(
                     onTap: () => widget.onAdd(w['id']),
                     child: Padding(
@@ -1365,7 +1404,9 @@ class _WorkerPickerState extends State<_WorkerPicker> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text(tl(context, w['name'] ?? ''),
+                                Text(
+                                    (isPermanent ? '📌 ' : '') +
+                                        tl(context, w['name'] ?? ''),
                                     style: const TextStyle(
                                         fontSize: 13.5,
                                         fontWeight: FontWeight.w600),

@@ -55,7 +55,7 @@ const List<Map<String, String>> kModuleDefinitions = [
     'levels': 'view,add,update',
     'label': 'Farm Masters',
     'description':
-        'Manage the farm master list (add, rename, deactivate, land details) - separate from marking daily attendance',
+        'Manage the farm and farm-worker master lists, and precision agriculture (boundary drawing, satellite/soil analysis) - separate from marking daily attendance. "view" = read-only, "add"/"update" = can also draw/edit boundaries and refresh analysis',
     'route': '/farm-masters',
     'icon': 'agriculture',
   },
@@ -256,6 +256,7 @@ const List<String> kFactoryModuleKeys = [
 
 const List<String> kAgricultureModuleKeys = [
   'farm_attendance',
+  'farm_masters',
   'farm_tractor',
   'agri',
 ];

@@ -184,6 +184,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
     int? farmId,
     String? phone,
     String? gender,
+    bool? isPermanent,
   }) async {
     try {
       final h = await _headers;
@@ -194,6 +195,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
         'farm_id': farmId,
         'phone': phone,
         'gender': gender,
+        if (isPermanent != null) 'is_permanent': isPermanent,
       });
       final res = id == null
           ? await http.post(Uri.parse('$baseUrl/farm-workers'),
@@ -450,6 +452,8 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
     int? farmId = worker?['farm_id'];
     int? workTypeId = worker?['work_type_id'];
     String? gender = worker?['gender'];
+    bool isPermanent =
+        worker?['is_permanent'] == 1 || worker?['is_permanent'] == true;
 
     showDialog(
       context: context,
@@ -546,6 +550,18 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                       borderRadius: BorderRadius.circular(10)),
                 ),
               ),
+              const SizedBox(height: 4),
+              SwitchListTile(
+                value: isPermanent,
+                activeColor: idaGreen,
+                contentPadding: EdgeInsets.zero,
+                title: const Text('📌 Permanent worker',
+                    style:
+                        TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                subtitle: const Text('Auto-suggested on every attendance day',
+                    style: TextStyle(fontSize: 11.5)),
+                onChanged: (v) => setDialogState(() => isPermanent = v),
+              ),
               if (worker != null) ...[
                 const SizedBox(height: 16),
                 const Divider(height: 1),
@@ -616,6 +632,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                   farmId: farmId,
                   phone: phoneCtrl.text.trim(),
                   gender: gender,
+                  isPermanent: isPermanent,
                 );
               },
               child:
@@ -761,6 +778,8 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                 itemBuilder: (_, i) {
                   final w = workers[i];
                   final active = w['is_active'] == 1;
+                  final isPermanent =
+                      w['is_permanent'] == 1 || w['is_permanent'] == true;
                   final loc = AppLocalizations.of(context)!;
                   final parts = <String>[
                     if (w['gender'] != null)
@@ -771,7 +790,8 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                     if (w['farm_name'] != null) tl(context, w['farm_name']),
                   ];
                   return _row(
-                    title: tl(context, w['name'] ?? ''),
+                    title: (isPermanent ? '📌 ' : '') +
+                        tl(context, w['name'] ?? ''),
                     subtitle: parts.join(' · '),
                     active: active,
                     onTap: () => _showWorkerDialog(worker: w),

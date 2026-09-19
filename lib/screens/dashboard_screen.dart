@@ -23,6 +23,7 @@ import 'machine_pf_screen.dart';
 import 'admin/parties_screen.dart';
 import 'admin/destinations_screen.dart';
 import 'admin/farm_masters_screen.dart';
+import 'farm_picker_screen.dart';
 import 'tv_dashboard_screen.dart';
 import 'attendance_screen.dart';
 import 'farm_tractor_work_screen.dart';
@@ -1007,6 +1008,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
                     // ── Daily Entries ────────────────────────────────────────
                     if (_can('farm_attendance') ||
+                        _can('farm_masters') ||
                         _can('farm_tractor') ||
                         _can('agri')) ...[
                       const SizedBox(height: 20),
@@ -1029,6 +1031,33 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 MaterialPageRoute(
                                     builder: (_) => const AttendanceScreen())),
                           ),
+                        if (_can('farm_masters')) ...[
+                          _tile(
+                            icon: Icons.agriculture_outlined,
+                            label: 'Farm Masters',
+                            sub:
+                                'Manage the farm list, worker list & permanent workers',
+                            iconBg: const Color(0xFFE8F5E2),
+                            iconColor: idaGreen,
+                            onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const FarmMastersScreen())),
+                          ),
+                          _tile(
+                            icon: Icons.satellite_alt_outlined,
+                            label: 'Precision Agriculture',
+                            sub:
+                                'Farm boundaries, vegetation health & soil analysis',
+                            iconBg: const Color(0xFFE3F2FD),
+                            iconColor: const Color(0xFF1565C0),
+                            onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => FarmPickerScreen(
+                                        canEdit: _canEdit('farm_masters')))),
+                          ),
+                        ],
                         if (_can('farm_tractor'))
                           _tile(
                             icon: Icons.agriculture,
