@@ -21,6 +21,8 @@
 -dontwarn com.google.mlkit.**
 
 # Same category of issue can surface for the Play Services layer ML
-# Kit builds on.
+# Kit builds on - cover the whole mlkit_vision_text family, not just
+# _common, since different script bindings pull in sibling packages.
 -keep class com.google.android.gms.internal.mlkit_vision_text_common.** { *; }
 -dontwarn com.google.android.gms.internal.mlkit_vision_text_common.**
+-dontwarn com.google.android.gms.internal.mlkit_vision_text_bundled_common.**
