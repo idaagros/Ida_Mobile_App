@@ -19,8 +19,8 @@ import 'farm_tractor_diesel_screen.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
-import '../services/api_service.dart';
 
+import '../config/app_config.dart';
 class FarmTractorWorkScreen extends StatefulWidget {
   const FarmTractorWorkScreen({super.key});
   @override
@@ -30,7 +30,7 @@ class FarmTractorWorkScreen extends StatefulWidget {
 class _FarmTractorWorkScreenState extends State<FarmTractorWorkScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   DateTime selectedDate = DateTime.now();
   List tractors = [];
@@ -40,14 +40,10 @@ class _FarmTractorWorkScreenState extends State<FarmTractorWorkScreen> {
   bool loadingMasters = true;
   bool loadingEntries = false;
   String? error;
-  bool canAdd = false;
 
   @override
   void initState() {
     super.initState();
-    ApiService.canAdd('farm_tractor').then((v) {
-      if (mounted) setState(() => canAdd = v);
-    });
     _init();
   }
 
@@ -433,16 +429,15 @@ class _FarmTractorWorkScreenState extends State<FarmTractorWorkScreen> {
                 MaterialPageRoute(
                     builder: (_) => const FarmTractorDieselScreen())),
           ),
-          if (canAdd)
-            IconButton(
-              icon: const Icon(Icons.settings_outlined),
-              tooltip: loc.ftSetupTooltip,
-              onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const FarmTractorMasterScreen()))
-                  .then((_) => _loadMasters()),
-            ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: loc.ftSetupTooltip,
+            onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const FarmTractorMasterScreen()))
+                .then((_) => _loadMasters()),
+          ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -450,10 +445,9 @@ class _FarmTractorWorkScreenState extends State<FarmTractorWorkScreen> {
         icon: const Icon(Icons.add, color: Colors.white),
         label:
             Text(loc.ftAssignWork, style: const TextStyle(color: Colors.white)),
-        onPressed:
-            (tractors.isEmpty || farms.isEmpty || workTypes.isEmpty || !canAdd)
-                ? null
-                : _showAssignDialog,
+        onPressed: (tractors.isEmpty || farms.isEmpty || workTypes.isEmpty)
+            ? null
+            : _showAssignDialog,
       ),
       body: loadingMasters
           ? const Center(child: CircularProgressIndicator(color: idaGreen))

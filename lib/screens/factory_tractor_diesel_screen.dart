@@ -13,6 +13,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
 
+import '../config/app_config.dart';
 class FactoryTractorDieselScreen extends StatefulWidget {
   const FactoryTractorDieselScreen({super.key});
   @override
@@ -24,7 +25,7 @@ class _FactoryTractorDieselScreenState
     extends State<FactoryTractorDieselScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   Future<Map<String, String>> get _headers async {
     final prefs = await SharedPreferences.getInstance();

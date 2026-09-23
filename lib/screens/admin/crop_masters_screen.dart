@@ -13,6 +13,7 @@ import '../../localization/transliterate.dart';
 import '../../services/api_service.dart';
 import '../../services/responsive.dart';
 
+import '../../config/app_config.dart';
 enum _Tab { crops, varieties }
 
 class CropMastersScreen extends StatefulWidget {
@@ -24,15 +25,13 @@ class CropMastersScreen extends StatefulWidget {
 class _CropMastersScreenState extends State<CropMastersScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   _Tab _tab = _Tab.crops;
   List crops = [];
   List varieties = [];
   bool loading = true;
   bool _canEditAgri = false;
-  bool _canAddAgri = false;
-  bool _canUpdateAgri = false;
 
   @override
   void initState() {
@@ -40,12 +39,6 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
     _loadAll();
     ApiService.canEdit('agri').then((v) {
       if (mounted) setState(() => _canEditAgri = v);
-    });
-    ApiService.canAdd('agri').then((v) {
-      if (mounted) setState(() => _canAddAgri = v);
-    });
-    ApiService.canUpdate('agri').then((v) {
-      if (mounted) setState(() => _canUpdateAgri = v);
     });
   }
 
@@ -137,8 +130,7 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
                 onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-              onPressed: (submitting ||
-                      (crop == null ? !_canAddAgri : !_canUpdateAgri))
+              onPressed: submitting
                   ? null
                   : () async {
                       if (nameCtrl.text.trim().isEmpty) return;
@@ -277,8 +269,7 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
                 onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-              onPressed: (submitting ||
-                      (variety == null ? !_canAddAgri : !_canUpdateAgri))
+              onPressed: submitting
                   ? null
                   : () async {
                       if (cropId == null || nameCtrl.text.trim().isEmpty)

@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
 
+import '../config/app_config.dart';
 class TransportScreen extends StatefulWidget {
   const TransportScreen({super.key});
   @override
@@ -19,7 +20,7 @@ class TransportScreen extends StatefulWidget {
 }
 
 class _TransportScreenState extends State<TransportScreen> {
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
   static const primaryColor = Color(0xFF1E4012);
 
   bool _isSearching = false;

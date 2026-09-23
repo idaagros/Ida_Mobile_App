@@ -15,6 +15,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/geo_utils.dart';
 
+import '../config/app_config.dart';
 class FarmBoundaryMapScreen extends StatefulWidget {
   final int farmId;
   final String farmName;
@@ -38,7 +39,7 @@ class FarmBoundaryMapScreen extends StatefulWidget {
 class _FarmBoundaryMapScreenState extends State<FarmBoundaryMapScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
   static const _defaultCenter = ll.LatLng(21.0, 77.75); // Amravati district, Maharashtra fallback
 
   final _mapController = MapController();

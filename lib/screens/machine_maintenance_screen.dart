@@ -1,11 +1,10 @@
-import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/api_service.dart';
 
+import '../config/app_config.dart';
 class MachineMaintScreen extends StatefulWidget {
   // 0=Activities, 1=Alerts, 2=History - the review-with-approve/reject
   // list lives in History, so the Needs Attention inbox needs this to
@@ -22,7 +21,7 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
   static const red = Color(0xFFE24B4A);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   late TabController _tabs;
   List activities = [];
@@ -30,15 +29,7 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
   List log = [];
   double odometer = 0;
   bool loading = true;
-  // Matches the backend's ACTUAL authorization model (is_admin flag OR
-  // a per-module permissions array with edit-level access) - NOT a
-  // crude role-string comparison. A prior version checked
-  // userRole == 'admin' || 'office', which doesn't correspond to
-  // anything the backend actually checks, and could hide the
-  // approve/reject buttons from someone who genuinely has edit access.
-  bool canEdit = false;
-  bool canAdd = false;
-  bool canApprove = false;
+  String? userRole;
 
   @override
   void initState() {
@@ -56,6 +47,7 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
 
   Future<Map<String, String>> get _headers async {
     final p = await SharedPreferences.getInstance();
+    userRole ??= p.getString('role');
     return {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer ${p.getString('token') ?? ''}',
@@ -63,21 +55,9 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
     };
   }
 
-  Future<void> _refreshCanEdit() async {
-    // Was a custom, inline implementation that only matched the exact
-    // legacy 'edit' string - missed anyone granted the newer granular
-    // levels (add/update/delete), incorrectly denying them access they
-    // actually have. ApiService.canEdit/canAdd already handle this
-    // correctly (matches any mutation level, not just legacy 'edit').
-    canEdit = await ApiService.canEdit('machine_maintenance');
-    canAdd = await ApiService.canAdd('machine_maintenance');
-    canApprove = await ApiService.canApprove('machine_maintenance');
-  }
-
   Future<void> _loadAll() async {
     setState(() => loading = true);
     try {
-      await _refreshCanEdit();
       final h = await _headers;
       final results = await Future.wait([
         http.get(Uri.parse('$baseUrl/machine-maintenance/activities'),
@@ -156,68 +136,24 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
 
     if (confirmed != true) return;
 
-    // Immediate feedback the moment the dialog closes - a loading
-    // snackbar that shows right away, rather than nothing until the
-    // network call resolves. If the call hangs, the person sees THIS
-    // instead of silence.
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Row(children: [
-            SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.white)),
-            SizedBox(width: 12),
-            Text('Logging maintenance…'),
-          ]),
-          duration: Duration(seconds: 30),
-        ),
-      );
-    }
-
     try {
       final h = await _headers;
-      final res = await http
-          .post(
-            Uri.parse('$baseUrl/machine-maintenance/log'),
-            headers: h,
-            body: jsonEncode({
-              'activity_id': activity['id'],
-              'notes': notesCtrl.text.trim(),
-              'done_date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
-            }),
-          )
-          // A hung request with no timeout looks EXACTLY like "nothing
-          // happened" - this turns that into a visible error instead.
-          .timeout(const Duration(seconds: 20));
-
-      if (mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
-
-      Map<String, dynamic> data;
-      try {
-        data = jsonDecode(res.body);
-      } catch (_) {
-        // Response wasn't valid JSON (e.g. a proxy/gateway error page) -
-        // still surface SOMETHING rather than let this fall through
-        // silently.
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(
-                'Unexpected response from server (status ${res.statusCode})'),
-            backgroundColor: red,
-          ));
-        }
-        return;
-      }
-
+      final res = await http.post(
+        Uri.parse('$baseUrl/machine-maintenance/log'),
+        headers: h,
+        body: jsonEncode({
+          'activity_id': activity['id'],
+          'notes': notesCtrl.text.trim(),
+          'done_date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+        }),
+      );
+      final data = jsonDecode(res.body);
       if (res.statusCode == 200) {
         _loadAll();
         if (mounted)
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(
-                '✅ ${activity['name']} logged — awaiting approval (it will keep showing as overdue until then)'),
+                '✅ ${activity['name']} logged — next due at ${data['next_due_at']} hrs'),
             backgroundColor: idaGreen,
           ));
       } else {
@@ -227,64 +163,19 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
             backgroundColor: red,
           ));
       }
-    } on TimeoutException {
-      if (mounted) {
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content:
-              Text('Request timed out — check your connection and try again'),
-          backgroundColor: red,
-        ));
-      }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Error: $e'), backgroundColor: red));
-      }
     }
   }
 
   Future<void> _acknowledgeAlert(int alertId) async {
-    try {
-      final h = await _headers;
-      final res = await http
-          .patch(
-              Uri.parse(
-                  '$baseUrl/machine-maintenance/alerts/$alertId/acknowledge'),
-              headers: h)
-          .timeout(const Duration(seconds: 20));
-      if (res.statusCode == 200) {
-        _loadAll();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('Alert acknowledged'), backgroundColor: idaGreen));
-        }
-      } else {
-        if (mounted) {
-          Map<String, dynamic> data = {};
-          try {
-            data = jsonDecode(res.body);
-          } catch (_) {}
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text(data['error'] ??
-                  'Failed to acknowledge (status ${res.statusCode})'),
-              backgroundColor: red));
-        }
-      }
-    } on TimeoutException {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content:
-                Text('Request timed out — check your connection and try again'),
-            backgroundColor: red));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e'), backgroundColor: red));
-      }
-    }
+    final h = await _headers;
+    await http.patch(
+        Uri.parse('$baseUrl/maintenance/alerts/$alertId/acknowledge'),
+        headers: h);
+    _loadAll();
   }
 
   Future<void> _updateThreshold(Map activity) async {
@@ -333,46 +224,13 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
   }
 
   Future<void> _approveLog(int logId, String status) async {
-    try {
-      final h = await _headers;
-      final res = await http
-          .patch(
-            Uri.parse('$baseUrl/machine-maintenance/log/$logId/status'),
-            headers: h,
-            body: jsonEncode({'status': status}),
-          )
-          .timeout(const Duration(seconds: 20));
-      if (res.statusCode == 200) {
-        _loadAll();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text('Maintenance $status'), backgroundColor: idaGreen));
-        }
-      } else {
-        if (mounted) {
-          Map<String, dynamic> data = {};
-          try {
-            data = jsonDecode(res.body);
-          } catch (_) {}
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text(data['error'] ??
-                  'Failed to update (status ${res.statusCode})'),
-              backgroundColor: red));
-        }
-      }
-    } on TimeoutException {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content:
-                Text('Request timed out — check your connection and try again'),
-            backgroundColor: red));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e'), backgroundColor: red));
-      }
-    }
+    final h = await _headers;
+    await http.patch(
+      Uri.parse('$baseUrl/maintenance/log/$logId/status'),
+      headers: h,
+      body: jsonEncode({'status': status}),
+    );
+    _loadAll();
   }
 
   @override
@@ -391,15 +249,12 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
           Image.asset('assets/images/idalogo.png', height: 28),
           const SizedBox(width: 8),
           const Flexible(
-              child: Tooltip(
-            message: 'Machine Maintenance',
-            child: Text('Machine Maintenance',
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFFF5A623))),
-          )),
+              child: Text('Machine Maintenance',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFFF5A623)))),
           if (overdueCount > 0) ...[
             const SizedBox(width: 8),
             Container(
@@ -565,7 +420,7 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
                           fontWeight: FontWeight.w700,
                           color: statusColor)),
                 ),
-                if (canEdit) ...[
+                if (userRole == 'admin') ...[
                   const SizedBox(height: 4),
                   GestureDetector(
                     onTap: () => _updateThreshold(a),
@@ -636,13 +491,12 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
             child: SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: canAdd ? () => _markDone(a) : null,
+                onPressed: () => _markDone(a),
                 icon: const Icon(Icons.check_circle_outline,
                     size: 16, color: Colors.white),
-                label: Text(canAdd ? 'Mark as Done' : 'No permission',
-                    style: const TextStyle(color: Colors.white, fontSize: 13)),
+                label: const Text('Mark as Done',
+                    style: TextStyle(color: Colors.white, fontSize: 13)),
                 style: ElevatedButton.styleFrom(
-                  disabledBackgroundColor: Colors.grey.shade300,
                   backgroundColor: isOverdue ? red : idaGreen,
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   shape: RoundedRectangleBorder(
@@ -775,7 +629,7 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
               const SizedBox(height: 8),
               Row(children: [
                 _historyChip(
-                    Icons.speed, 'Done at ${entry['machine_hours_at']} hrs'),
+                    Icons.speed, 'Done at ${entry['tractor_hours_at']} hrs'),
                 const SizedBox(width: 8),
                 _historyChip(Icons.arrow_forward,
                     'Next at ${entry['next_due_at_hours']} hrs'),
@@ -795,7 +649,8 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
                         fontSize: 12, color: Color(0xFF6B7280))),
               ],
               // Approve/reject for admin/office
-              if (canApprove && entry['status'] == 'pending') ...[
+              if ((userRole == 'admin' || userRole == 'office') &&
+                  entry['status'] == 'pending') ...[
                 const SizedBox(height: 10),
                 Row(children: [
                   Expanded(

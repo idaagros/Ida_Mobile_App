@@ -19,8 +19,8 @@ import 'package:intl/intl.dart';
 import '../../localization/app_localizations.dart';
 import '../../localization/transliterate.dart';
 import '../../services/responsive.dart';
-import '../../services/api_service.dart';
 
+import '../../config/app_config.dart';
 enum _Tab { tractors, rateCard }
 
 class FarmTractorMasterScreen extends StatefulWidget {
@@ -33,27 +33,19 @@ class FarmTractorMasterScreen extends StatefulWidget {
 class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   _Tab _tab = _Tab.tractors;
   List tractors = [];
   List workTypes = [];
   List rateCard = [];
   bool loading = true;
-  bool canAdd = false;
-  bool canUpdate = false;
 
   static const billingUnits = ['hour', 'acre', 'bag', 'trip', 'day'];
 
   @override
   void initState() {
     super.initState();
-    ApiService.canAdd('farm_tractor').then((v) {
-      if (mounted) setState(() => canAdd = v);
-    });
-    ApiService.canUpdate('farm_tractor').then((v) {
-      if (mounted) setState(() => canUpdate = v);
-    });
     _loadAll();
   }
 
@@ -314,22 +306,20 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
         title: Text(loc.ftSetupTitle,
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       ),
-      floatingActionButton: !canAdd
-          ? null
-          : FloatingActionButton(
-              backgroundColor: idaGreen,
-              onPressed: () {
-                switch (_tab) {
-                  case _Tab.tractors:
-                    _showTractorDialog();
-                    break;
-                  case _Tab.rateCard:
-                    _showRateDialog();
-                    break;
-                }
-              },
-              child: const Icon(Icons.add, color: Colors.white),
-            ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: idaGreen,
+        onPressed: () {
+          switch (_tab) {
+            case _Tab.tractors:
+              _showTractorDialog();
+              break;
+            case _Tab.rateCard:
+              _showRateDialog();
+              break;
+          }
+        },
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
       body: Column(children: [
         Container(
           color: idaDark,
@@ -391,8 +381,7 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
                         t['registration_number'],
                       if (t['hp'] != null) '${t['hp']} HP'
                     ].join(' · '),
-                    onTap:
-                        canUpdate ? () => _showTractorDialog(tractor: t) : null,
+                    onTap: () => _showTractorDialog(tractor: t),
                   );
                 },
               );

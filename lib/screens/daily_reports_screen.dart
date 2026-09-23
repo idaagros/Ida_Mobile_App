@@ -16,6 +16,7 @@ import 'dart:convert';
 import '../services/pdf_download_helper.dart';
 import '../services/responsive.dart';
 
+import '../config/app_config.dart';
 class DailyReportsScreen extends StatefulWidget {
   const DailyReportsScreen({super.key});
   @override
@@ -26,7 +27,7 @@ class _DailyReportsScreenState extends State<DailyReportsScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   // Module multi-select — key -> (label, icon, color)
   static const _moduleOptions = [

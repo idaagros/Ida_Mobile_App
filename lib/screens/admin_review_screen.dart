@@ -4,8 +4,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
-import '../services/api_service.dart';
 
+import '../config/app_config.dart';
 class AdminReviewScreen extends StatefulWidget {
   // Optional initial status filter — 'pending', 'approved', or 'returned'.
   // Lets the dashboard stat cards deep-link straight into a filtered view.
@@ -26,12 +26,13 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   late TabController _tabs;
 
   List _electricity = [];
   List _tractor = [];
+  List _labour = [];
   List _factory = [];
   List _machine = [];
   List _machinePf = [];
@@ -49,55 +50,13 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
   DateTime? _fromDate;
   DateTime? _toDate;
 
-  // module (this screen's own naming, e.g. 'machine-pf') -> whether the
-  // user can approve/reject/return records for it. Each tab needs its
-  // own check, not one blanket permission - someone could have edit
-  // rights on electricity but not tractor.
-  Map<String, bool> _canApprovePerModule = {};
-  // Separate from the above - the "Edit (Admin)" post-approval
-  // correction button below uses the broader requireEdit on the
-  // backend (PUT /:id/admin-edit), not the specific approve level,
-  // since fixing a mistake after approval is a different action from
-  // approving in the first place. Was previously shown to anyone who
-  // could open this screen at all, regardless of their actual mutation
-  // rights - a real gap, now closed.
-  Map<String, bool> _canEditPerModule = {};
-
-  // This screen's internal module strings mostly match the backend's
-  // permission module keys directly, EXCEPT 'machine-pf' (hyphen here)
-  // vs 'machine_pf' (underscore in kModuleDefinitions/the backend) -
-  // checked directly against the actual code rather than assumed.
-  String _permissionKeyFor(String screenModule) =>
-      screenModule == 'machine-pf' ? 'machine_pf' : screenModule;
-
-  Future<void> _loadApprovePermissions() async {
-    const modules = [
-      'electricity',
-      'tractor',
-      'factory',
-      'machine',
-      'machine-pf'
-    ];
-    final approveResults = await Future.wait(
-        modules.map((m) => ApiService.canApprove(_permissionKeyFor(m))));
-    final editResults = await Future.wait(
-        modules.map((m) => ApiService.canEdit(_permissionKeyFor(m))));
-    if (mounted) {
-      setState(() {
-        _canApprovePerModule = Map.fromIterables(modules, approveResults);
-        _canEditPerModule = Map.fromIterables(modules, editResults);
-      });
-    }
-  }
-
   @override
   void initState() {
     super.initState();
     _filter = widget.initialFilter ?? 'pending';
     _tabs = TabController(
-        length: 5, vsync: this, initialIndex: widget.initialTabIndex ?? 0);
+        length: 6, vsync: this, initialIndex: widget.initialTabIndex ?? 0);
     _tabs.addListener(() => setState(() {}));
-    _loadApprovePermissions();
     _fetchAll();
     _fetchCounts();
   }
@@ -173,6 +132,8 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
       final results = await Future.wait([
         fetchModule('electricity'),
         fetchModule('tractor'),
+        fetchModule('labour',
+            dateKey: 'work_start_date', supportsStatusFilter: false),
         fetchModule('factory', dateKey: 'entry_date'),
         fetchModule('machine'),
         fetchModule('machine-pf'),
@@ -180,9 +141,10 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
       setState(() {
         _electricity = results[0];
         _tractor = results[1];
-        _factory = results[2];
-        _machine = results[3];
-        _machinePf = results[4];
+        _labour = results[2];
+        _factory = results[3];
+        _machine = results[4];
+        _machinePf = results[5];
       });
     } catch (e) {
       debugPrint('Fetch error: $e');
@@ -263,6 +225,9 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
               break;
             case 'tractor':
               _tractor.removeWhere((r) => r['id'] == id);
+              break;
+            case 'labour':
+              _labour.removeWhere((r) => r['id'] == id);
               break;
             case 'factory':
               _factory.removeWhere((r) => r['id'] == id);
@@ -460,57 +425,44 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
             ],
             const SizedBox(height: 24),
             if ((record['status'] ?? 'pending') == 'pending') ...[
-              if (!(_canApprovePerModule[module] ?? false)) ...[
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(10)),
-                  child: const Text(
-                      'You don\'t have permission to approve or return this record.',
-                      style: TextStyle(fontSize: 12.5, color: Colors.grey)),
-                ),
-              ] else
-                Row(children: [
-                  Expanded(
-                      child: OutlinedButton.icon(
-                    icon: const Icon(Icons.undo_rounded, size: 18),
-                    label: const Text('Return'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: amber,
-                      side: BorderSide(color: amber),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _showReturnDialog(module, record['id']);
-                    },
-                  )),
-                  const SizedBox(width: 10),
-                  Expanded(
-                      child: ElevatedButton.icon(
-                    icon: const Icon(Icons.check_rounded, size: 18),
-                    label: const Text('Approve'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: idaGreen,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _updateStatus(module, record['id'], 'approved');
-                    },
-                  )),
-                ]),
+              Row(children: [
+                Expanded(
+                    child: OutlinedButton.icon(
+                  icon: const Icon(Icons.undo_rounded, size: 18),
+                  label: const Text('Return'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: amber,
+                    side: BorderSide(color: amber),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _showReturnDialog(module, record['id']);
+                  },
+                )),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: ElevatedButton.icon(
+                  icon: const Icon(Icons.check_rounded, size: 18),
+                  label: const Text('Approve'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: idaGreen,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _updateStatus(module, record['id'], 'approved');
+                  },
+                )),
+              ]),
             ] else if ((record['status'] ?? '') == 'approved' &&
                 ['tractor', 'electricity', 'machine', 'machine-pf']
-                    .contains(module) &&
-                (_canEditPerModule[module] ?? false)) ...[
+                    .contains(module)) ...[
               // Approved meter readings are locked for field users, but
               // admin retains the right to fix mistakes after approval.
               SizedBox(
@@ -832,10 +784,12 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
       case 1:
         return _tractor;
       case 2:
-        return _factory;
+        return _labour;
       case 3:
-        return _machine;
+        return _factory;
       case 4:
+        return _machine;
+      case 5:
         return _machinePf;
       default:
         return [];
@@ -849,10 +803,12 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
       case 1:
         return 'tractor';
       case 2:
-        return 'factory';
+        return 'labour';
       case 3:
-        return 'machine';
+        return 'factory';
       case 4:
+        return 'machine';
+      case 5:
         return 'machine-pf';
       default:
         return 'electricity';
@@ -875,66 +831,32 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
           Image.asset('assets/images/idalogo.png', height: 28),
           const SizedBox(width: 10),
           const Flexible(
-            child: Tooltip(
-              message: 'Review Submissions',
-              child: Text('Review Submissions',
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      color: amber, fontSize: 17, fontWeight: FontWeight.w600)),
-            ),
+            child: Text('Review Submissions',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    color: amber, fontSize: 17, fontWeight: FontWeight.w600)),
           ),
         ]),
         actions: [
           IconButton(
               icon: const Icon(Icons.refresh_rounded), onPressed: _fetchAll),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(48),
-          child: Stack(
-            children: [
-              TabBar(
-                controller: _tabs,
-                isScrollable: true,
-                indicatorColor: amber,
-                labelColor: Colors.white,
-                unselectedLabelColor: Colors.white54,
-                labelStyle:
-                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                tabs: [
-                  Tab(text: 'Electricity\n(${_badgeCount('electricity')})'),
-                  Tab(text: 'Tractor\n(${_badgeCount('tractor')})'),
-                  Tab(text: 'Factory\n(${_badgeCount('factory')})'),
-                  Tab(text: 'Machine\n(${_badgeCount('machine')})'),
-                  Tab(text: 'Machine PF\n(${_badgeCount('machine-pf')})'),
-                ],
-              ),
-              // Fade indicator on the right edge - the tab bar scrolls
-              // (isScrollable: true above), but with no visual cue for
-              // that, the extra tabs weren't discoverable at all. This
-              // is decorative only (IgnorePointer), so it never blocks
-              // taps or the tab bar's own scroll gesture underneath it.
-              Positioned(
-                right: 0,
-                top: 0,
-                bottom: 0,
-                child: IgnorePointer(
-                  child: Container(
-                    width: 28,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.centerLeft,
-                        end: Alignment.centerRight,
-                        colors: [
-                          idaDark.withOpacity(0),
-                          idaDark.withOpacity(0.85),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+        bottom: TabBar(
+          controller: _tabs,
+          isScrollable: true,
+          indicatorColor: amber,
+          labelColor: Colors.white,
+          unselectedLabelColor: Colors.white54,
+          labelStyle:
+              const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          tabs: [
+            Tab(text: 'Electricity\n(${_badgeCount('electricity')})'),
+            Tab(text: 'Tractor\n(${_badgeCount('tractor')})'),
+            Tab(text: 'Labour\n(${_labour.length})'),
+            Tab(text: 'Factory\n(${_badgeCount('factory')})'),
+            Tab(text: 'Machine\n(${_badgeCount('machine')})'),
+            Tab(text: 'Machine PF\n(${_badgeCount('machine-pf')})'),
+          ],
         ),
       ),
       body: Column(children: [
@@ -1077,8 +999,6 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
                                           module, r['id'], 'approved'),
                                       onReturn: () =>
                                           _showReturnDialog(module, r['id']),
-                                      canApprove:
-                                          _canApprovePerModule[module] ?? false,
                                     ))
                                 .toList()),
                       ),
@@ -1125,7 +1045,6 @@ class _RecordCard extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onApprove;
   final VoidCallback onReturn;
-  final bool canApprove;
 
   const _RecordCard({
     required this.record,
@@ -1133,7 +1052,6 @@ class _RecordCard extends StatelessWidget {
     required this.onTap,
     required this.onApprove,
     required this.onReturn,
-    required this.canApprove,
   });
 
   static const idaGreen = Color(0xFF3B7A28);
@@ -1229,7 +1147,7 @@ class _RecordCard extends StatelessWidget {
                 ]),
               ),
             ],
-            if (_isPending && canApprove) ...[
+            if (_isPending) ...[
               const SizedBox(height: 12),
               Row(children: [
                 _ActionBtn(

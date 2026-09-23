@@ -27,8 +27,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
-import '../services/api_service.dart';
 
+import '../config/app_config.dart';
 class CropCalendarScreen extends StatefulWidget {
   final String cycleType; // 'seasonal' | 'orchard'
   final int cycleId;
@@ -46,28 +46,15 @@ class CropCalendarScreen extends StatefulWidget {
 class _CropCalendarScreenState extends State<CropCalendarScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   List items = [];
   List workers = [];
   bool loading = true;
-  // Only populated for cycleType='seasonal' plans with
-  // row_arrangement='sequence' - the current pattern-line sequence,
-  // for display and as the pre-populated starting point when editing.
-  Map<String, dynamic>? mainPlanDetails;
-  List patternLines = [];
-  bool canAdd = false;
-  bool canUpdate = false;
 
   @override
   void initState() {
     super.initState();
-    ApiService.canAdd('agri').then((v) {
-      if (mounted) setState(() => canAdd = v);
-    });
-    ApiService.canUpdate('agri').then((v) {
-      if (mounted) setState(() => canUpdate = v);
-    });
     _load();
   }
 
@@ -89,18 +76,6 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
                 '$baseUrl/agri/cycles/${widget.cycleType}/${widget.cycleId}/schedule'),
             headers: h),
         http.get(Uri.parse('$baseUrl/farm-workers'), headers: h),
-        // Pattern lines only apply to seasonal sowing plans, not
-        // orchard cycles - agri_sowing_pattern_lines has no orchard
-        // equivalent. Fetching unconditionally for seasonal and
-        // simply showing nothing if row_arrangement isn't 'sequence'.
-        if (widget.cycleType == 'seasonal')
-          http.get(Uri.parse('$baseUrl/agri/sowing-plans/${widget.cycleId}'),
-              headers: h),
-        if (widget.cycleType == 'seasonal')
-          http.get(
-              Uri.parse(
-                  '$baseUrl/agri/sowing-plans/${widget.cycleId}/pattern-lines'),
-              headers: h),
       ]);
       if (results[0].statusCode == 200) items = jsonDecode(results[0].body);
       if (results[1].statusCode == 200) {
@@ -109,14 +84,6 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
             .toString()
             .toLowerCase()
             .compareTo((b['name'] ?? '').toString().toLowerCase()));
-      }
-      if (widget.cycleType == 'seasonal') {
-        if (results[2].statusCode == 200) {
-          mainPlanDetails = jsonDecode(results[2].body);
-        }
-        if (results[3].statusCode == 200) {
-          patternLines = jsonDecode(results[3].body)['lines'] ?? [];
-        }
       }
     } catch (e) {
       debugPrint('Load error: $e');
@@ -182,7 +149,7 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
     );
   }
 
-  Future<void> _showCompleteDialog(Map item) async {
+  void _showCompleteDialog(Map item) {
     final loc = AppLocalizations.of(context)!;
     DateTime operationDate = DateTime.now();
     final productCtrl = TextEditingController(text: item['label'] ?? '');
@@ -194,33 +161,6 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
     final costCtrl = TextEditingController();
     int? workerId;
     bool submitting = false;
-
-    // Brands already on file for this item's compound (item['label']
-    // holds the compound name, e.g. "Pendimethalin 38.7% CS" - see
-    // SELECT_BASE in cycleScheduleItems.js). Fetched once, before the
-    // dialog opens - not the earlier typeahead-as-you-type approach,
-    // since the compound is already known here, there's nothing to
-    // search for.
-    List<Map<String, dynamic>> knownBrands = [];
-    if (item['source_type'] == 'spray' || item['source_type'] == 'pruning') {
-      try {
-        final h = await _headers;
-        final res = await http.get(
-          Uri.parse(
-              '$baseUrl/agri/product-brands/for-compound/${Uri.encodeComponent(item['label'] ?? '')}'),
-          headers: h,
-        );
-        if (res.statusCode == 200) {
-          knownBrands = List<Map<String, dynamic>>.from(jsonDecode(res.body));
-        }
-      } catch (_) {
-        // A failed brand lookup shouldn't block marking the spray
-        // complete - falls through to manual entry either way.
-      }
-    }
-    // null = manual entry (the productCtrl TextField is shown/used).
-    // A real value = one of knownBrands was picked from the dropdown.
-    String? selectedBrand = null;
 
     showDialog(
       context: context,
@@ -252,48 +192,13 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
               ),
               if (item['source_type'] != 'stage') ...[
                 const SizedBox(height: 12),
-                if (knownBrands.isNotEmpty) ...[
-                  DropdownButtonFormField<String?>(
-                    value: selectedBrand,
-                    decoration: InputDecoration(
-                        labelText: 'Brand sprayed',
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10))),
-                    items: [
-                      ...knownBrands.map((b) => DropdownMenuItem<String?>(
-                          value: b['brand_name'],
-                          child: Text(b['brand_name'],
-                              overflow: TextOverflow.ellipsis))),
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('Other (enter manually)'),
-                      ),
-                    ],
-                    onChanged: (v) => setDialogState(() {
-                      selectedBrand = v;
-                      if (v != null) productCtrl.text = v;
-                    }),
-                  ),
-                  if (selectedBrand == null) ...[
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: productCtrl,
-                      decoration: InputDecoration(
-                          labelText: 'Product used',
-                          border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10))),
-                    ),
-                  ],
-                ] else
-                  // No brands on file yet for this compound - straight
-                  // to manual entry, same as before this change.
-                  TextField(
-                    controller: productCtrl,
-                    decoration: InputDecoration(
-                        labelText: 'Product used',
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10))),
-                  ),
+                TextField(
+                  controller: productCtrl,
+                  decoration: InputDecoration(
+                      labelText: 'Product used',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10))),
+                ),
                 const SizedBox(height: 12),
                 Row(children: [
                   Expanded(
@@ -348,10 +253,8 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
             TextButton(
                 onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: idaGreen,
-                  disabledBackgroundColor: Colors.grey.shade300),
-              onPressed: (submitting || !canAdd)
+              style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
+              onPressed: submitting
                   ? null
                   : () async {
                       setDialogState(() => submitting = true);
@@ -430,9 +333,8 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
                 onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange.shade700,
-                  disabledBackgroundColor: Colors.grey.shade300),
-              onPressed: (submitting || !canUpdate)
+                  backgroundColor: Colors.orange.shade700),
+              onPressed: submitting
                   ? null
                   : () async {
                       setDialogState(() => submitting = true);
@@ -692,196 +594,6 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
     );
   }
 
-  // Converts a stored cm value back to its originally-entered unit,
-  // for pre-populating the edit form with the number the user
-  // actually typed rather than a converted cm figure they'd have to
-  // mentally convert back.
-  double _fromCm(double cm, String unit) {
-    switch (unit) {
-      case 'in':
-        return cm / 2.54;
-      case 'ft':
-        return cm / 30.48;
-      default:
-        return cm;
-    }
-  }
-
-  Future<void> _showEditPatternLinesDialog() async {
-    if (patternLines.isEmpty) return;
-    // Every distinct crop already appearing in the pattern, derived
-    // from the lines themselves - covers both single-crop (Khalla)
-    // and intercropped (Tarwale) cases without a separate fetch.
-    final Map<int, String> cropOptions = {};
-    for (final l in patternLines) {
-      cropOptions[l['crop_variety_id']] = l['crop_variety_name'];
-    }
-
-    final List<Map<String, dynamic>> editLines = patternLines
-        .map((l) => {
-              'cropVarietyId': l['crop_variety_id'],
-              'gapCtrl': TextEditingController(
-                  text: _fromCm(double.parse(l['gap_to_next_cm'].toString()),
-                          l['gap_to_next_unit'] ?? 'cm')
-                      .toStringAsFixed(2)),
-              'unit': l['gap_to_next_unit'] ?? 'cm',
-            })
-        .toList();
-    bool submitting = false;
-    final loc = AppLocalizations.of(context)!;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Edit Sowing Pattern',
-              style: TextStyle(fontWeight: FontWeight.w700)),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Text(
-                  'Enter the gap to the NEXT line, in order (last gap wraps back to line 1):',
-                  style:
-                      TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
-              const SizedBox(height: 10),
-              ...editLines.asMap().entries.map((entry) {
-                final i = entry.key;
-                final line = entry.value;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(children: [
-                          SizedBox(
-                            width: 22,
-                            child: Text('${i + 1}.',
-                                style: const TextStyle(
-                                    fontSize: 12, fontWeight: FontWeight.w600)),
-                          ),
-                          Expanded(
-                            child: cropOptions.length > 1
-                                ? DropdownButtonFormField<int>(
-                                    value: line['cropVarietyId'],
-                                    isDense: true,
-                                    decoration: InputDecoration(
-                                        labelText: 'Crop on this line',
-                                        isDense: true,
-                                        border: OutlineInputBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(10))),
-                                    items: cropOptions.entries
-                                        .map((e) => DropdownMenuItem(
-                                            value: e.key,
-                                            child: Text(tl(context, e.value),
-                                                overflow:
-                                                    TextOverflow.ellipsis)))
-                                        .toList(),
-                                    onChanged: (v) => setDialogState(
-                                        () => line['cropVarietyId'] = v),
-                                  )
-                                // Single-crop pattern (e.g. Khalla) - no
-                                // choice to make, just show which crop.
-                                : Text(tl(context, cropOptions.values.first),
-                                    style: const TextStyle(fontSize: 13)),
-                          ),
-                        ]),
-                        const SizedBox(height: 6),
-                        Row(children: [
-                          const SizedBox(width: 22),
-                          Expanded(
-                            child: TextField(
-                              controller: line['gapCtrl'],
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                      decimal: true),
-                              decoration: InputDecoration(
-                                  labelText: 'Gap to next line',
-                                  isDense: true,
-                                  border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(10))),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          _unitDropdown(loc, line['unit'],
-                              (v) => setDialogState(() => line['unit'] = v)),
-                          IconButton(
-                            icon: const Icon(Icons.remove_circle_outline,
-                                size: 20, color: Colors.red),
-                            onPressed: editLines.length <= 2
-                                ? null
-                                : () =>
-                                    setDialogState(() => editLines.removeAt(i)),
-                          ),
-                        ]),
-                      ]),
-                );
-              }),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () => setDialogState(() => editLines.add({
-                        'cropVarietyId': cropOptions.keys.first,
-                        'gapCtrl': TextEditingController(),
-                        'unit': 'in',
-                      })),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add line'),
-                ),
-              ),
-            ]),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-              onPressed: submitting
-                  ? null
-                  : () async {
-                      setDialogState(() => submitting = true);
-                      final h = await _headers;
-                      final linesPayload = editLines
-                          .map((l) => {
-                                'crop_variety_id': l['cropVarietyId'],
-                                'gap_to_next': double.tryParse(
-                                    (l['gapCtrl'] as TextEditingController)
-                                        .text
-                                        .trim()),
-                                'gap_to_next_unit': l['unit'],
-                              })
-                          .toList();
-                      final res = await http.post(
-                        Uri.parse(
-                            '$baseUrl/agri/sowing-plans/${widget.cycleId}/pattern-lines'),
-                        headers: {...h, 'Content-Type': 'application/json'},
-                        body: jsonEncode({'lines': linesPayload}),
-                      );
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      if (res.statusCode == 201) {
-                        _showSnack('Pattern updated');
-                        await _load();
-                      } else {
-                        final data = jsonDecode(res.body);
-                        _showSnack(data['error'] ?? loc.agriFailedSave,
-                            isError: true);
-                      }
-                    },
-              child: submitting
-                  ? const SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : Text(loc.save, style: const TextStyle(color: Colors.white)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Future<void> _showAddIntercropDialog() async {
     final loc = AppLocalizations.of(context)!;
     final h = await _headers;
@@ -894,22 +606,6 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
     }
     final varieties = List<Map<String, dynamic>>.from(jsonDecode(res.body));
     if (varieties.isEmpty) return;
-
-    // Needed for the 'sequence' pattern-lines picker below - each
-    // line is EITHER the main plan's crop OR the new companion crop,
-    // since intercropping interleaves exactly two.
-    final mainPlanRes = await http.get(
-        Uri.parse('$baseUrl/agri/sowing-plans/${widget.cycleId}'),
-        headers: h);
-    if (mainPlanRes.statusCode != 200) {
-      _showSnack(loc.agriFailedSave, isError: true);
-      return;
-    }
-    final mainPlan = jsonDecode(mainPlanRes.body);
-    final int mainCropVarietyId = mainPlan['crop_variety_id'];
-    final String mainCropLabel =
-        '${tl(context, mainPlan['crop_variety_name'])} (main crop)';
-
     if (!mounted) return;
 
     int? varietyId = varieties.first['id'];
@@ -921,27 +617,6 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
     final plantSpacingCtrl = TextEditingController();
     String plantSpacingUnit = 'cm';
     final sharedAreaCtrl = TextEditingController();
-    // 'sequence' mode - a third option alongside the existing
-    // width-ratio (uniform-only) calculation this dialog already did.
-    // When true, density percentages replace rows_per_cycle/spacing
-    // for the AREA calculation (per direct confirmation: NOT physical
-    // land-splitting - each crop's own stated % of its normal
-    // sole-crop density, percentages can total over 100%).
-    bool useSequenceMode = false;
-    final mainDensityCtrl = TextEditingController();
-    final companionDensityCtrl = TextEditingController();
-    final List<Map<String, dynamic>> patternLines = [
-      {
-        'cropVarietyId': mainCropVarietyId,
-        'gapCtrl': TextEditingController(),
-        'unit': 'in'
-      },
-      {
-        'cropVarietyId': mainCropVarietyId,
-        'gapCtrl': TextEditingController(),
-        'unit': 'in'
-      },
-    ];
     bool submitting = false;
 
     showDialog(
@@ -998,213 +673,67 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    value: useSequenceMode,
-                    onChanged: (v) => setDialogState(() => useSequenceMode = v),
-                    title: const Text('Custom sequence pattern',
-                        style: TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w600)),
-                    subtitle: const Text(
-                        'For mixed multi-line patterns like Soybean-Soybean-Soybean-Tur repeating - uses stated density % instead of row-width ratio',
-                        style: TextStyle(fontSize: 11)),
-                  ),
-                  const SizedBox(height: 8),
-                  if (!useSequenceMode) ...[
-                    Row(children: [
-                      Expanded(
-                        child: TextField(
-                          controller: mainRowsCtrl,
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(
-                              labelText: loc.agriMainRowsPerCycleLabel,
-                              isDense: true,
-                              border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10))),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          controller: intercropRowsCtrl,
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(
-                              labelText: loc.agriIntercropRowsPerCycleLabel,
-                              isDense: true,
-                              border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10))),
-                        ),
-                      ),
-                    ]),
-                    const SizedBox(height: 12),
-                    Row(children: [
-                      Expanded(
-                        child: TextField(
-                          controller: rowSpacingCtrl,
-                          keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true),
-                          decoration: InputDecoration(
-                              labelText: loc.agriRowSpacingLabel,
-                              isDense: true,
-                              border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10))),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _unitDropdown(loc, rowSpacingUnit,
-                          (v) => setDialogState(() => rowSpacingUnit = v)),
-                    ]),
-                    const SizedBox(height: 12),
-                    Row(children: [
-                      Expanded(
-                        child: TextField(
-                          controller: plantSpacingCtrl,
-                          keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true),
-                          decoration: InputDecoration(
-                              labelText: loc.agriPlantSpacingLabel,
-                              isDense: true,
-                              border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10))),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _unitDropdown(loc, plantSpacingUnit,
-                          (v) => setDialogState(() => plantSpacingUnit = v)),
-                    ]),
-                  ] else ...[
-                    // Density %, stated directly (NOT derived from
-                    // line-counting) - can total over 100%, since
-                    // intercropped crops share land rather than
-                    // dividing it. See real_farm_records.sql for the
-                    // confirmed Tarwale example (70% + 100% = 170%).
-                    Text(mainCropLabel,
-                        style: const TextStyle(
-                            fontSize: 11.5, color: Color(0xFF6B7280))),
-                    const SizedBox(height: 4),
-                    TextField(
-                      controller: mainDensityCtrl,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      decoration: InputDecoration(
-                          labelText:
-                              "Main crop's density % of its own sole-crop planting",
-                          isDense: true,
-                          border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10))),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: companionDensityCtrl,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      decoration: InputDecoration(
-                          labelText:
-                              "Companion crop's density % of its own sole-crop planting",
-                          isDense: true,
-                          border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10))),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                        'Enter the gap to the NEXT line, in order (last gap wraps back to line 1):',
-                        style: TextStyle(
-                            fontSize: 11.5, color: Colors.grey.shade600)),
-                    const SizedBox(height: 10),
-                    ...patternLines.asMap().entries.map((entry) {
-                      final i = entry.key;
-                      final line = entry.value;
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(children: [
-                                SizedBox(
-                                  width: 22,
-                                  child: Text('${i + 1}.',
-                                      style: const TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600)),
-                                ),
-                                Expanded(
-                                  child: DropdownButtonFormField<int>(
-                                    value: line['cropVarietyId'],
-                                    isDense: true,
-                                    decoration: InputDecoration(
-                                        labelText: 'Crop on this line',
-                                        isDense: true,
-                                        border: OutlineInputBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(10))),
-                                    items: [
-                                      DropdownMenuItem(
-                                          value: mainCropVarietyId,
-                                          child: Text(mainCropLabel,
-                                              overflow: TextOverflow.ellipsis)),
-                                      if (varietyId != null)
-                                        DropdownMenuItem(
-                                            value: varietyId,
-                                            child: Text(
-                                                '${tl(context, varieties.firstWhere((v) => v['id'] == varietyId)['crop_name'])} (companion)',
-                                                overflow:
-                                                    TextOverflow.ellipsis)),
-                                    ],
-                                    onChanged: (v) => setDialogState(
-                                        () => line['cropVarietyId'] = v),
-                                  ),
-                                ),
-                              ]),
-                              const SizedBox(height: 6),
-                              Row(children: [
-                                const SizedBox(width: 22),
-                                Expanded(
-                                  child: TextField(
-                                    controller: line['gapCtrl'],
-                                    keyboardType:
-                                        const TextInputType.numberWithOptions(
-                                            decimal: true),
-                                    decoration: InputDecoration(
-                                        labelText: 'Gap to next line',
-                                        isDense: true,
-                                        border: OutlineInputBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(10))),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                _unitDropdown(
-                                    loc,
-                                    line['unit'],
-                                    (v) =>
-                                        setDialogState(() => line['unit'] = v)),
-                                IconButton(
-                                  icon: const Icon(Icons.remove_circle_outline,
-                                      size: 20, color: Colors.red),
-                                  onPressed: patternLines.length <= 2
-                                      ? null
-                                      : () => setDialogState(
-                                          () => patternLines.removeAt(i)),
-                                ),
-                              ]),
-                            ]),
-                      );
-                    }),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: () => setDialogState(() => patternLines.add({
-                              'cropVarietyId': mainCropVarietyId,
-                              'gapCtrl': TextEditingController(),
-                              'unit': 'in'
-                            })),
-                        icon: const Icon(Icons.add, size: 18),
-                        label: const Text('Add line'),
+                  Row(children: [
+                    Expanded(
+                      child: TextField(
+                        controller: mainRowsCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                            labelText: loc.agriMainRowsPerCycleLabel,
+                            isDense: true,
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10))),
                       ),
                     ),
-                    const SizedBox(height: 8),
-                  ],
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: intercropRowsCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                            labelText: loc.agriIntercropRowsPerCycleLabel,
+                            isDense: true,
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10))),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    Expanded(
+                      child: TextField(
+                        controller: rowSpacingCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        decoration: InputDecoration(
+                            labelText: loc.agriRowSpacingLabel,
+                            isDense: true,
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10))),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _unitDropdown(loc, rowSpacingUnit,
+                        (v) => setDialogState(() => rowSpacingUnit = v)),
+                  ]),
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    Expanded(
+                      child: TextField(
+                        controller: plantSpacingCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        decoration: InputDecoration(
+                            labelText: loc.agriPlantSpacingLabel,
+                            isDense: true,
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10))),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _unitDropdown(loc, plantSpacingUnit,
+                        (v) => setDialogState(() => plantSpacingUnit = v)),
+                  ]),
                   const SizedBox(height: 12),
                   TextField(
                     controller: sharedAreaCtrl,
@@ -1430,47 +959,42 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
             overflow: TextOverflow.ellipsis,
             maxLines: 1),
       ),
-      floatingActionButton: !canAdd
-          ? null
-          : FloatingActionButton(
-              backgroundColor: idaGreen,
-              onPressed: () => showModalBottomSheet(
-                context: context,
-                shape: const RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.vertical(top: Radius.circular(20))),
-                builder: (_) => SafeArea(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    ListTile(
-                        leading:
-                            const Icon(Icons.people_outline, color: idaGreen),
-                        title: Text(loc.agriLogLabor),
-                        onTap: () {
-                          Navigator.pop(context);
-                          _showLogLaborDialog();
-                        }),
-                    ListTile(
-                        leading: const Icon(Icons.agriculture_outlined,
-                            color: idaGreen),
-                        title: Text(loc.agriLogHarvest),
-                        onTap: () {
-                          Navigator.pop(context);
-                          _showLogHarvestDialog();
-                        }),
-                    if (widget.cycleType == 'seasonal')
-                      ListTile(
-                          leading:
-                              const Icon(Icons.grass_outlined, color: idaGreen),
-                          title: Text(loc.agriAddIntercropButton),
-                          onTap: () {
-                            Navigator.pop(context);
-                            _showAddIntercropDialog();
-                          }),
-                  ]),
-                ),
-              ),
-              child: const Icon(Icons.add, color: Colors.white),
-            ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: idaGreen,
+        onPressed: () => showModalBottomSheet(
+          context: context,
+          shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+          builder: (_) => SafeArea(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              ListTile(
+                  leading: const Icon(Icons.people_outline, color: idaGreen),
+                  title: Text(loc.agriLogLabor),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showLogLaborDialog();
+                  }),
+              ListTile(
+                  leading:
+                      const Icon(Icons.agriculture_outlined, color: idaGreen),
+                  title: Text(loc.agriLogHarvest),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showLogHarvestDialog();
+                  }),
+              if (widget.cycleType == 'seasonal')
+                ListTile(
+                    leading: const Icon(Icons.grass_outlined, color: idaGreen),
+                    title: Text(loc.agriAddIntercropButton),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _showAddIntercropDialog();
+                    }),
+            ]),
+          ),
+        ),
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
       body: loading
           ? const Center(child: CircularProgressIndicator(color: idaGreen))
           : RefreshIndicator(
@@ -1481,61 +1005,6 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
                   ListView(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
                     children: [
-                      if (mainPlanDetails?['row_arrangement'] == 'sequence')
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 16),
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF3F7ED),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFFDCE7CE)),
-                          ),
-                          child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(children: [
-                                  const Icon(Icons.timeline_outlined,
-                                      size: 18, color: idaGreen),
-                                  const SizedBox(width: 8),
-                                  const Expanded(
-                                    child: Text('Sowing Pattern',
-                                        style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w700)),
-                                  ),
-                                  if (canAdd)
-                                    TextButton(
-                                      style: TextButton.styleFrom(
-                                          padding: EdgeInsets.zero,
-                                          minimumSize: const Size(50, 30)),
-                                      onPressed: _showEditPatternLinesDialog,
-                                      child: const Text('Edit',
-                                          style: TextStyle(fontSize: 12.5)),
-                                    ),
-                                ]),
-                                const SizedBox(height: 8),
-                                if (patternLines.isEmpty)
-                                  Text(
-                                      'No pattern lines entered yet — tap Edit to add them.',
-                                      style: TextStyle(
-                                          fontSize: 12.5,
-                                          color: Colors.grey.shade600))
-                                else
-                                  ...patternLines.asMap().entries.map((e) {
-                                    final i = e.key;
-                                    final line = e.value;
-                                    final isLast = i == patternLines.length - 1;
-                                    return Padding(
-                                      padding: const EdgeInsets.only(bottom: 3),
-                                      child: Text(
-                                          '${i + 1}. ${tl(context, line['crop_variety_name'])}'
-                                          '${isLast ? '  →  (wraps to line 1)' : '  →  ${line['gap_to_next_cm']} cm to next'}',
-                                          style:
-                                              const TextStyle(fontSize: 12.5)),
-                                    );
-                                  }),
-                              ]),
-                        ),
                       if (overdue.isNotEmpty)
                         _section(
                             loc.agriOverdueSection,

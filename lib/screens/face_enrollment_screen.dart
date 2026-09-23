@@ -12,8 +12,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:camera/camera.dart';
 import '../services/face_recognition_service.dart';
-import '../services/api_service.dart';
 
+import '../config/app_config.dart';
 class FaceEnrollmentScreen extends StatefulWidget {
   final int workerId;
   final String workerName;
@@ -27,7 +27,7 @@ class FaceEnrollmentScreen extends StatefulWidget {
 class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   CameraController? _controller;
   final _faceService = FaceRecognitionService();
@@ -37,14 +37,10 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
   XFile? _capturedPhoto;
   Uint8List?
       _capturedBytes; // XFile.path isn't a real filesystem path on web; read bytes instead for display
-  bool canUpdate = false;
 
   @override
   void initState() {
     super.initState();
-    ApiService.canUpdate('farm_attendance').then((v) {
-      if (mounted) setState(() => canUpdate = v);
-    });
     _init();
   }
 
@@ -205,9 +201,7 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
                                       horizontal: 20, vertical: 14)),
                             ),
                             ElevatedButton.icon(
-                              onPressed: (_processing || !canUpdate)
-                                  ? null
-                                  : _confirmAndEnroll,
+                              onPressed: _processing ? null : _confirmAndEnroll,
                               icon: _processing
                                   ? const SizedBox(
                                       height: 16,
@@ -217,15 +211,10 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
                                   : const Icon(Icons.check,
                                       color: Colors.white),
                               label: Text(
-                                  _processing
-                                      ? 'Saving…'
-                                      : !canUpdate
-                                          ? 'No permission to enroll'
-                                          : 'Use This Photo',
+                                  _processing ? 'Saving…' : 'Use This Photo',
                                   style: const TextStyle(color: Colors.white)),
                               style: ElevatedButton.styleFrom(
                                   backgroundColor: idaGreen,
-                                  disabledBackgroundColor: Colors.grey.shade300,
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 20, vertical: 14)),
                             ),

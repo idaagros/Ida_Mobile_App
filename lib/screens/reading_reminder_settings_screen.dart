@@ -12,6 +12,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
 
+import '../config/app_config.dart';
 class ReadingReminderSettingsScreen extends StatefulWidget {
   const ReadingReminderSettingsScreen({super.key});
   @override
@@ -23,7 +24,7 @@ class _ReadingReminderSettingsScreenState
     extends State<ReadingReminderSettingsScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   Future<Map<String, String>> get _headers async {
     final prefs = await SharedPreferences.getInstance();

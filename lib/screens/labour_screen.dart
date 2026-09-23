@@ -6,8 +6,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
-import '../services/api_service.dart';
 
+import '../config/app_config.dart';
 class LabourScreen extends StatefulWidget {
   const LabourScreen({super.key});
   @override
@@ -18,24 +18,16 @@ class _LabourScreenState extends State<LabourScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   List labourList = [];
   Map summary = {};
   bool loading = true;
   String filterStatus = 'all';
-  bool canAdd = false;
-  bool canUpdate = false;
 
   @override
   void initState() {
     super.initState();
-    ApiService.canAdd('labour').then((v) {
-      if (mounted) setState(() => canAdd = v);
-    });
-    ApiService.canUpdate('labour').then((v) {
-      if (mounted) setState(() => canUpdate = v);
-    });
     _loadData();
   }
 
@@ -124,20 +116,16 @@ class _LabourScreenState extends State<LabourScreen> {
       backgroundColor: const Color(0xFFF7F9F5),
       appBar: AppBar(
         backgroundColor: idaDark,
-        iconTheme: const IconThemeData(color: Colors.white),
         title: Row(children: [
           Image.asset('assets/images/idalogo.png', height: 28),
           const SizedBox(width: 10),
           const Flexible(
-              child: Tooltip(
-            message: 'Labour Management',
-            child: Text('Labour Management',
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFFF5A623))),
-          )),
+              child: Text('Labour Management',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFFF5A623)))),
         ]),
         actions: [
           IconButton(
@@ -147,16 +135,13 @@ class _LabourScreenState extends State<LabourScreen> {
         ],
         elevation: 0,
       ),
-      floatingActionButton: canAdd
-          ? FloatingActionButton.extended(
-              onPressed: _openAddSheet,
-              backgroundColor: idaGreen,
-              icon: const Icon(Icons.person_add, color: Colors.white),
-              label: const Text('Add Labour',
-                  style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w600)),
-            )
-          : null,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _openAddSheet,
+        backgroundColor: idaGreen,
+        icon: const Icon(Icons.person_add, color: Colors.white),
+        label: const Text('Add Labour',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+      ),
       body: loading
           ? const Center(child: CircularProgressIndicator(color: idaGreen))
           : RefreshIndicator(
@@ -338,27 +323,26 @@ class _LabourScreenState extends State<LabourScreen> {
                   child: _detailItem(Icons.payments_outlined, 'Pay type',
                       labour['pay_type'].toString().toUpperCase())),
             // Edit button
-            if (canUpdate)
-              GestureDetector(
-                onTap: () => _openEditSheet(Map.from(labour)),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE8F5E2),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.edit_outlined, size: 14, color: idaGreen),
-                    SizedBox(width: 4),
-                    Text('Edit',
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: idaGreen,
-                            fontWeight: FontWeight.w600)),
-                  ]),
+            GestureDetector(
+              onTap: () => _openEditSheet(Map.from(labour)),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F5E2),
+                  borderRadius: BorderRadius.circular(8),
                 ),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.edit_outlined, size: 14, color: idaGreen),
+                  SizedBox(width: 4),
+                  Text('Edit',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: idaGreen,
+                          fontWeight: FontWeight.w600)),
+                ]),
               ),
+            ),
           ]),
         ),
       ]),

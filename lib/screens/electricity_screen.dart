@@ -5,13 +5,12 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/image_helper.dart';
-import '../services/ocr_helper.dart';
 import '../services/colored_date_picker.dart';
 import '../services/responsive.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/api_service.dart';
 
+import '../config/app_config.dart';
 class ElectricityReadingScreen extends StatefulWidget {
   final String? returnedRecordId;
   final String? adminNote;
@@ -26,7 +25,7 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   final readingCtrl = TextEditingController();
   final notesCtrl = TextEditingController();
@@ -54,21 +53,9 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
   XFile? photoFile;
   Uint8List? photoBytes;
   String? photoName;
-  // OCR (on-device, via ML Kit) - runs on the photo to try prefilling
-  // the meter reading. _ocrRunning shows a brief loading state while
-  // it works; _ocrPrefilled marks the reading field as OCR-sourced so
-  // the UI can nudge the user to double check it before submitting.
-  bool _ocrRunning = false;
-  bool _ocrPrefilled = false;
 
   bool loading = false;
   bool submitting = false;
-  // Submitting a reading is an 'add' operation (a new record each
-  // time - there's no in-place edit of an existing one from this
-  // screen). Starts false (safe default) until the async check
-  // resolves - SharedPreferences reads are fast, so this is a brief
-  // window, not a visible loading state of its own.
-  bool canAdd = false;
 
   double? previousReading;
   String? previousDate;
@@ -107,16 +94,7 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
   @override
   void initState() {
     super.initState();
-    ApiService.canAdd('electricity').then((v) {
-      if (mounted) setState(() => canAdd = v);
-    });
     readingCtrl.addListener(_validateReading);
-    readingCtrl.addListener(() {
-      // Once the user actually edits the field after an OCR prefill,
-      // clear the badge - they've engaged with the value, whether they
-      // changed it or just confirmed it by editing/retyping.
-      if (_ocrPrefilled) setState(() => _ocrPrefilled = false);
-    });
     if (widget.returnedRecordId != null) {
       _fetchReturnedRecord();
     } else {
@@ -400,20 +378,6 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
         photoName = result.name;
         photoFile = null; // ImageHelper returns bytes directly
       });
-      // Only attempt OCR prefill if the field is still empty - never
-      // overwrite a value the user already typed in themselves.
-      if (readingCtrl.text.trim().isEmpty) {
-        setState(() => _ocrRunning = true);
-        final lines = await OcrHelper.recognizeLines(result.originalBytes);
-        final reading = OcrHelper.extractMeterReading(lines);
-        if (mounted) {
-          setState(() => _ocrRunning = false);
-          if (reading != null) {
-            readingCtrl.text = reading; // fires _validateReading too
-            setState(() => _ocrPrefilled = true);
-          }
-        }
-      }
     }
   }
 
@@ -530,7 +494,7 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
           Image.asset('assets/images/idalogo.png', height: 28),
           const SizedBox(width: 10),
           const Flexible(
-              child: Text('Electricity Meter Reading',
+              child: Text('Electricity Reading',
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                       fontSize: 17,
@@ -720,43 +684,6 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
                           errorText: errorMessage,
                         ),
                       ),
-
-                      if (_ocrRunning) ...[
-                        const SizedBox(height: 8),
-                        Row(children: [
-                          const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: idaGreen)),
-                          const SizedBox(width: 8),
-                          Text('Reading the meter photo…',
-                              style: TextStyle(
-                                  fontSize: 12, color: Colors.grey.shade600)),
-                        ]),
-                      ],
-                      if (_ocrPrefilled) ...[
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: amber.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(children: [
-                            Icon(Icons.auto_awesome, size: 14, color: amber),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                  'Filled from the photo — please check it\'s correct',
-                                  style: TextStyle(
-                                      fontSize: 11.5,
-                                      color: amber.withOpacity(0.9))),
-                            ),
-                          ]),
-                        ),
-                      ],
 
                       // Live units consumed preview
                       if (unitsConsumed != null && unitsConsumed! >= 0) ...[
@@ -1169,8 +1096,7 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
                         child: ElevatedButton.icon(
                           onPressed: (submitting ||
                                   isDateLocked ||
-                                  existingRecordStatus != null ||
-                                  !canAdd)
+                                  existingRecordStatus != null)
                               ? null
                               : _submit,
                           icon: submitting
@@ -1192,11 +1118,9 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
                                     ? 'Locked — Approved'
                                     : existingRecordStatus != null
                                         ? 'Entry already exists for this date'
-                                        : !canAdd
-                                            ? 'No permission to submit'
-                                            : (widget.returnedRecordId != null
-                                                ? 'Resubmit for Approval'
-                                                : 'Submit Reading'),
+                                        : (widget.returnedRecordId != null
+                                            ? 'Resubmit for Approval'
+                                            : 'Submit Reading'),
                             style: const TextStyle(
                                 fontSize: 16,
                                 color: Colors.white,

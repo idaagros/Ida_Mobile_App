@@ -9,8 +9,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/responsive.dart';
-import '../../services/api_service.dart';
 
+import '../../config/app_config.dart';
 class PartiesScreen extends StatefulWidget {
   const PartiesScreen({super.key});
   @override
@@ -20,22 +20,14 @@ class PartiesScreen extends StatefulWidget {
 class _PartiesScreenState extends State<PartiesScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   List parties = [];
   bool loading = true;
-  bool canAdd = false;
-  bool canUpdate = false;
 
   @override
   void initState() {
     super.initState();
-    ApiService.canAdd('parties').then((v) {
-      if (mounted) setState(() => canAdd = v);
-    });
-    ApiService.canUpdate('parties').then((v) {
-      if (mounted) setState(() => canUpdate = v);
-    });
     _load();
   }
 
@@ -151,13 +143,11 @@ class _PartiesScreenState extends State<PartiesScreen> {
         title: const Text('Manage Parties',
             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       ),
-      floatingActionButton: canAdd
-          ? FloatingActionButton(
-              backgroundColor: idaGreen,
-              onPressed: _showAddDialog,
-              child: const Icon(Icons.add, color: Colors.white),
-            )
-          : null,
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: idaGreen,
+        onPressed: _showAddDialog,
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
       body: Responsive.constrainedContent(
           context,
           loading
@@ -195,8 +185,7 @@ class _PartiesScreenState extends State<PartiesScreen> {
                             trailing: Switch(
                               value: active,
                               activeColor: idaGreen,
-                              onChanged:
-                                  canUpdate ? (_) => _toggleActive(p) : null,
+                              onChanged: (_) => _toggleActive(p),
                             ),
                           ),
                         );

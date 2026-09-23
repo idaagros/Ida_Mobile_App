@@ -11,8 +11,8 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
-import '../services/api_service.dart';
 
+import '../config/app_config.dart';
 class PfAlertsScreen extends StatefulWidget {
   const PfAlertsScreen({super.key});
   @override
@@ -22,19 +22,15 @@ class PfAlertsScreen extends StatefulWidget {
 class _PfAlertsScreenState extends State<PfAlertsScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   List _alerts = [];
   bool _loading = true;
   String? _error;
-  bool _canUpdate = false;
 
   @override
   void initState() {
     super.initState();
-    ApiService.canUpdate('machine_pf').then((v) {
-      if (mounted) setState(() => _canUpdate = v);
-    });
     _fetchAlerts();
   }
 
@@ -228,9 +224,8 @@ class _PfAlertsScreenState extends State<PfAlertsScreen> {
                                           Align(
                                             alignment: Alignment.centerRight,
                                             child: OutlinedButton(
-                                              onPressed: _canUpdate
-                                                  ? () => _acknowledge(a['id'])
-                                                  : null,
+                                              onPressed: () =>
+                                                  _acknowledge(a['id']),
                                               style: OutlinedButton.styleFrom(
                                                 foregroundColor: idaGreen,
                                                 side: const BorderSide(

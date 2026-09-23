@@ -21,12 +21,8 @@ import '../services/api_service.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
-import '../services/image_helper.dart';
-import '../services/ocr_helper.dart';
-import '../widgets/scan_review_sheet.dart';
-import '../services/grouped_scan_parser.dart';
-import '../widgets/grouped_scan_review_sheet.dart';
 
+import '../config/app_config.dart';
 class WorkAllocationScreen extends StatefulWidget {
   final DateTime attendanceDate;
   const WorkAllocationScreen({super.key, required this.attendanceDate});
@@ -53,7 +49,7 @@ class _TaskGroup {
 class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   bool loading = true;
   bool saving = false;
@@ -73,28 +69,12 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
   double? expectedTotalWage;
 
   final List<_TaskGroup> groups = [];
-  // Stage B (work allocation) specific access - separate from isAdmin,
-  // which only gates the admin approve/reject decision.
-  bool canUpdateStageB = false;
-  // The actual admin approve/reject decision - now its own distinct
-  // 'approve' permission rather than the plain isAdmin boolean.
-  bool canApproveStageB = false;
-  // For the read-only "submitted, awaiting approval" summary only -
-  // separate from any filter the editable form might use, to avoid
-  // any future confusion between the two.
-  String _readOnlyGenderFilter = 'All'; // 'All' | 'M' | 'F'
 
   String get _dateStr => DateFormat('yyyy-MM-dd').format(widget.attendanceDate);
 
   @override
   void initState() {
     super.initState();
-    ApiService.canUpdateSection('farm_attendance', 'allocation').then((v) {
-      if (mounted) setState(() => canUpdateStageB = v);
-    });
-    ApiService.canApproveSection('farm_attendance', 'allocation').then((v) {
-      if (mounted) setState(() => canApproveStageB = v);
-    });
     _init();
   }
 
@@ -182,8 +162,7 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
       .toList();
 
   bool get _canBuild =>
-      canUpdateStageB &&
-      (allocationStatus == null || allocationStatus == 'returned');
+      allocationStatus == null || allocationStatus == 'returned';
 
   // ── Draft persistence ────────────────────────────────────────────
   //
@@ -262,128 +241,6 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
     final group = _TaskGroup()..isTask1 = true;
     _showGroupBuilder(group,
         isNew: true, prefillRate: true, restrictToWorkerId: null);
-  }
-
-  // Scans a full handwritten list that may contain MULTIPLE Farm +
-  // Work Type sections (confirmed directly: real notes are grouped
-  // this way, not a flat name list) - splits it into sections using
-  // the actual Farm/Work Type masters as the classification signal,
-  // then opens one review sheet covering every section at once.
-  // Never applies anything automatically: every section's Farm/Work
-  // Type and every worker match stays editable, and confirming is
-  // what actually creates the tasks.
-  Future<void> _scanFullList() async {
-    final result = await ImageHelper.pickWithSheet(context);
-    if (result == null) return;
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) =>
-          const Center(child: CircularProgressIndicator(color: idaGreen)),
-    );
-
-    final lines = await OcrHelper.recognizeLines(result.originalBytes);
-
-    if (mounted) Navigator.pop(context); // close the loading spinner
-
-    if (lines.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text(
-              'Could not read anything from that photo. Try a clearer, well-lit shot.'),
-          backgroundColor: Colors.orange.shade700,
-        ));
-      }
-      return;
-    }
-
-    final generalFarm = farms.firstWhere(
-        (f) => (f['name'] ?? '').toString().trim().toLowerCase() == 'general',
-        orElse: () => {});
-    final generalWorkType = workTypes.firstWhere(
-        (w) => (w['name'] ?? '').toString().trim().toLowerCase() == 'general',
-        orElse: () => {});
-
-    if (generalFarm.isEmpty || generalWorkType.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text(
-              'A "General" Farm and Work Type are needed for this feature - please add them in Farm/Work Type Master first.'),
-          backgroundColor: Colors.red,
-        ));
-      }
-      return;
-    }
-
-    final result2 = GroupedScanParser.parse(
-      lines: lines,
-      farms: farms.cast<Map<String, dynamic>>(),
-      workTypes: workTypes.cast<Map<String, dynamic>>(),
-      workers: _unallocated,
-      workerIdOf: (w) => w['worker_id'] as int,
-      workerNameOf: (w) => (w['name'] ?? '').toString(),
-      generalFarmId: generalFarm['id'] as int,
-      generalFarmLabel: (generalFarm['name'] ?? 'General').toString(),
-      generalWorkTypeId: generalWorkType['id'] as int,
-      generalWorkTypeLabel: (generalWorkType['name'] ?? 'General').toString(),
-    );
-
-    if (result2.sections.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text(
-              'Could not match any workers from that photo against today\'s present list.'),
-          backgroundColor: Colors.orange.shade700,
-        ));
-      }
-      return;
-    }
-
-    if (!mounted) return;
-    final confirmed = await showModalBottomSheet<List<ConfirmedSection>>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => GroupedScanReviewSheet(
-        sections: result2.sections,
-        unclassified: result2.unclassified,
-        candidateWorkers: _unallocated,
-        farms: farms.cast<Map<String, dynamic>>(),
-        workTypes: workTypes.cast<Map<String, dynamic>>(),
-        idaGreen: idaGreen,
-        workerIdOf: (w) => w['worker_id'] as int,
-        workerNameOf: (w) => (w['name'] ?? '').toString(),
-        fallbackRateOf: (w) =>
-            w['morning_amount']?.toString() ?? w['daily_wage']?.toString(),
-      ),
-    );
-
-    if (confirmed == null) return; // cancelled
-
-    setState(() {
-      for (final section in confirmed) {
-        final confirmedEntries =
-            section.entries.where((e) => e.selectedWorkerId != null).toList();
-        if (confirmedEntries.isEmpty)
-          continue; // nothing chosen in this section
-
-        final group = _TaskGroup()
-          ..isTask1 = true
-          ..farmId = section.farmId
-          ..workTypeId = section.workTypeId;
-        for (final entry in confirmedEntries) {
-          final id = entry.selectedWorkerId!;
-          group.workerIds.add(id);
-          final amount = entry.amountCtrl.text.trim();
-          group.rateCtrls[id] = TextEditingController(text: amount);
-          group.noteCtrls[id] = TextEditingController();
-        }
-        groups.add(group);
-      }
-    });
-    _saveDraft();
   }
 
   void _editGroup(_TaskGroup group) {
@@ -729,7 +586,7 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
   // reasons) before the buttons are even in view. Nothing to approve
   // blind against.
   Widget _decisionButtons(AppLocalizations loc) {
-    if (allocationStatus != 'pending' || !canApproveStageB)
+    if (allocationStatus != 'pending' || !isAdmin)
       return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(top: 16),
@@ -867,22 +724,6 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
                   side: const BorderSide(color: idaGreen),
                   padding: const EdgeInsets.symmetric(vertical: 13)),
               onPressed: _addSingleTask,
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              icon: const Icon(Icons.document_scanner_outlined,
-                  size: 18, color: idaGreen),
-              label: const Text('Scan Full List',
-                  style:
-                      TextStyle(color: idaGreen, fontWeight: FontWeight.w700)),
-              style: OutlinedButton.styleFrom(
-                  foregroundColor: idaGreen,
-                  side: const BorderSide(color: idaGreen),
-                  padding: const EdgeInsets.symmetric(vertical: 13)),
-              onPressed: _scanFullList,
             ),
           ),
         ],
@@ -1593,14 +1434,6 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
           .toString()
           .toLowerCase()
           .compareTo((b['name'] ?? '').toString().toLowerCase()));
-    final maleCount = sortedPerWorker.where((pw) => pw['gender'] == 'M').length;
-    final femaleCount =
-        sortedPerWorker.where((pw) => pw['gender'] == 'F').length;
-    final filteredPerWorker = _readOnlyGenderFilter == 'All'
-        ? sortedPerWorker
-        : sortedPerWorker
-            .where((pw) => pw['gender'] == _readOnlyGenderFilter)
-            .toList();
     final total = savedAllocations.fold(
         0.0, (s, a) => s + (double.tryParse(a['total_wage'].toString()) ?? 0));
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1611,18 +1444,9 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
                 fontWeight: FontWeight.w700,
                 color: Color(0xFF6B7280),
                 letterSpacing: 0.6)),
-        const SizedBox(height: 4),
-        Text(
-            '${loc.faMaleFull}: $maleCount  ·  ${loc.faFemaleFull}: $femaleCount',
-            style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey.shade600,
-                fontWeight: FontWeight.w600)),
         const SizedBox(height: 10),
-        _readOnlyGenderFilterToggle(loc),
-        const SizedBox(height: 10),
-        _tileGrid(context,
-            filteredPerWorker.map((pw) => _remarkRow(pw, loc)).toList()),
+        _tileGrid(
+            context, sortedPerWorker.map((pw) => _remarkRow(pw, loc)).toList()),
         const SizedBox(height: 18),
       ],
       Row(children: [
@@ -1717,38 +1541,6 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
           ),
         ),
       ],
-    ]);
-  }
-
-  Widget _readOnlyGenderFilterToggle(AppLocalizations loc) {
-    Widget chip(String label, String value) {
-      final selected = _readOnlyGenderFilter == value;
-      return Expanded(
-        child: GestureDetector(
-          onTap: () => setState(() => _readOnlyGenderFilter = value),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: selected ? idaGreen : const Color(0xFFF4F7F2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(label,
-                style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    color: selected ? Colors.white : Colors.grey.shade600)),
-          ),
-        ),
-      );
-    }
-
-    return Row(children: [
-      chip(loc.faAll, 'All'),
-      const SizedBox(width: 6),
-      chip(loc.faMaleFull, 'M'),
-      const SizedBox(width: 6),
-      chip(loc.faFemaleFull, 'F'),
     ]);
   }
 
@@ -1903,12 +1695,7 @@ class _MultiTaskWorkerSheetState extends State<_MultiTaskWorkerSheet> {
               note: g.noteCtrls[widget.workerId]?.text,
             ))
         .toList();
-    if (lines.isEmpty) {
-      lines.add(_SheetLine(
-          rate: widget.morningAmount != null
-              ? widget.morningAmount!.toStringAsFixed(2)
-              : null));
-    }
+    if (lines.isEmpty) lines.add(_SheetLine());
   }
 
   @override
@@ -2327,103 +2114,6 @@ class _TaskGroupSheetState extends State<_TaskGroupSheet> {
     });
   }
 
-  // Handwritten list scan - lets the person bulk-select workers for
-  // this Farm + Work Type by photographing a handwritten name/rate
-  // list instead of tapping each one individually. Never applies
-  // anything automatically: the review sheet requires the person to
-  // confirm every match and every rate first (handwriting OCR is
-  // genuinely unreliable compared to printed text - confirmed
-  // directly that handwriting quality here varies and isn't always
-  // neat).
-  Future<void> _scanList() async {
-    // Work type is set once for the whole task, not per scanned line -
-    // block scanning until Farm + Work Type are actually chosen, so
-    // confirmed workers never end up added to an incomplete task.
-    if (widget.group.farmId == null || widget.group.workTypeId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content:
-            Text('Pick a Farm and Work Type above first, then scan the list.'),
-        backgroundColor: Colors.orange,
-      ));
-      return;
-    }
-
-    final result = await ImageHelper.pickWithSheet(context);
-    if (result == null) return;
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) =>
-          Center(child: CircularProgressIndicator(color: widget.idaGreen)),
-    );
-
-    final lines = await OcrHelper.recognizeLines(result.originalBytes);
-    final parsed = OcrHelper.parseNameAmountLines(lines);
-
-    if (mounted) Navigator.pop(context); // close the loading spinner
-
-    if (parsed.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text(
-              'Could not read any names from that photo. Try a clearer, well-lit shot.'),
-          backgroundColor: Colors.orange.shade700,
-        ));
-      }
-      return;
-    }
-
-    // Only offer workers eligible for this group and not already
-    // selected in it as match candidates.
-    final candidateWorkers = widget.unallocatedExcludingThisGroup
-        .where((w) => !widget.group.workerIds.contains(w['worker_id']))
-        .toList();
-
-    final farmName = widget.farms.firstWhere(
-        (f) => f['id'] == widget.group.farmId,
-        orElse: () => {})['name'];
-    final workTypeName = widget.workTypes.firstWhere(
-        (w) => w['id'] == widget.group.workTypeId,
-        orElse: () => {})['name'];
-
-    if (!mounted) return;
-    final confirmed = await showModalBottomSheet<List<ScanEntry>>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => ScanReviewSheet(
-        parsedLines: parsed,
-        candidateWorkers: candidateWorkers,
-        idaGreen: widget.idaGreen,
-        idOf: (w) => w['worker_id'] as int,
-        nameOf: (w) => (w['name'] ?? '').toString(),
-        taskContextLabel: (farmName != null && workTypeName != null)
-            ? '${tl(context, farmName)} · ${tl(context, workTypeName)}'
-            : null,
-        // Same default a manually-added worker would get - shown here
-        // so the review sheet's rate field never looks blank/broken
-        // for a matched worker when OCR just didn't catch an amount.
-        fallbackRateOf: (w) =>
-            w['morning_amount']?.toString() ?? w['daily_wage']?.toString(),
-      ),
-    );
-
-    if (confirmed == null) return; // cancelled
-    for (final entry in confirmed) {
-      if (entry.selectedWorkerId == null) continue; // skipped
-      final id = entry.selectedWorkerId!;
-      if (!widget.group.workerIds.contains(id)) {
-        _toggleWorker(id); // adds with the usual rate default
-      }
-      final amount = entry.amountCtrl.text.trim();
-      if (amount.isNotEmpty) {
-        widget.group.rateCtrls[id]?.text = amount;
-      }
-    }
-  }
-
   Future<void> _breakAttendance(int workerId, String name) async {
     final rateCtrl = widget.group.rateCtrls[workerId]!;
     final noteCtrl = widget.group.noteCtrls[workerId]!;
@@ -2577,29 +2267,12 @@ class _TaskGroupSheetState extends State<_TaskGroupSheet> {
                   }),
                 ),
                 const SizedBox(height: 16),
-                Row(children: [
-                  Expanded(
-                    child: Text(loc.faWaWorkersForThisTask,
-                        style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF6B7280),
-                            letterSpacing: 0.6)),
-                  ),
-                  TextButton.icon(
-                    onPressed: _scanList,
-                    icon: Icon(Icons.document_scanner_outlined,
-                        size: 15, color: widget.idaGreen),
-                    label: Text('Scan List',
-                        style: TextStyle(
-                            color: widget.idaGreen,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600)),
-                    style: TextButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        minimumSize: const Size(0, 0)),
-                  ),
-                ]),
+                Text(loc.faWaWorkersForThisTask,
+                    style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF6B7280),
+                        letterSpacing: 0.6)),
                 const SizedBox(height: 8),
                 ...widget.unallocatedExcludingThisGroup.map((w) {
                   final id = w['worker_id'] as int;

@@ -24,6 +24,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 
+import '../config/app_config.dart';
 class TvDashboardScreen extends StatefulWidget {
   const TvDashboardScreen({super.key});
   @override
@@ -31,7 +32,7 @@ class TvDashboardScreen extends StatefulWidget {
 }
 
 class _TvDashboardScreenState extends State<TvDashboardScreen> {
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   Map<String, dynamic>? data;
   bool loading = true;

@@ -12,6 +12,7 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../config/app_config.dart';
 class PasswordScreen extends StatefulWidget {
   const PasswordScreen({super.key});
   @override
@@ -19,9 +20,8 @@ class PasswordScreen extends StatefulWidget {
 }
 
 class _PasswordScreenState extends State<PasswordScreen> {
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
-  static const primaryColor =
-      Color(0xFF3B7A28); // matches the app's idaGreen theme
+  static const baseUrl = AppConfig.apiBaseUrl;
+  static const primaryColor = Color(0xFF1565C0); // matching the CCA blue
 
   List _categories = [];
   bool _loading = true;
@@ -97,7 +97,7 @@ class _PasswordScreenState extends State<PasswordScreen> {
       final base = Color(int.parse(val ?? '4279757248'));
       return [base, Color.lerp(base, Colors.black, 0.2)!];
     } catch (_) {
-      return [primaryColor, const Color(0xFF1E4012)];
+      return [primaryColor, const Color(0xFF0D47A1)];
     }
   }
 
@@ -335,7 +335,8 @@ class _PasswordScreenState extends State<PasswordScreen> {
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: primaryColor))
+          ? const Center(
+              child: CircularProgressIndicator(color: Color(0xFF1565C0)))
           : _categories.isEmpty
               ? const Center(
                   child: Text('No categories yet.',
@@ -448,8 +449,7 @@ class OtpWaitScreen extends StatefulWidget {
 }
 
 class _OtpWaitScreenState extends State<OtpWaitScreen> {
-  static const primaryColor =
-      Color(0xFF3B7A28); // matches the app's idaGreen theme
+  static const primaryColor = Color(0xFF1565C0);
   String _status = 'pending';
   final _otpCtrl = TextEditingController();
   bool _verifying = false;
@@ -687,7 +687,7 @@ class _PasswordCategoryScreenState extends State<_PasswordCategoryScreen> {
                               color: widget.colors[0]))),
                   if (widget.isAdmin) ...[
                     IconButton(
-                        icon: const Icon(Icons.edit, color: Color(0xFF3B7A28)),
+                        icon: const Icon(Icons.edit, color: Colors.blue),
                         onPressed: () {
                           Navigator.pop(ctx);
                           _showEditDialog(entry);
@@ -747,7 +747,7 @@ class _PasswordCategoryScreenState extends State<_PasswordCategoryScreen> {
                           child: Text(value,
                               style: const TextStyle(
                                   fontSize: 15,
-                                  color: Color(0xFF3B7A28),
+                                  color: Colors.blue,
                                   decoration: TextDecoration.underline,
                                   fontWeight: FontWeight.w500)))
                       : isPassword
@@ -772,8 +772,7 @@ class _PasswordCategoryScreenState extends State<_PasswordCategoryScreen> {
                 ])),
             if (canCopy)
               IconButton(
-                  icon: const Icon(Icons.copy,
-                      size: 16, color: Color(0xFF3B7A28)),
+                  icon: const Icon(Icons.copy, size: 16, color: Colors.blue),
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: value));
                     ScaffoldMessenger.of(context)

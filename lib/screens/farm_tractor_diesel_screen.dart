@@ -14,8 +14,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
-import '../services/api_service.dart';
 
+import '../config/app_config.dart';
 class FarmTractorDieselScreen extends StatefulWidget {
   const FarmTractorDieselScreen({super.key});
   @override
@@ -26,21 +26,17 @@ class FarmTractorDieselScreen extends StatefulWidget {
 class _FarmTractorDieselScreenState extends State<FarmTractorDieselScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   List tractors = [];
   int? selectedTractorId;
   List logs = [];
   Map? average;
   bool loading = true;
-  bool canAdd = false;
 
   @override
   void initState() {
     super.initState();
-    ApiService.canAdd('farm_tractor').then((v) {
-      if (mounted) setState(() => canAdd = v);
-    });
     _loadTractors();
   }
 
@@ -215,8 +211,7 @@ class _FarmTractorDieselScreenState extends State<FarmTractorDieselScreen> {
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: idaGreen,
-        onPressed:
-            (selectedTractorId == null || !canAdd) ? null : _showAddLogDialog,
+        onPressed: selectedTractorId == null ? null : _showAddLogDialog,
         child: const Icon(Icons.add, color: Colors.white),
       ),
       body: tractors.isEmpty && !loading

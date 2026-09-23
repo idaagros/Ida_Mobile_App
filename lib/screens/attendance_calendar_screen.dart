@@ -22,6 +22,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../localization/app_localizations.dart';
 import '../services/responsive.dart';
 
+import '../config/app_config.dart';
 class AttendanceCalendarScreen extends StatefulWidget {
   const AttendanceCalendarScreen({super.key});
   @override
@@ -35,7 +36,7 @@ class _AttendanceCalendarScreenState extends State<AttendanceCalendarScreen> {
   static const violet = Color(0xFF7C4DFF);
   static const red = Color(0xFFC0392B);
   static const orange = Color(0xFFE67E22);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   late DateTime _visibleMonth =
       DateTime(DateTime.now().year, DateTime.now().month, 1);

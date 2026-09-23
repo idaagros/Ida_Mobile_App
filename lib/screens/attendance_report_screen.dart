@@ -25,6 +25,7 @@ import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
 
+import '../config/app_config.dart';
 class AttendanceReportScreen extends StatefulWidget {
   const AttendanceReportScreen({super.key});
   @override
@@ -42,7 +43,7 @@ const _dimOptions = [
 class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   // ── Report 1: Worker Wage Report ────────────────────────────
   DateTime _wageFrom = DateTime.now().subtract(const Duration(days: 6));

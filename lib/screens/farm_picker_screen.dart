@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'farm_precision_ag_screen.dart';
 
+import '../config/app_config.dart';
 class FarmPickerScreen extends StatefulWidget {
   final bool canEdit; // draw/edit boundary + trigger refresh, vs read-only
   const FarmPickerScreen({super.key, required this.canEdit});
@@ -20,7 +21,7 @@ class FarmPickerScreen extends StatefulWidget {
 class _FarmPickerScreenState extends State<FarmPickerScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   List farms = [];
   bool loading = true;

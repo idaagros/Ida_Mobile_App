@@ -11,8 +11,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
-import '../services/api_service.dart';
 
+import '../config/app_config.dart';
 class ElectricityBillProjectionScreen extends StatefulWidget {
   const ElectricityBillProjectionScreen({super.key});
   @override
@@ -24,7 +24,7 @@ class _ElectricityBillProjectionScreenState
     extends State<ElectricityBillProjectionScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   Future<Map<String, String>> get _headers async {
     final prefs = await SharedPreferences.getInstance();
@@ -79,7 +79,7 @@ class _ElectricityBillProjectionScreenState
         backgroundColor: idaDark,
         foregroundColor: Colors.white,
         elevation: 0,
-        title: const Text('Electric Bill Projection',
+        title: const Text('Electricity Bill Projection',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
         actions: [
           IconButton(
@@ -293,7 +293,7 @@ class TariffSettingsScreen extends StatefulWidget {
 class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   Future<Map<String, String>> get _headers async {
     final prefs = await SharedPreferences.getInstance();
@@ -314,14 +314,10 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
   final contractDemandCtrl = TextEditingController();
   final dutyCtrl = TextEditingController();
   String readingType = 'kwh';
-  bool canUpdate = false;
 
   @override
   void initState() {
     super.initState();
-    ApiService.canUpdate('electricity').then((v) {
-      if (mounted) setState(() => canUpdate = v);
-    });
     _load();
   }
 
@@ -492,7 +488,7 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
                       style: ElevatedButton.styleFrom(
                           backgroundColor: idaGreen,
                           padding: const EdgeInsets.symmetric(vertical: 14)),
-                      onPressed: (saving || !canUpdate) ? null : _save,
+                      onPressed: saving ? null : _save,
                       child: saving
                           ? const SizedBox(
                               height: 18,

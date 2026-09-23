@@ -40,9 +40,9 @@ import '../localization/app_locale.dart';
 import '../services/api_service.dart';
 import 'transport_screen.dart';
 import 'password_screen.dart';
-import 'admin/app_settings_screen.dart';
 import 'otp_approvals_screen.dart';
 
+import '../config/app_config.dart';
 // ── Returned record model ─────────────────────────────────────────────────────
 class ReturnedRecord {
   final String id;
@@ -76,7 +76,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static const _base = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const _base = AppConfig.apiBaseUrl;
 
   String _displayName = '';
   bool _isAdmin = false;
@@ -424,731 +424,695 @@ class _DashboardScreenState extends State<DashboardScreen>
       );
     }
 
-    return PopScope(
-        canPop: false,
-        onPopInvokedWithResult: (didPop, result) {
-          if (!didPop) _logout();
-        },
-        child: Scaffold(
-          backgroundColor: const Color(0xFFF7F9F5),
-          appBar: AppBar(
-            backgroundColor: idaDark,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            title: Row(children: [
-              Image.asset('assets/images/idalogo.png', height: 28),
-            ]),
-            actions: [
-              // Bell icon with count badge for non-admin
-              if (!_isAdmin && _activeReturned.isNotEmpty)
-                Stack(children: [
-                  IconButton(
-                    icon: const Icon(Icons.notifications_active,
-                        color: Colors.white),
-                    onPressed: () => _scrollToBanner(),
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F9F5),
+      appBar: AppBar(
+        backgroundColor: idaDark,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Row(children: [
+          Image.asset('assets/images/idalogo.png', height: 28),
+          const SizedBox(width: 10),
+          const Flexible(
+            child: Text('Ida AgriCo',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+          ),
+        ]),
+        actions: [
+          // Bell icon with count badge for non-admin
+          if (!_isAdmin && _activeReturned.isNotEmpty)
+            Stack(children: [
+              IconButton(
+                icon:
+                    const Icon(Icons.notifications_active, color: Colors.white),
+                onPressed: () => _scrollToBanner(),
+              ),
+              Positioned(
+                right: 6,
+                top: 6,
+                child: Container(
+                  width: 16,
+                  height: 16,
+                  decoration: const BoxDecoration(
+                      color: Colors.red, shape: BoxShape.circle),
+                  child: Center(
+                    child: Text('${_activeReturned.length}',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700)),
                   ),
-                  Positioned(
-                    right: 6,
-                    top: 6,
-                    child: Container(
-                      width: 16,
-                      height: 16,
-                      decoration: const BoxDecoration(
-                          color: Colors.red, shape: BoxShape.circle),
-                      child: Center(
-                        child: Text('${_activeReturned.length}',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ]),
+          if (_hasFactory && _hasAgriculture)
+            IconButton(
+                icon: Icon(
+                    _currentSector == 'factory' ? Icons.factory : Icons.eco,
+                    color: Colors.white70),
+                onPressed: _switchSector,
+                tooltip: AppLocalizations.of(context)!.sectorSwitchTitle),
+          IconButton(
+              icon: const Icon(Icons.translate, color: Colors.white70),
+              onPressed: _showLanguagePicker,
+              tooltip: AppLocalizations.of(context)!.language),
+          IconButton(
+              icon: const Icon(Icons.logout, color: Colors.white70),
+              onPressed: _logout,
+              tooltip: 'Sign out'),
+        ],
+      ),
+      body: SingleChildScrollView(
+        controller: _scrollCtrl,
+        padding: const EdgeInsets.all(20),
+        child: Responsive.constrainedContent(
+            context,
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // ── Returned records banner (non-admin, pulsing) ───────────
+              if (!_isAdmin && _activeReturned.isNotEmpty) ...[
+                _ReturnedBanner(
+                  records: _activeReturned,
+                  pulseAnim: _pulseAnim,
+                  onFix: _openModuleForFix,
+                  onDismiss: (r) => setState(() => r.acknowledged = true),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // ── Welcome card ───────────────────────────────────────────
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                    color: idaDark, borderRadius: BorderRadius.circular(16)),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                          AppLocalizations.of(context)!
+                              .welcomeBack(_displayName),
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 4),
+                      Text(
+                        DateFormat('EEEE, d MMMM yyyy').format(DateTime.now()),
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.5), fontSize: 13),
                       ),
+                    ]),
+              ),
+
+              const SizedBox(height: 20),
+
+              // ── Needs Attention summary (admin AND edit-level non-admin
+              // alike - the backend already filters by permission, so if
+              // this is non-zero, the current user genuinely has something
+              // to act on) ─────────────────────────────────────────────
+              if (_needsAttentionCount > 0) ...[
+                InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const NeedsAttentionScreen()))
+                      .then((_) => _fetchNeedsAttention()),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                        color: const Color(0xFFFEF3DC),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFF5D399))),
+                    child: Row(children: [
+                      const Icon(Icons.notifications_active_outlined,
+                          color: Color(0xFF92600A), size: 22),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                  '$_needsAttentionCount item${_needsAttentionCount == 1 ? '' : 's'} need${_needsAttentionCount == 1 ? 's' : ''} your attention',
+                                  style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF92600A))),
+                              const Text('Tap to review',
+                                  style: TextStyle(
+                                      fontSize: 12, color: Color(0xFF92600A))),
+                            ]),
+                      ),
+                      const Icon(Icons.chevron_right, color: Color(0xFF92600A)),
+                    ]),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // ── Admin stats (admin only) ───────────────────────────────
+              if (_isAdmin) ...[
+                Row(children: [
+                  _statCard('—', 'Submissions\nthis month', idaGreen),
+                  const SizedBox(width: 12),
+                  _statCard('—', 'Pending\nreview', amber),
+                  const SizedBox(width: 12),
+                  _statCard('—', 'Rejected /\nreturned', Colors.red.shade400),
+                ]),
+                const SizedBox(height: 28),
+              ] else
+                const SizedBox(height: 8),
+
+              // ══════════════════════════════════════════════════════════
+              // FACTORY SECTOR
+              // ══════════════════════════════════════════════════════════
+              if (_currentSector == 'factory') ...[
+                // ── Modules ────────────────────────────────────────────────
+                if (_can('daily_report') ||
+                    _can('electricity') ||
+                    _can('tractor') ||
+                    _can('labour') ||
+                    _can('factory') ||
+                    _can('machine') ||
+                    _can('machine_pf') ||
+                    _can('outward_register')) ...[
+                  _sectionHeader(
+                      AppLocalizations.of(context)!.sectionDailyEntries),
+                  const SizedBox(height: 12),
+                ],
+
+                _tileGrid(context, [
+                  if (_can('electricity'))
+                    _tile(
+                      icon: Icons.electric_bolt,
+                      label: AppLocalizations.of(context)!
+                          .moduleLabel('electricity', 'Electricity Reading'),
+                      sub: AppLocalizations.of(context)!.moduleDescription(
+                          'electricity', 'Submit daily meter reading'),
+                      iconBg: const Color(0xFFFEF3DC),
+                      iconColor: amber,
+                      hasPending: _returned.any(
+                          (r) => r.module == 'electricity' && !r.acknowledged),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) =>
+                                  const ElectricityReadingScreen())),
                     ),
+                  if (_can('electricity'))
+                    _tile(
+                      icon: Icons.receipt_long_outlined,
+                      label: 'Bill Projection',
+                      sub:
+                          'Estimated monthly bill and cost of low power factor',
+                      iconBg: const Color(0xFFFEF3DC),
+                      iconColor: amber,
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) =>
+                                  const ElectricityBillProjectionScreen())),
+                    ),
+                  if (_can('tractor'))
+                    _tile(
+                      icon: Icons.agriculture,
+                      label: AppLocalizations.of(context)!
+                          .moduleLabel('tractor', 'Factory Tractor'),
+                      sub: AppLocalizations.of(context)!.moduleDescription(
+                          'tractor',
+                          'Submit daily meter reading for the factory\'s own tractor'),
+                      hasPending: _returned
+                          .any((r) => r.module == 'tractor' && !r.acknowledged),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const TractorReadingScreen())),
+                    ),
+                  if (_can('labour'))
+                    _tile(
+                      icon: Icons.people,
+                      label: AppLocalizations.of(context)!
+                          .moduleLabel('labour', 'Labour Management'),
+                      sub: AppLocalizations.of(context)!.moduleDescription(
+                          'labour', 'Add, edit and view labour records'),
+                      hasPending: _returned
+                          .any((r) => r.module == 'labour' && !r.acknowledged),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const LabourScreen())),
+                    ),
+                  if (_can('factory'))
+                    _tile(
+                      icon: Icons.factory,
+                      label: AppLocalizations.of(context)!
+                          .moduleLabel('factory', 'Factory Run Hours'),
+                      sub: AppLocalizations.of(context)!.moduleDescription(
+                          'factory', 'Log machine start/stop times for today'),
+                      hasPending: _returned
+                          .any((r) => r.module == 'factory' && !r.acknowledged),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const FactoryRunScreen())),
+                    ),
+                  if (_can('machine'))
+                    _tile(
+                      icon: Icons.precision_manufacturing,
+                      label: 'Machine Hours Reading',
+                      sub: 'Submit daily machine meter reading',
+                      iconBg: const Color(0xFFE8F0FE),
+                      iconColor: Color(0xFF1A73E8),
+                      hasPending: _returned
+                          .any((r) => r.module == 'machine' && !r.acknowledged),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const MachineReadingScreen())),
+                    ),
+                  if (_can('machine_pf'))
+                    _tile(
+                      icon: Icons.bolt,
+                      label: 'Machine PF Reading',
+                      sub: 'Submit daily Power Factor (PF) meter reading',
+                      iconBg: const Color(0xFFFDE8E8),
+                      iconColor: Color(0xFFE53935),
+                      hasPending: _returned.any(
+                          (r) => r.module == 'machine_pf' && !r.acknowledged),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const MachinePfScreen())),
+                    ),
+                  if (_can('outward_register'))
+                    _tile(
+                      icon: Icons.local_shipping,
+                      label: 'Outward Sales Register',
+                      sub:
+                          'Log truck dispatches: weighment, bhada, invoice & agent',
+                      iconBg: const Color(0xFFE8F0FE),
+                      iconColor: Color(0xFF1A73E8),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) =>
+                                  const OutwardRegisterListScreen())),
+                    ),
+                ]),
+
+                // ── Reports & Analytics ────────────────────────────────────
+                if (_can('reports_analytics')) ...[
+                  const SizedBox(height: 20),
+                  _sectionHeader(
+                      AppLocalizations.of(context)!.sectionReportsAnalytics),
+                  const SizedBox(height: 12),
+                  _tileGrid(context, [
+                    _tile(
+                      icon: Icons.picture_as_pdf_outlined,
+                      label: AppLocalizations.of(context)!
+                          .moduleLabel('daily_report', 'Daily Reports'),
+                      sub: AppLocalizations.of(context)!.moduleDescription(
+                          'daily_report',
+                          'Generate PDF reports of tractor, electricity & machine readings'),
+                      iconBg: const Color(0xFFFDE8E8),
+                      iconColor: const Color(0xFFE53935),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const DailyReportsScreen())),
+                    ),
+                    _tile(
+                      icon: Icons.bolt,
+                      label: 'Low PF Alerts',
+                      sub: 'Machine power-factor readings below 0.99',
+                      iconBg: const Color(0xFFFDE8E8),
+                      iconColor: const Color(0xFFE53935),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const PfAlertsScreen())),
+                    ),
+                    _tile(
+                      icon: Icons.bar_chart_outlined,
+                      label: 'Electricity History',
+                      sub: 'View all meter readings & monthly totals',
+                      iconBg: const Color(0xFFFEF3DC),
+                      iconColor: amber,
+                      onTap: () => _soon('Electricity history'),
+                    ),
+                    _tile(
+                      icon: Icons.query_stats,
+                      label: 'Tractor History',
+                      sub: 'View all tractor hours & monthly totals',
+                      onTap: () => _soon('Tractor history'),
+                    ),
+                    if (_can('outward_register'))
+                      _tile(
+                        icon: Icons.summarize_outlined,
+                        label: 'Outward Sales Report',
+                        sub:
+                            'Date-range report: Excel or PDF, with section status badges',
+                        iconBg: const Color(0xFFE8F0FE),
+                        iconColor: const Color(0xFF1A73E8),
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) =>
+                                    const OutwardRegisterReportScreen())),
+                      ),
+                  ]),
+                ],
+
+                // ── Payroll ──────────────────────────────────────────────
+                if (_can('payroll')) ...[
+                  const SizedBox(height: 20),
+                  _sectionHeader(AppLocalizations.of(context)!.sectionPayroll),
+                  const SizedBox(height: 12),
+                  _tile(
+                    icon: Icons.payments_outlined,
+                    label: AppLocalizations.of(context)!
+                        .moduleLabel('payroll', 'Payroll'),
+                    sub: AppLocalizations.of(context)!.moduleDescription(
+                        'payroll', 'Manage worker wages and deductions'),
+                    onTap: () => _soon('Payroll'),
+                  ),
+                ],
+
+                // ── Transport ────────────────────────────────────────────
+                if (_can('transport')) ...[
+                  const SizedBox(height: 20),
+                  _sectionHeader(
+                      AppLocalizations.of(context)!.sectionAdministrative),
+                  const SizedBox(height: 12),
+                  _tile(
+                    icon: Icons.local_shipping_outlined,
+                    label: 'Transport Directory',
+                    sub: 'Transporter contacts with call & WhatsApp support',
+                    iconBg: const Color(0xFFE3F2FD),
+                    iconColor: const Color(0xFF0D47A1),
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const TransportScreen())),
+                  ),
+                ],
+
+                // ── Maintenance ──────────────────────────────────────────
+                if (_can('tractor_maintenance') ||
+                    _can('machine_maintenance')) ...[
+                  const SizedBox(height: 20),
+                  _sectionHeader('Maintenance'),
+                  const SizedBox(height: 12),
+                  _tileGrid(context, [
+                    if (_can('tractor_maintenance'))
+                      _tile(
+                        icon: Icons.build_circle_outlined,
+                        label: 'Tractor Maintenance',
+                        sub: 'Maintenance schedule, alerts & history',
+                        iconBg: const Color(0xFFFEF3DC),
+                        iconColor: amber,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const MaintenanceScreen())),
+                      ),
+                    if (_can('machine_maintenance'))
+                      _tile(
+                        icon: Icons.precision_manufacturing_outlined,
+                        label: 'Machine Maintenance',
+                        sub: 'Machine maintenance schedule, alerts & history',
+                        iconBg: const Color(0xFFE8F0FE),
+                        iconColor: Color(0xFF1A73E8),
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const MachineMaintScreen())),
+                      ),
+                  ]),
+                ],
+              ],
+
+              // ══════════════════════════════════════════════════════════
+              // AGRICULTURE SECTOR
+              // ══════════════════════════════════════════════════════════
+              if (_currentSector == 'agriculture') ...[
+                if (_can('farm_attendance') ||
+                    _can('farm_masters') ||
+                    _can('farm_tractor') ||
+                    _can('agri')) ...[
+                  _sectionHeader(
+                      AppLocalizations.of(context)!.sectionFarmOperations),
+                  const SizedBox(height: 12),
+                  _tileGrid(context, [
+                    if (_can('farm_attendance'))
+                      _tile(
+                        icon: Icons.groups_outlined,
+                        label: AppLocalizations.of(context)!
+                            .moduleLabel('farm_attendance', 'Farm Attendance'),
+                        sub: AppLocalizations.of(context)!.moduleDescription(
+                            'farm_attendance',
+                            'Mark daily attendance & wages for farm field workers'),
+                        iconBg: const Color(0xFFE8F5E2),
+                        iconColor: idaGreen,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const AttendanceScreen())),
+                      ),
+                    if (_can('farm_masters')) ...[
+                      _tile(
+                        icon: Icons.agriculture_outlined,
+                        label: 'Farm Masters',
+                        sub: 'Manage the farm list, worker list & permanent workers',
+                        iconBg: const Color(0xFFE8F5E2),
+                        iconColor: idaGreen,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const FarmMastersScreen())),
+                      ),
+                      _tile(
+                        icon: Icons.satellite_alt_outlined,
+                        label: 'Precision Agriculture',
+                        sub: 'Farm boundaries, vegetation health & soil analysis',
+                        iconBg: const Color(0xFFE3F2FD),
+                        iconColor: const Color(0xFF1565C0),
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => FarmPickerScreen(
+                                    canEdit: _canEdit('farm_masters')))),
+                      ),
+                    ],
+                    if (_can('farm_tractor'))
+                      _tile(
+                        icon: Icons.agriculture,
+                        label: 'Farm Tractor',
+                        sub:
+                            'Assign tractor field work and log hours, diesel and billing',
+                        iconBg: const Color(0xFFFEF3DC),
+                        iconColor: Colors.orange.shade800,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const FarmTractorWorkScreen())),
+                      ),
+                    if (_can('agri')) ...[
+                      _tile(
+                        icon: Icons.wb_sunny_outlined,
+                        label: 'Weather',
+                        sub: 'Current conditions and 7-day forecast, per farm',
+                        iconBg: const Color(0xFFFEF3DC),
+                        iconColor: Colors.orange.shade800,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const WeatherScreen())),
+                      ),
+                      _tile(
+                        icon: Icons.eco_outlined,
+                        label:
+                            AppLocalizations.of(context)!.agriCropMastersTitle,
+                        sub: 'Manage crops and their varieties',
+                        iconBg: const Color(0xFFE8F5E2),
+                        iconColor: idaGreen,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const CropMastersScreen())),
+                      ),
+                      _tile(
+                        icon: Icons.spa_outlined,
+                        label: AppLocalizations.of(context)!
+                            .agriAgronomySetupTitle,
+                        sub: 'Orchard blocks and agronomy schedule templates',
+                        iconBg: const Color(0xFFE8F5E2),
+                        iconColor: idaGreen,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const AgronomySetupScreen())),
+                      ),
+                      _tile(
+                        icon: Icons.calendar_month_outlined,
+                        label: AppLocalizations.of(context)!.agriCyclesTitle,
+                        sub:
+                            'Sow, log operations, and track the planned-vs-actual calendar',
+                        iconBg: const Color(0xFFE8F5E2),
+                        iconColor: idaGreen,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const CropCyclesScreen())),
+                      ),
+                      _tile(
+                        icon: Icons.insert_chart_outlined,
+                        label: AppLocalizations.of(context)!.agriReportsTitle,
+                        sub:
+                            'Planning view of what\'s due, plus cost & yield reports',
+                        iconBg: const Color(0xFFE8F5E2),
+                        iconColor: idaGreen,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const CropReportsScreen())),
+                      ),
+                    ],
+                  ]),
+                ],
+              ],
+
+              // ══════════════════════════════════════════════════════════
+              // CROSS-CUTTING — shown regardless of which sector is active
+              // ══════════════════════════════════════════════════════════
+              if (_can('passwords')) ...[
+                const SizedBox(height: 20),
+                _sectionHeader(
+                    AppLocalizations.of(context)!.sectionAdministrative),
+                const SizedBox(height: 12),
+                _tile(
+                  icon: Icons.vpn_key_outlined,
+                  label: 'Password Manager',
+                  sub: 'Secure credentials store — OTP required for non-admins',
+                  iconBg: const Color(0xFFEDE7F6),
+                  iconColor: const Color(0xFF4A148C),
+                  onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const PasswordScreen())),
+                ),
+              ],
+
+              // ── Administration (admin only) ────────────────────────────
+              if (_isAdmin) ...[
+                const SizedBox(height: 20),
+                _sectionHeader(
+                    AppLocalizations.of(context)!.sectionAdministration),
+                const SizedBox(height: 12),
+                _tileGrid(context, [
+                  _tile(
+                    icon: Icons.fact_check_outlined,
+                    label: 'Review Submissions',
+                    sub: 'Approve, reject or return records to staff',
+                    iconBg: const Color(0xFFE8F0FE),
+                    iconColor: const Color(0xFF1A73E8),
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const AdminReviewScreen())),
+                  ),
+                  _tile(
+                    icon: Icons.local_shipping_outlined,
+                    label: 'Dispatch Review',
+                    sub: 'Approve each section of an outward dispatch entry',
+                    iconBg: const Color(0xFFE8F0FE),
+                    iconColor: const Color(0xFF1A73E8),
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) =>
+                                const OutwardRegisterReviewListScreen())),
+                  ),
+                  _tile(
+                    icon: Icons.lock_clock_outlined,
+                    label: 'OTP Approvals',
+                    sub:
+                        'Approve password access requests & share OTP with users',
+                    iconBg: const Color(0xFFEDE7F6),
+                    iconColor: const Color(0xFF4A148C),
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const OtpApprovalsScreen())),
+                  ),
+                  _tile(
+                    icon: Icons.manage_accounts_outlined,
+                    label: 'Manage Users',
+                    sub: 'Create accounts and assign module access',
+                    onTap: () => Navigator.pushNamed(context, '/admin/users'),
+                  ),
+                  _tile(
+                    icon: Icons.business_outlined,
+                    label: 'Manage Parties',
+                    sub: 'Buyer list used in the Outward Sales Register',
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const PartiesScreen())),
+                  ),
+                  _tile(
+                    icon: Icons.flag_outlined,
+                    label: 'Manage Destinations',
+                    sub: 'Destination list used in the Outward Sales Register',
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const DestinationsScreen())),
+                  ),
+                  // Farm Masters moved to the Agriculture sector above,
+                  // gated by _can('farm_masters') instead of admin-only —
+                  // an admin still sees it there too (_can treats admin
+                  // as having every module).
+                  _tile(
+                    icon: Icons.tv_outlined,
+                    label: 'TV Dashboard',
+                    sub: 'Full-screen live overview for office/factory display',
+                    iconBg: const Color(0xFFE3F2FD),
+                    iconColor: const Color(0xFF1565C0),
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const TvDashboardScreen())),
                   ),
                 ]),
-              if (_hasFactory && _hasAgriculture)
-                IconButton(
-                    icon: Icon(
-                        _currentSector == 'factory' ? Icons.factory : Icons.eco,
-                        color: Colors.white70),
-                    onPressed: _switchSector,
-                    tooltip: AppLocalizations.of(context)!.sectorSwitchTitle),
-              IconButton(
-                  icon: const Icon(Icons.translate, color: Colors.white70),
-                  onPressed: _showLanguagePicker,
-                  tooltip: AppLocalizations.of(context)!.language),
-              IconButton(
-                  icon: const Icon(Icons.logout, color: Colors.white70),
-                  onPressed: _logout,
-                  tooltip: 'Sign out'),
-            ],
-          ),
-          body: SingleChildScrollView(
-            controller: _scrollCtrl,
-            padding: const EdgeInsets.all(20),
-            child: Responsive.constrainedContent(
-                context,
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  // ── Returned records banner (non-admin, pulsing) ───────────
-                  if (!_isAdmin && _activeReturned.isNotEmpty) ...[
-                    _ReturnedBanner(
-                      records: _activeReturned,
-                      pulseAnim: _pulseAnim,
-                      onFix: _openModuleForFix,
-                      onDismiss: (r) => setState(() => r.acknowledged = true),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
+              ],
 
-                  // ── Welcome card ───────────────────────────────────────────
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                        color: idaDark,
-                        borderRadius: BorderRadius.circular(16)),
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                              AppLocalizations.of(context)!
-                                  .welcomeBack(_displayName),
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w700)),
-                          const SizedBox(height: 4),
-                          Text(
-                            DateFormat('EEEE, d MMMM yyyy')
-                                .format(DateTime.now()),
-                            style: TextStyle(
-                                color: Colors.white.withOpacity(0.5),
-                                fontSize: 13),
-                          ),
-                        ]),
-                  ),
+              if (!_isAdmin && _permissions.isEmpty) ...[
+                const SizedBox(height: 40),
+                Center(
+                  child: Column(children: [
+                    Icon(Icons.lock_outline,
+                        size: 48, color: Colors.grey.shade300),
+                    const SizedBox(height: 12),
+                    const Text('No modules assigned',
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.black54)),
+                    const SizedBox(height: 6),
+                    const Text('Contact your admin to get access to modules.',
+                        style: TextStyle(fontSize: 13, color: Colors.grey),
+                        textAlign: TextAlign.center),
+                  ]),
+                ),
+              ],
 
-                  const SizedBox(height: 20),
-
-                  // ── Needs Attention summary (admin AND edit-level non-admin
-                  // alike - the backend already filters by permission, so if
-                  // this is non-zero, the current user genuinely has something
-                  // to act on) ─────────────────────────────────────────────
-                  if (_needsAttentionCount > 0) ...[
-                    InkWell(
-                      borderRadius: BorderRadius.circular(14),
-                      onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const NeedsAttentionScreen()))
-                          .then((_) => _fetchNeedsAttention()),
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                            color: const Color(0xFFFEF3DC),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: const Color(0xFFF5D399))),
-                        child: Row(children: [
-                          const Icon(Icons.notifications_active_outlined,
-                              color: Color(0xFF92600A), size: 22),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                      '$_needsAttentionCount item${_needsAttentionCount == 1 ? '' : 's'} need${_needsAttentionCount == 1 ? 's' : ''} your attention',
-                                      style: const TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w700,
-                                          color: Color(0xFF92600A))),
-                                  const Text('Tap to review',
-                                      style: TextStyle(
-                                          fontSize: 12,
-                                          color: Color(0xFF92600A))),
-                                ]),
-                          ),
-                          const Icon(Icons.chevron_right,
-                              color: Color(0xFF92600A)),
-                        ]),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-
-                  // ══════════════════════════════════════════════════════════
-                  // FACTORY SECTOR
-                  // ══════════════════════════════════════════════════════════
-                  if (_currentSector == 'factory') ...[
-                    // ── Modules ────────────────────────────────────────────────
-                    if (_can('daily_report') ||
-                        _can('electricity') ||
-                        _can('tractor') ||
-                        _can('labour') ||
-                        _can('factory') ||
-                        _can('machine') ||
-                        _can('machine_pf') ||
-                        _can('outward_register')) ...[
-                      _sectionHeader(
-                          AppLocalizations.of(context)!.sectionDailyEntries),
-                      const SizedBox(height: 12),
-                    ],
-
-                    _tileGrid(context, [
-                      if (_can('electricity'))
-                        _tile(
-                          icon: Icons.electric_bolt,
-                          label: AppLocalizations.of(context)!.moduleLabel(
-                              'electricity', 'Electricity Meter Reading'),
-                          sub: AppLocalizations.of(context)!.moduleDescription(
-                              'electricity', 'Submit daily meter reading'),
-                          iconBg: const Color(0xFFFEF3DC),
-                          iconColor: amber,
-                          hasPending: _returned.any((r) =>
-                              r.module == 'electricity' && !r.acknowledged),
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) =>
-                                      const ElectricityReadingScreen())),
-                        ),
-                      if (_can('tractor'))
-                        _tile(
-                          icon: Icons.agriculture,
-                          label: AppLocalizations.of(context)!.moduleLabel(
-                              'tractor', 'Factory Tractor Hours Reading'),
-                          sub: AppLocalizations.of(context)!.moduleDescription(
-                              'tractor',
-                              'Submit daily meter reading for the factory\'s own tractor'),
-                          hasPending: _returned.any(
-                              (r) => r.module == 'tractor' && !r.acknowledged),
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) =>
-                                      const TractorReadingScreen())),
-                        ),
-                      if (_can('factory'))
-                        _tile(
-                          icon: Icons.factory,
-                          label: AppLocalizations.of(context)!
-                              .moduleLabel('factory', 'Factory Run Hours'),
-                          sub: AppLocalizations.of(context)!.moduleDescription(
-                              'factory',
-                              'Log machine start/stop times for today'),
-                          hasPending: _returned.any(
-                              (r) => r.module == 'factory' && !r.acknowledged),
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const FactoryRunScreen())),
-                        ),
-                      if (_can('machine'))
-                        _tile(
-                          icon: Icons.precision_manufacturing,
-                          label: 'Machine Hours Reading',
-                          sub: 'Submit daily machine meter reading',
-                          iconBg: const Color(0xFFE8F0FE),
-                          iconColor: Color(0xFF1A73E8),
-                          hasPending: _returned.any(
-                              (r) => r.module == 'machine' && !r.acknowledged),
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) =>
-                                      const MachineReadingScreen())),
-                        ),
-                      if (_can('machine_pf'))
-                        _tile(
-                          icon: Icons.bolt,
-                          label: 'Power Factor Reading',
-                          sub: 'Submit daily Power Factor (PF) meter reading',
-                          iconBg: const Color(0xFFFDE8E8),
-                          iconColor: Color(0xFFE53935),
-                          hasPending: _returned.any((r) =>
-                              r.module == 'machine_pf' && !r.acknowledged),
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const MachinePfScreen())),
-                        ),
-                      if (_can('outward_register'))
-                        _tile(
-                          icon: Icons.local_shipping,
-                          label: 'Outward Sales Register',
-                          sub:
-                              'Log truck dispatches: weighment, bhada, invoice & agent',
-                          iconBg: const Color(0xFFE8F0FE),
-                          iconColor: Color(0xFF1A73E8),
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) =>
-                                      const OutwardRegisterListScreen())),
-                        ),
-                    ]),
-
-                    // ── Reports & Analytics ────────────────────────────────────
-                    if (_can('reports_analytics')) ...[
-                      const SizedBox(height: 20),
-                      _sectionHeader(AppLocalizations.of(context)!
-                          .sectionReportsAnalytics),
-                      const SizedBox(height: 12),
-                      _tileGrid(context, [
-                        _tile(
-                          icon: Icons.picture_as_pdf_outlined,
-                          label: AppLocalizations.of(context)!
-                              .moduleLabel('daily_report', 'Daily Reports'),
-                          sub: AppLocalizations.of(context)!.moduleDescription(
-                              'daily_report',
-                              'Generate PDF reports of tractor, electricity & machine readings'),
-                          iconBg: const Color(0xFFFDE8E8),
-                          iconColor: const Color(0xFFE53935),
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const DailyReportsScreen())),
-                        ),
-                        if (_can('outward_register'))
-                          _tile(
-                            icon: Icons.summarize_outlined,
-                            label: 'Outward Sales Report',
-                            sub:
-                                'Date-range report: Excel or PDF, with section status badges',
-                            iconBg: const Color(0xFFE8F0FE),
-                            iconColor: const Color(0xFF1A73E8),
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) =>
-                                        const OutwardRegisterReportScreen())),
-                          ),
-                        if (_can('electricity'))
-                          _tile(
-                            icon: Icons.receipt_long_outlined,
-                            label: 'Electric Bill Projection',
-                            sub:
-                                'Estimated monthly bill and cost of low power factor',
-                            iconBg: const Color(0xFFFEF3DC),
-                            iconColor: amber,
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) =>
-                                        const ElectricityBillProjectionScreen())),
-                          ),
-                        if (_isAdmin)
-                          _tile(
-                            icon: Icons.tv_outlined,
-                            label: 'TV Dashboard',
-                            sub:
-                                'Full-screen live overview for office/factory display',
-                            iconBg: const Color(0xFFE3F2FD),
-                            iconColor: const Color(0xFF1565C0),
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const TvDashboardScreen())),
-                          ),
-                      ]),
-                    ],
-
-                    // ── Maintenance ──────────────────────────────────────────
-                    if (_can('tractor_maintenance') ||
-                        _can('machine_maintenance')) ...[
-                      const SizedBox(height: 20),
-                      _sectionHeader('Maintenance'),
-                      const SizedBox(height: 12),
-                      _tileGrid(context, [
-                        if (_can('tractor_maintenance'))
-                          _tile(
-                            icon: Icons.build_circle_outlined,
-                            label: 'Tractor Maintenance',
-                            sub: 'Maintenance schedule, alerts & history',
-                            iconBg: const Color(0xFFFEF3DC),
-                            iconColor: amber,
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const MaintenanceScreen())),
-                          ),
-                        if (_can('machine_maintenance'))
-                          _tile(
-                            icon: Icons.precision_manufacturing_outlined,
-                            label: 'Machine Maintenance',
-                            sub:
-                                'Machine maintenance schedule, alerts & history',
-                            iconBg: const Color(0xFFE8F0FE),
-                            iconColor: Color(0xFF1A73E8),
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) =>
-                                        const MachineMaintScreen())),
-                          ),
-                      ]),
-                    ],
-
-                    // ── Administration (admin only) ────────────────────────────
-                    if (_isAdmin) ...[
-                      const SizedBox(height: 20),
-                      _sectionHeader(
-                          AppLocalizations.of(context)!.sectionAdministration),
-                      const SizedBox(height: 12),
-                      _tileGrid(context, [
-                        _tile(
-                          icon: Icons.fact_check_outlined,
-                          label: 'Review Submissions',
-                          sub: 'Approve, reject or return records to staff',
-                          iconBg: const Color(0xFFE8F0FE),
-                          iconColor: const Color(0xFF1A73E8),
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const AdminReviewScreen())),
-                        ),
-                        _tile(
-                          icon: Icons.local_shipping_outlined,
-                          label: 'Dispatch Review',
-                          sub:
-                              'Approve each section of an outward dispatch entry',
-                          iconBg: const Color(0xFFE8F0FE),
-                          iconColor: const Color(0xFF1A73E8),
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) =>
-                                      const OutwardRegisterReviewListScreen())),
-                        ),
-                        _tile(
-                          icon: Icons.lock_clock_outlined,
-                          label: 'OTP Approvals',
-                          sub:
-                              'Approve password access requests & share OTP with users',
-                          iconBg: const Color(0xFFEDE7F6),
-                          iconColor: const Color(0xFF4A148C),
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const OtpApprovalsScreen())),
-                        ),
-                        _tile(
-                          icon: Icons.bolt,
-                          label: 'Low PF Alerts',
-                          sub: 'Machine power-factor readings below 0.99',
-                          iconBg: const Color(0xFFFDE8E8),
-                          iconColor: const Color(0xFFE53935),
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const PfAlertsScreen())),
-                        ),
-                        if (_can('passwords'))
-                          _tile(
-                            icon: Icons.vpn_key_outlined,
-                            label: 'Password Manager',
-                            sub:
-                                'Secure credentials store — OTP required for non-admins',
-                            iconBg: const Color(0xFFEDE7F6),
-                            iconColor: const Color(0xFF4A148C),
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const PasswordScreen())),
-                          ),
-                        if (_isAdmin)
-                          _tile(
-                            icon: Icons.tune,
-                            label: 'App Settings',
-                            sub:
-                                'Face login sensitivity and other app-wide settings',
-                            iconBg: const Color(0xFFE0F2E9),
-                            iconColor: idaGreen,
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const AppSettingsScreen())),
-                          ),
-                      ]),
-                    ],
-
-                    // ── Masters ──────────────────────────────────────────────
-                    // Not purely admin-only: "Manage Users" genuinely is, but
-                    // Parties/Destinations/Labour each have their own grantable
-                    // module now (confirmed directly: destinations/parties were
-                    // deliberately split out from outward_register specifically
-                    // so a non-admin "authorized person" could be granted just
-                    // that, without needing full admin). The outer gate covers
-                    // anyone who can see AT LEAST ONE tile inside; each tile
-                    // then has its own specific check.
-                    if (_isAdmin ||
-                        _can('parties') ||
-                        _can('destinations') ||
-                        _can('labour') ||
-                        _can('transport')) ...[
-                      const SizedBox(height: 20),
-                      _sectionHeader('Masters'),
-                      const SizedBox(height: 12),
-                      _tileGrid(context, [
-                        if (_isAdmin)
-                          _tile(
-                            icon: Icons.manage_accounts_outlined,
-                            label: 'Manage Users',
-                            sub: 'Create accounts and assign module access',
-                            onTap: () =>
-                                Navigator.pushNamed(context, '/admin/users'),
-                          ),
-                        if (_can('parties'))
-                          _tile(
-                            icon: Icons.business_outlined,
-                            label: 'Manage Parties',
-                            sub:
-                                'Buyer list used in the Outward Sales Register',
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const PartiesScreen())),
-                          ),
-                        if (_can('destinations'))
-                          _tile(
-                            icon: Icons.flag_outlined,
-                            label: 'Manage Destinations',
-                            sub:
-                                'Destination list used in the Outward Sales Register',
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) =>
-                                        const DestinationsScreen())),
-                          ),
-                        if (_can('labour'))
-                          _tile(
-                            icon: Icons.people,
-                            label: AppLocalizations.of(context)!
-                                .moduleLabel('labour', 'Labour Management'),
-                            sub: AppLocalizations.of(context)!
-                                .moduleDescription('labour',
-                                    'Add, edit and view labour records'),
-                            hasPending: _returned.any(
-                                (r) => r.module == 'labour' && !r.acknowledged),
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const LabourScreen())),
-                          ),
-                        if (_can('transport'))
-                          _tile(
-                            icon: Icons.local_shipping_outlined,
-                            label: 'Transport Directory',
-                            sub:
-                                'Transporter contacts with call & WhatsApp support',
-                            iconBg: const Color(0xFFE3F2FD),
-                            iconColor: const Color(0xFF0D47A1),
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const TransportScreen())),
-                          ),
-                      ]),
-                    ],
-                  ],
-
-                  // ══════════════════════════════════════════════════════════
-                  // AGRICULTURE SECTOR
-                  // ══════════════════════════════════════════════════════════
-                  if (_currentSector == 'agriculture') ...[
-                    // ── Masters ──────────────────────────────────────────────
-                    if (_can('agri') || _isAdmin) ...[
-                      _sectionHeader('Masters'),
-                      const SizedBox(height: 12),
-                      _tileGrid(context, [
-                        if (_can('agri'))
-                          _tile(
-                            icon: Icons.spa_outlined,
-                            label: AppLocalizations.of(context)!
-                                .agriAgronomySetupTitle,
-                            sub:
-                                'Orchard blocks and agronomy schedule templates',
-                            iconBg: const Color(0xFFE8F5E2),
-                            iconColor: idaGreen,
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) =>
-                                        const AgronomySetupScreen())),
-                          ),
-                        if (_can('agri'))
-                          _tile(
-                            icon: Icons.eco_outlined,
-                            label: AppLocalizations.of(context)!
-                                .agriCropMastersTitle,
-                            sub: 'Manage crops and their varieties',
-                            iconBg: const Color(0xFFE8F5E2),
-                            iconColor: idaGreen,
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const CropMastersScreen())),
-                          ),
-                        if (_can('farm_masters'))
-                          _tile(
-                            icon: Icons.agriculture_outlined,
-                            label: 'Farm Attendance Setup',
-                            sub:
-                                'Manage farms, work types & farm worker master list',
-                            iconBg: const Color(0xFFE8F5E2),
-                            iconColor: idaGreen,
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const FarmMastersScreen())),
-                          ),
-                      ]),
-                    ],
-
-                    // ── Daily Entries ────────────────────────────────────────
-                    if (_can('farm_attendance') ||
-                        _can('farm_masters') ||
-                        _can('farm_tractor') ||
-                        _can('agri')) ...[
-                      const SizedBox(height: 20),
-                      _sectionHeader(
-                          AppLocalizations.of(context)!.sectionDailyEntries),
-                      const SizedBox(height: 12),
-                      _tileGrid(context, [
-                        if (_can('farm_attendance'))
-                          _tile(
-                            icon: Icons.groups_outlined,
-                            label: AppLocalizations.of(context)!.moduleLabel(
-                                'farm_attendance', 'Farm Attendance'),
-                            sub: AppLocalizations.of(context)!.moduleDescription(
-                                'farm_attendance',
-                                'Mark daily attendance & wages for farm field workers'),
-                            iconBg: const Color(0xFFE8F5E2),
-                            iconColor: idaGreen,
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const AttendanceScreen())),
-                          ),
-                        if (_can('farm_masters')) ...[
-                          _tile(
-                            icon: Icons.agriculture_outlined,
-                            label: 'Farm Masters',
-                            sub:
-                                'Manage the farm list, worker list & permanent workers',
-                            iconBg: const Color(0xFFE8F5E2),
-                            iconColor: idaGreen,
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const FarmMastersScreen())),
-                          ),
-                          _tile(
-                            icon: Icons.satellite_alt_outlined,
-                            label: 'Precision Agriculture',
-                            sub:
-                                'Farm boundaries, vegetation health & soil analysis',
-                            iconBg: const Color(0xFFE3F2FD),
-                            iconColor: const Color(0xFF1565C0),
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => FarmPickerScreen(
-                                        canEdit: _canEdit('farm_masters')))),
-                          ),
-                        ],
-                        if (_can('farm_tractor'))
-                          _tile(
-                            icon: Icons.agriculture,
-                            label: 'Farm Tractor',
-                            sub:
-                                'Assign tractor field work and log hours, diesel and billing',
-                            iconBg: const Color(0xFFFEF3DC),
-                            iconColor: Colors.orange.shade800,
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) =>
-                                        const FarmTractorWorkScreen())),
-                          ),
-                        if (_can('agri'))
-                          _tile(
-                            icon: Icons.calendar_month_outlined,
-                            label:
-                                AppLocalizations.of(context)!.agriCyclesTitle,
-                            sub:
-                                'Sow, log operations, and track the planned-vs-actual calendar',
-                            iconBg: const Color(0xFFE8F5E2),
-                            iconColor: idaGreen,
-                            onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const CropCyclesScreen())),
-                          ),
-                      ]),
-                    ],
-
-                    // ── Reports ──────────────────────────────────────────────
-                    if (_can('agri')) ...[
-                      const SizedBox(height: 20),
-                      _sectionHeader(AppLocalizations.of(context)!
-                          .sectionReportsAnalytics),
-                      const SizedBox(height: 12),
-                      _tileGrid(context, [
-                        _tile(
-                          icon: Icons.wb_sunny_outlined,
-                          label: 'Weather',
-                          sub:
-                              'Current conditions and 7-day forecast, per farm',
-                          iconBg: const Color(0xFFFEF3DC),
-                          iconColor: Colors.orange.shade800,
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const WeatherScreen())),
-                        ),
-                        _tile(
-                          icon: Icons.insert_chart_outlined,
-                          label: AppLocalizations.of(context)!.agriReportsTitle,
-                          sub:
-                              'Planning view of what\'s due, plus cost & yield reports',
-                          iconBg: const Color(0xFFE8F5E2),
-                          iconColor: idaGreen,
-                          onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const CropReportsScreen())),
-                        ),
-                      ]),
-                    ],
-                  ],
-
-                  if (!_isAdmin && _permissions.isEmpty) ...[
-                    const SizedBox(height: 40),
-                    Center(
-                      child: Column(children: [
-                        Icon(Icons.lock_outline,
-                            size: 48, color: Colors.grey.shade300),
-                        const SizedBox(height: 12),
-                        const Text('No modules assigned',
-                            style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                                color: Colors.black54)),
-                        const SizedBox(height: 6),
-                        const Text(
-                            'Contact your admin to get access to modules.',
-                            style: TextStyle(fontSize: 13, color: Colors.grey),
-                            textAlign: TextAlign.center),
-                      ]),
-                    ),
-                  ],
-
-                  const SizedBox(height: 24),
-                ])),
-          ),
-        ));
+              const SizedBox(height: 24),
+            ])),
+      ),
+    );
   }
 
   final _scrollCtrl = ScrollController();
@@ -1189,6 +1153,26 @@ class _DashboardScreenState extends State<DashboardScreen>
       );
     });
   }
+
+  Widget _statCard(String value, String label, Color color) => Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE0E7D8)),
+          ),
+          child: Column(children: [
+            Text(value,
+                style: TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.w800, color: color)),
+            const SizedBox(height: 4),
+            Text(label,
+                style: const TextStyle(fontSize: 10, color: Color(0xFF6B7280)),
+                textAlign: TextAlign.center),
+          ]),
+        ),
+      );
 
   Widget _tile({
     required IconData icon,

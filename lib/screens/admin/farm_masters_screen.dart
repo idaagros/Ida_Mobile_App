@@ -17,6 +17,7 @@ import '../../localization/transliterate.dart';
 import '../face_enrollment_screen.dart';
 import '../../services/responsive.dart';
 
+import '../../config/app_config.dart';
 class FarmMastersScreen extends StatefulWidget {
   const FarmMastersScreen({super.key});
   @override
@@ -28,7 +29,7 @@ enum _Tab { farms, workTypes, workers }
 class _FarmMastersScreenState extends State<FarmMastersScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   _Tab _tab = _Tab.farms;
   bool loading = true;
@@ -452,8 +453,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
     int? farmId = worker?['farm_id'];
     int? workTypeId = worker?['work_type_id'];
     String? gender = worker?['gender'];
-    bool isPermanent =
-        worker?['is_permanent'] == 1 || worker?['is_permanent'] == true;
+    bool isPermanent = worker?['is_permanent'] == 1 || worker?['is_permanent'] == true;
 
     showDialog(
       context: context,
@@ -551,16 +551,20 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                 ),
               ),
               const SizedBox(height: 4),
+              // Permanent workers are auto-suggested (pre-checked, still
+              // removable for that one day) on every Farm Attendance
+              // present-worker list, instead of being picked by hand
+              // every single day.
               SwitchListTile(
-                value: isPermanent,
-                activeColor: idaGreen,
                 contentPadding: EdgeInsets.zero,
+                dense: true,
+                activeColor: idaGreen,
+                value: isPermanent,
+                onChanged: (v) => setDialogState(() => isPermanent = v),
                 title: const Text('📌 Permanent worker',
-                    style:
-                        TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
                 subtitle: const Text('Auto-suggested on every attendance day',
                     style: TextStyle(fontSize: 11.5)),
-                onChanged: (v) => setDialogState(() => isPermanent = v),
               ),
               if (worker != null) ...[
                 const SizedBox(height: 16),
@@ -778,9 +782,8 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                 itemBuilder: (_, i) {
                   final w = workers[i];
                   final active = w['is_active'] == 1;
-                  final isPermanent =
-                      w['is_permanent'] == 1 || w['is_permanent'] == true;
                   final loc = AppLocalizations.of(context)!;
+                  final permanent = w['is_permanent'] == 1 || w['is_permanent'] == true;
                   final parts = <String>[
                     if (w['gender'] != null)
                       (w['gender'] == 'M' ? loc.faMaleFull : loc.faFemaleFull),
@@ -790,8 +793,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                     if (w['farm_name'] != null) tl(context, w['farm_name']),
                   ];
                   return _row(
-                    title: (isPermanent ? '📌 ' : '') +
-                        tl(context, w['name'] ?? ''),
+                    title: (permanent ? '📌 ' : '') + tl(context, w['name'] ?? ''),
                     subtitle: parts.join(' · '),
                     active: active,
                     onTap: () => _showWorkerDialog(worker: w),

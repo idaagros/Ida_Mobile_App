@@ -4,8 +4,8 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
-import '../services/api_service.dart';
 
+import '../config/app_config.dart';
 // ── Downtime reason options ───────────────────────────────
 const _reasonOptions = [
   {'value': 'lunch', 'label': 'Lunch break', 'icon': '🍱'},
@@ -25,20 +25,16 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   DateTime selectedDate = DateTime.now().subtract(const Duration(days: 1));
   List entries = [];
   Map summary = {};
   bool loading = true;
-  bool canAdd = false;
 
   @override
   void initState() {
     super.initState();
-    ApiService.canAdd('factory').then((v) {
-      if (mounted) setState(() => canAdd = v);
-    });
     _loadData();
   }
 
@@ -142,16 +138,13 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
         ],
         elevation: 0,
       ),
-      floatingActionButton: canAdd
-          ? FloatingActionButton.extended(
-              onPressed: _openAddForm,
-              backgroundColor: idaGreen,
-              icon: const Icon(Icons.add, color: Colors.white),
-              label: const Text('Add Entry',
-                  style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w600)),
-            )
-          : null,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _openAddForm,
+        backgroundColor: idaGreen,
+        icon: const Icon(Icons.add, color: Colors.white),
+        label: const Text('Add Entry',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+      ),
       body: loading
           ? const Center(child: CircularProgressIndicator(color: idaGreen))
           : RefreshIndicator(

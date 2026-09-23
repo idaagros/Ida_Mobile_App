@@ -14,6 +14,7 @@ import 'package:share_plus/share_plus.dart';
 import '../services/pdf_download_helper.dart';
 import '../services/responsive.dart';
 
+import '../config/app_config.dart';
 class OutwardRegisterReportScreen extends StatefulWidget {
   const OutwardRegisterReportScreen({super.key});
   @override
@@ -25,7 +26,7 @@ class _OutwardRegisterReportScreenState
     extends State<OutwardRegisterReportScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   DateTime fromDate = DateTime.now().subtract(const Duration(days: 7));
   DateTime toDate = DateTime.now();

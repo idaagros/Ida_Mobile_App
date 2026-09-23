@@ -23,6 +23,7 @@ import 'attendance_calendar_screen.dart';
 import 'face_attendance_capture_screen.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
+import '../config/app_config.dart';
 
 class AttendanceScreen extends StatefulWidget {
   final DateTime? initialDate;
@@ -35,7 +36,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   late DateTime selectedDate = widget.initialDate ?? DateTime.now();
   bool isAdmin = false;
@@ -47,6 +48,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   final maleCountCtrl = TextEditingController();
   final femaleCountCtrl = TextEditingController();
+  // Read-only - never typed into, just displayed via the same
+  // TextField styling as male/female for visual consistency. Its text
+  // is set whenever permanentCount is updated (see _loadDay).
+  final permanentCountCtrl = TextEditingController();
   bool savingHeadcount = false;
 
   final Set<int> selectedWorkerIds = {};
@@ -60,6 +65,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   String? allocationStatus;
   double? confirmedExpectedTotal; // last submitted total, once locked
   List<Map<String, dynamic>> presentWorkers = [];
+  // Live count of currently-active permanent workers, shown read-only
+  // next to the male/female fields (mirrors the web app's headcount
+  // card) - not typed in by the user, always whatever the server says
+  // is currently marked permanent.
+  int permanentCount = 0;
   bool permanentAutoSuggested =
       false; // present_workers came from permanent-worker suggestions, not an actual saved submission
 
@@ -89,6 +99,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   void dispose() {
     maleCountCtrl.dispose();
     femaleCountCtrl.dispose();
+    permanentCountCtrl.dispose();
     for (final c in presentWageCtrls.values) c.dispose();
     super.dispose();
   }
@@ -150,6 +161,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           attendanceAdminNote = data['attendance_admin_note'];
           allocationStatus = data['allocation_status'];
           permanentAutoSuggested = data['permanent_auto_suggested'] == true;
+          permanentCount = int.tryParse(data['permanent_count']?.toString() ?? '') ?? 0;
+          permanentCountCtrl.text = permanentCount.toString();
 
           presentWorkers =
               List<Map<String, dynamic>>.from(data['present_workers'] ?? []);
@@ -898,11 +911,51 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         Row(children: [
           Expanded(
               child: _numField(maleCountCtrl, loc.faMaleFull,
-                  enabled: _canEditHeadcount)),
+                  enabled: _canEditHeadcount,
+                  // Just forces a rebuild so the Total box below
+                  // updates live as the user types - the actual value
+                  // is still read straight from the controller.
+                  onChanged: _canEditHeadcount ? (_) => setState(() {}) : null)),
           const SizedBox(width: 10),
           Expanded(
               child: _numField(femaleCountCtrl, loc.faFemaleFull,
-                  enabled: _canEditHeadcount)),
+                  enabled: _canEditHeadcount,
+                  onChanged: _canEditHeadcount ? (_) => setState(() {}) : null)),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(
+              // Always disabled - it's a live count from the permanent
+              // workers list, never something entered here.
+              child: _numField(permanentCountCtrl, loc.faPermanentFull,
+                  enabled: false)),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 2,
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              decoration: BoxDecoration(
+                  color: const Color(0xFFF4F7F2),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE0E7D8))),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(loc.faTotalWorkersAvailable,
+                      style: const TextStyle(
+                          fontSize: 12, color: Color(0xFF6B7280))),
+                  Text(
+                    '${(int.tryParse(maleCountCtrl.text) ?? 0) + (int.tryParse(femaleCountCtrl.text) ?? 0) + permanentCount}',
+                    style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: idaDark),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ]),
         if (_canEditHeadcount) ...[
           const SizedBox(height: 12),
@@ -930,10 +983,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   Widget _numField(TextEditingController ctrl, String label,
-      {required bool enabled, bool decimal = false}) {
+      {required bool enabled, bool decimal = false, ValueChanged<String>? onChanged}) {
     return TextField(
       controller: ctrl,
       enabled: enabled,
+      onChanged: onChanged,
       keyboardType: decimal
           ? const TextInputType.numberWithOptions(decimal: true)
           : TextInputType.number,

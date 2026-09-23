@@ -23,7 +23,8 @@ import '../../localization/transliterate.dart';
 import '../../services/api_service.dart';
 import '../../services/responsive.dart';
 
-enum _Tab { orchardBlocks, stageTemplates, sprayTemplates, productBrands }
+import '../../config/app_config.dart';
+enum _Tab { orchardBlocks, stageTemplates, sprayTemplates }
 
 class AgronomySetupScreen extends StatefulWidget {
   const AgronomySetupScreen({super.key});
@@ -34,7 +35,7 @@ class AgronomySetupScreen extends StatefulWidget {
 class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   static const stageTriggerTypes = ['DAS', 'DAF', 'DAP', 'DAH'];
   static const sprayTriggerTypes = ['DAS', 'DAF', 'DAP', 'DAH', 'DAPREV'];
@@ -52,12 +53,8 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
   List orchardBlocks = [];
   List stageTemplates = [];
   List sprayTemplates = [];
-  List productBrands = [];
   bool loading = true;
   bool _canEditAgri = false;
-  bool _canDeleteAgri = false;
-  bool _canAddAgri = false;
-  bool _canUpdateAgri = false;
 
   List get perennialVarieties =>
       varieties.where((v) => v['crop_type'] == 'perennial').toList();
@@ -68,15 +65,6 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
     _loadAll();
     ApiService.canEdit('agri').then((v) {
       if (mounted) setState(() => _canEditAgri = v);
-    });
-    ApiService.canDelete('agri').then((v) {
-      if (mounted) setState(() => _canDeleteAgri = v);
-    });
-    ApiService.canAdd('agri').then((v) {
-      if (mounted) setState(() => _canAddAgri = v);
-    });
-    ApiService.canUpdate('agri').then((v) {
-      if (mounted) setState(() => _canUpdateAgri = v);
     });
   }
 
@@ -99,7 +87,6 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
         http.get(Uri.parse('$baseUrl/agri/crop-stage-templates'), headers: h),
         http.get(Uri.parse('$baseUrl/agri/spray-schedule-templates'),
             headers: h),
-        http.get(Uri.parse('$baseUrl/agri/product-brands'), headers: h),
       ]);
       if (results[0].statusCode == 200) farms = jsonDecode(results[0].body);
       if (results[1].statusCode == 200) varieties = jsonDecode(results[1].body);
@@ -109,8 +96,6 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
         stageTemplates = jsonDecode(results[3].body);
       if (results[4].statusCode == 200)
         sprayTemplates = jsonDecode(results[4].body);
-      if (results[5].statusCode == 200)
-        productBrands = jsonDecode(results[5].body);
     } catch (e) {
       debugPrint('Load error: $e');
     } finally {
@@ -291,8 +276,7 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
                 onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-              onPressed: (submitting ||
-                      (block == null ? !_canAddAgri : !_canUpdateAgri))
+              onPressed: submitting
                   ? null
                   : () async {
                       setDialogState(() => submitting = true);
@@ -474,8 +458,7 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
                 onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-              onPressed: (submitting ||
-                      (template == null ? !_canAddAgri : !_canUpdateAgri))
+              onPressed: submitting
                   ? null
                   : () async {
                       if (stageNameCtrl.text.trim().isEmpty ||
@@ -711,8 +694,7 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
                   onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-                onPressed: (submitting ||
-                        (template == null ? !_canAddAgri : !_canUpdateAgri))
+                onPressed: submitting
                     ? null
                     : () async {
                         if (daysCtrl.text.trim().isEmpty) return;
@@ -811,9 +793,6 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
                   case _Tab.sprayTemplates:
                     _showSprayTemplateDialog();
                     break;
-                  case _Tab.productBrands:
-                    _showProductBrandDialog();
-                    break;
                 }
               },
               child: const Icon(Icons.add, color: Colors.white),
@@ -831,9 +810,6 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
             const SizedBox(width: 6),
             _segment(loc.agriSprayTemplatesTab, _Tab.sprayTemplates,
                 sprayTemplates.length),
-            const SizedBox(width: 6),
-            _segment(
-                'Product Brands', _Tab.productBrands, productBrands.length),
           ]),
         ),
         Expanded(
@@ -928,27 +904,6 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
                   );
                 },
               );
-      case _Tab.productBrands:
-        // Grouped by compound - "Pendimethalin 38.7% CS (3 brands)" -
-        // tap to see/edit the actual brand names for that compound.
-        return productBrands.isEmpty
-            ? _empty(
-                'No product brands added yet — tap + to add your first one.')
-            : ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                itemCount: productBrands.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (_, i) {
-                  final p = productBrands[i];
-                  return _row(
-                    title: p['compound_name'],
-                    subtitle:
-                        '${p['brand_count']} brand${p['brand_count'] == 1 ? '' : 's'} on file',
-                    onTap: () => _showProductBrandDialog(
-                        compoundName: p['compound_name']),
-                  );
-                },
-              );
     }
   }
 
@@ -983,152 +938,6 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
           if (onTap != null)
             const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
         ]),
-      ),
-    );
-  }
-
-  Future<void> _showProductBrandDialog({String? compoundName}) async {
-    final compoundCtrl = TextEditingController(text: compoundName ?? '');
-    final newBrandCtrl = TextEditingController();
-    List<Map<String, dynamic>> existingBrands = [];
-    bool loadingBrands = compoundName != null;
-    bool submitting = false;
-
-    if (compoundName != null) {
-      try {
-        final h = await _headers;
-        final res = await http.get(
-          Uri.parse(
-              '$baseUrl/agri/product-brands/for-compound/${Uri.encodeComponent(compoundName)}'),
-          headers: h,
-        );
-        if (res.statusCode == 200) {
-          existingBrands =
-              List<Map<String, dynamic>>.from(jsonDecode(res.body));
-        }
-      } catch (_) {}
-      loadingBrands = false;
-    }
-
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(compoundName == null ? 'Add Product Brand' : compoundName,
-              style: const TextStyle(fontWeight: FontWeight.w700)),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              // Compound name only editable when adding fresh -
-              // editing an existing compound's brand list keeps the
-              // name fixed, to avoid accidentally creating a second,
-              // slightly-misspelled variant of the same compound.
-              TextField(
-                controller: compoundCtrl,
-                enabled: compoundName == null,
-                decoration: InputDecoration(
-                    labelText: 'Compound (e.g. "Pendimethalin 38.7% CS")',
-                    isDense: true,
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10))),
-              ),
-              const SizedBox(height: 14),
-              if (loadingBrands)
-                const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: CircularProgressIndicator(color: idaGreen),
-                )
-              else if (existingBrands.isNotEmpty) ...[
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Brands on file',
-                      style:
-                          TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-                ),
-                const SizedBox(height: 6),
-                ...existingBrands.map((b) => Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Row(children: [
-                        Expanded(
-                            child: Text(b['brand_name'],
-                                style: const TextStyle(fontSize: 13))),
-                        if (_canDeleteAgri)
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline,
-                                size: 18, color: Colors.red),
-                            onPressed: () async {
-                              final h = await _headers;
-                              await http.delete(
-                                  Uri.parse(
-                                      '$baseUrl/agri/product-brands/${b['id']}'),
-                                  headers: h);
-                              setDialogState(() => existingBrands.remove(b));
-                            },
-                          ),
-                      ]),
-                    )),
-                const SizedBox(height: 8),
-              ],
-              Row(children: [
-                Expanded(
-                  child: TextField(
-                    controller: newBrandCtrl,
-                    decoration: InputDecoration(
-                        labelText: 'Add a brand name',
-                        isDense: true,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10))),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.add_circle, color: idaGreen),
-                  onPressed: submitting
-                      ? null
-                      : () async {
-                          final compound = compoundCtrl.text.trim();
-                          final brand = newBrandCtrl.text.trim();
-                          if (compound.isEmpty || brand.isEmpty) return;
-                          setDialogState(() => submitting = true);
-                          final h = await _headers;
-                          final res = await http.post(
-                            Uri.parse('$baseUrl/agri/product-brands'),
-                            headers: {...h, 'Content-Type': 'application/json'},
-                            body: jsonEncode({
-                              'compound_name': compound,
-                              'brand_name': brand
-                            }),
-                          );
-                          setDialogState(() => submitting = false);
-                          if (res.statusCode == 201) {
-                            newBrandCtrl.clear();
-                            setDialogState(() => existingBrands.add({
-                                  'id': jsonDecode(res.body)['id'],
-                                  'brand_name': brand
-                                }));
-                          } else {
-                            final data = jsonDecode(res.body);
-                            _showSnack(data['error'] ?? 'Failed to add brand',
-                                isError: true);
-                          }
-                        },
-                ),
-              ]),
-            ]),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                Navigator.pop(ctx);
-                await _loadAll();
-              },
-              child: const Text('Done'),
-            ),
-          ],
-        ),
       ),
     );
   }

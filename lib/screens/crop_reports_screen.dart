@@ -24,6 +24,7 @@ import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
 
+import '../config/app_config.dart';
 class CropReportsScreen extends StatefulWidget {
   const CropReportsScreen({super.key});
   @override
@@ -34,7 +35,7 @@ class _CropReportsScreenState extends State<CropReportsScreen>
     with SingleTickerProviderStateMixin {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   late TabController _tabController;
   List farms = [];

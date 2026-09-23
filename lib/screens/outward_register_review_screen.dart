@@ -13,8 +13,8 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
-import '../services/api_service.dart';
 
+import '../config/app_config.dart';
 enum ReviewFilter { needsAttention, allApproved, allRecords }
 
 class OutwardRegisterReviewListScreen extends StatefulWidget {
@@ -28,7 +28,7 @@ class _OutwardRegisterReviewListScreenState
     extends State<OutwardRegisterReviewListScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   List records = [];
   bool loading = true;
@@ -268,7 +268,7 @@ class _OutwardRegisterReviewScreenState
     extends State<OutwardRegisterReviewScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   bool loading = true;
   Map<String, dynamic>? record;
@@ -624,16 +624,6 @@ class _AdminSectionCardState extends State<_AdminSectionCard> {
 
   bool expanded = true; // sections needing review default open
   bool saving = false;
-  bool canUpdate = false;
-
-  @override
-  void initState() {
-    super.initState();
-    ApiService.canUpdateSection('outward_register', widget.sectionKey)
-        .then((v) {
-      if (mounted) setState(() => canUpdate = v);
-    });
-  }
 
   String get status => widget.section == null
       ? 'not_started'
@@ -831,8 +821,7 @@ class _AdminSectionCardState extends State<_AdminSectionCard> {
                     child: SizedBox(
                       height: 40,
                       child: OutlinedButton(
-                        onPressed:
-                            (saving || !canUpdate) ? null : _showReturnDialog,
+                        onPressed: saving ? null : _showReturnDialog,
                         style: OutlinedButton.styleFrom(
                           foregroundColor: const Color(0xFFB23A3A),
                           side: const BorderSide(color: Color(0xFFB23A3A)),
@@ -850,12 +839,9 @@ class _AdminSectionCardState extends State<_AdminSectionCard> {
                     child: SizedBox(
                       height: 40,
                       child: ElevatedButton(
-                        onPressed: (saving || !canUpdate)
-                            ? null
-                            : () => _setStatus('approved'),
+                        onPressed: saving ? null : () => _setStatus('approved'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: idaGreen,
-                          disabledBackgroundColor: Colors.grey.shade300,
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8)),
                         ),
@@ -865,8 +851,8 @@ class _AdminSectionCardState extends State<_AdminSectionCard> {
                                 height: 14,
                                 child: CircularProgressIndicator(
                                     strokeWidth: 2, color: Colors.white))
-                            : Text(canUpdate ? 'Approve' : 'No permission',
-                                style: const TextStyle(
+                            : const Text('Approve',
+                                style: TextStyle(
                                     color: Colors.white,
                                     fontSize: 12.5,
                                     fontWeight: FontWeight.w700)),

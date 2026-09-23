@@ -17,8 +17,8 @@ import 'crop_calendar_screen.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
-import '../services/api_service.dart';
 
+import '../config/app_config.dart';
 class CropCyclesScreen extends StatefulWidget {
   const CropCyclesScreen({super.key});
   @override
@@ -28,7 +28,7 @@ class CropCyclesScreen extends StatefulWidget {
 class _CropCyclesScreenState extends State<CropCyclesScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   List sowingPlans = [];
   List orchardCycles = [];
@@ -36,14 +36,10 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
   List seasonalVarieties = [];
   List orchardBlocks = [];
   bool loading = true;
-  bool canAdd = false;
 
   @override
   void initState() {
     super.initState();
-    ApiService.canAdd('agri').then((v) {
-      if (mounted) setState(() => canAdd = v);
-    });
     _loadAll();
   }
 
@@ -169,15 +165,6 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
     String intraPairUnit = 'cm';
     final interPairCtrl = TextEditingController();
     String interPairUnit = 'cm';
-    // 'sequence' arrangement: an ordered, repeating list of gaps -
-    // since this screen creates ONE crop at a time (no intercrop
-    // picker here), every pattern line is implicitly the same crop
-    // as varietyId above - only the gap-to-next-line value varies.
-    // Each entry wraps to the first after the last.
-    final List<Map<String, dynamic>> patternLines = [
-      {'gapCtrl': TextEditingController(), 'unit': 'in'},
-      {'gapCtrl': TextEditingController(), 'unit': 'in'},
-    ];
     bool submitting = false;
 
     showDialog(
@@ -301,9 +288,6 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                       child: Text(loc.agriArrangementUniform)),
                   DropdownMenuItem(
                       value: 'paired', child: Text(loc.agriArrangementPaired)),
-                  const DropdownMenuItem(
-                      value: 'sequence',
-                      child: Text('Custom sequence (multi-line pattern)')),
                 ],
                 onChanged: (v) => setDialogState(() => rowArrangement = v!),
               ),
@@ -326,7 +310,7 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                   _unitDropdown(loc, rowSpacingUnit,
                       (v) => setDialogState(() => rowSpacingUnit = v)),
                 ])
-              else if (rowArrangement == 'paired') ...[
+              else ...[
                 Row(children: [
                   Expanded(
                     child: TextField(
@@ -362,64 +346,6 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                   _unitDropdown(loc, interPairUnit,
                       (v) => setDialogState(() => interPairUnit = v)),
                 ]),
-              ] else ...[
-                // 'sequence': an ordered, repeating list of gaps -
-                // e.g. Khalla's 16"/30"/16"/22" - the last line's gap
-                // wraps back to line 1. All lines are this same crop
-                // (varietyId above), since this screen creates one
-                // crop at a time.
-                Text(
-                    'Enter the gap to the NEXT line, in order. The last gap wraps back to line 1.',
-                    style:
-                        TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
-                const SizedBox(height: 10),
-                ...patternLines.asMap().entries.map((entry) {
-                  final i = entry.key;
-                  final line = entry.value;
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Row(children: [
-                      SizedBox(
-                        width: 22,
-                        child: Text('${i + 1}.',
-                            style: const TextStyle(
-                                fontSize: 12, fontWeight: FontWeight.w600)),
-                      ),
-                      Expanded(
-                        child: TextField(
-                          controller: line['gapCtrl'],
-                          keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true),
-                          decoration: InputDecoration(
-                              labelText: 'Gap to next line',
-                              isDense: true,
-                              border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10))),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      _unitDropdown(loc, line['unit'],
-                          (v) => setDialogState(() => line['unit'] = v)),
-                      IconButton(
-                        icon: const Icon(Icons.remove_circle_outline,
-                            size: 20, color: Colors.red),
-                        onPressed: patternLines.length <= 2
-                            ? null // a cycle needs at least 2 lines
-                            : () =>
-                                setDialogState(() => patternLines.removeAt(i)),
-                      ),
-                    ]),
-                  );
-                }),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: () => setDialogState(() => patternLines.add(
-                        {'gapCtrl': TextEditingController(), 'unit': 'in'})),
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add line'),
-                  ),
-                ),
               ],
             ]),
           ),
@@ -465,47 +391,9 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                             'inter_pair_distance_unit': interPairUnit,
                         }),
                       );
-                      Map<String, dynamic>? data;
-                      if (res.statusCode == 201) {
-                        data = jsonDecode(res.body);
-                        // 'sequence' mode: save the pattern lines in a
-                        // follow-up call, now that we have the new
-                        // plan's id. Every line uses the same
-                        // varietyId - this screen creates one crop at
-                        // a time, no per-line crop picker.
-                        if (rowArrangement == 'sequence') {
-                          final linesPayload = patternLines
-                              .map((l) => {
-                                    'crop_variety_id': varietyId,
-                                    'gap_to_next': double.tryParse(
-                                        (l['gapCtrl'] as TextEditingController)
-                                            .text
-                                            .trim()),
-                                    'gap_to_next_unit': l['unit'],
-                                  })
-                              .toList();
-                          final linesRes = await http.post(
-                            Uri.parse(
-                                '$baseUrl/agri/sowing-plans/${data!['id']}/pattern-lines'),
-                            headers: {...h, 'Content-Type': 'application/json'},
-                            body: jsonEncode({'lines': linesPayload}),
-                          );
-                          if (linesRes.statusCode != 201) {
-                            // Main plan WAS created successfully - only
-                            // the pattern lines failed. Say so plainly
-                            // rather than a generic failure message,
-                            // since the two are separate outcomes here.
-                            if (ctx.mounted) Navigator.pop(ctx);
-                            _showSnack(
-                                'Sowing plan saved, but the pattern lines failed to save — edit the plan to re-enter them.',
-                                isError: true);
-                            await _loadAll();
-                            return;
-                          }
-                        }
-                      }
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (res.statusCode == 201) {
+                        final data = jsonDecode(res.body);
                         _showSnack(loc.agriScheduleGenerated);
                         await _loadAll();
                         if (mounted) {
@@ -514,13 +402,13 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                               MaterialPageRoute(
                                   builder: (_) => CropCalendarScreen(
                                       cycleType: 'seasonal',
-                                      cycleId: data!['id'],
+                                      cycleId: data['id'],
                                       title:
                                           '${tl(context, data['crop_variety_name'])} — ${tl(context, data['farm_name'])}')));
                         }
                       } else {
-                        final errData = jsonDecode(res.body);
-                        _showSnack(errData['error'] ?? loc.agriFailedSave,
+                        final data = jsonDecode(res.body);
+                        _showSnack(data['error'] ?? loc.agriFailedSave,
                             isError: true);
                       }
                     },
@@ -693,13 +581,11 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
         title: Text(loc.agriCyclesTitle,
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       ),
-      floatingActionButton: !canAdd
-          ? null
-          : FloatingActionButton(
-              backgroundColor: idaGreen,
-              onPressed: _showAddMenu,
-              child: const Icon(Icons.add, color: Colors.white),
-            ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: idaGreen,
+        onPressed: _showAddMenu,
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
       body: loading
           ? const Center(child: CircularProgressIndicator(color: idaGreen))
           : RefreshIndicator(

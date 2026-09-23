@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import '../services/responsive.dart';
 
+import '../config/app_config.dart';
 class OtpApprovalsScreen extends StatefulWidget {
   const OtpApprovalsScreen({super.key});
   @override
@@ -22,7 +23,7 @@ class OtpApprovalsScreen extends StatefulWidget {
 class _OtpApprovalsScreenState extends State<OtpApprovalsScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   List _requests = [];
   bool _loading = true;

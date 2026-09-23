@@ -15,8 +15,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:camera/camera.dart';
 import '../services/face_recognition_service.dart';
-import '../services/api_service.dart';
 
+import '../config/app_config.dart';
 class FaceMatchResult {
   final int workerId;
   final String name;
@@ -40,7 +40,7 @@ class _FaceAttendanceCaptureScreenState
     extends State<FaceAttendanceCaptureScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   CameraController? _controller;
   final _faceService = FaceRecognitionService();
@@ -52,14 +52,10 @@ class _FaceAttendanceCaptureScreenState
       _capturedBytes; // XFile.path isn't a real filesystem path on web; read bytes instead for display
   Map<String, dynamic>?
       _matchResult; // {matched, name, worker_id, gender, daily_wage, distance}
-  bool canAccess = false;
 
   @override
   void initState() {
     super.initState();
-    ApiService.canAccess('farm_attendance').then((v) {
-      if (mounted) setState(() => canAccess = v);
-    });
     _init();
   }
 
@@ -246,17 +242,13 @@ class _FaceAttendanceCaptureScreenState
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                             ElevatedButton.icon(
-                              onPressed: canAccess ? _captureAndMatch : null,
+                              onPressed: _captureAndMatch,
                               icon: const Icon(Icons.camera_alt,
                                   color: Colors.white),
-                              label: Text(
-                                  canAccess
-                                      ? 'Capture & Recognize'
-                                      : 'No permission to use this',
-                                  style: const TextStyle(color: Colors.white)),
+                              label: const Text('Capture & Recognize',
+                                  style: TextStyle(color: Colors.white)),
                               style: ElevatedButton.styleFrom(
                                   backgroundColor: idaGreen,
-                                  disabledBackgroundColor: Colors.grey.shade300,
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 24, vertical: 14)),
                             ),

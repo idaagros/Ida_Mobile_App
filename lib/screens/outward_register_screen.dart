@@ -20,8 +20,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/image_helper.dart';
 import '../services/colored_date_picker.dart';
 import '../services/responsive.dart';
-import '../services/api_service.dart';
 
+import '../config/app_config.dart';
 class OutwardRegisterScreen extends StatefulWidget {
   final int? recordId; // null = create new; non-null = open existing
   const OutwardRegisterScreen({super.key, this.recordId});
@@ -35,13 +35,12 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
   static const grey = Color(0xFF9CA3AF);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   int? recordId;
   bool loading = true;
   bool saving = false;
   String? errorMessage;
-  bool canAddRecord = false;
 
   // ── Header fields ──────────────────────────────────────────
   DateTime dispatchDate = DateTime.now();
@@ -73,9 +72,6 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
   void initState() {
     super.initState();
     recordId = widget.recordId;
-    ApiService.canAdd('outward_register').then((v) {
-      if (mounted) setState(() => canAddRecord = v);
-    });
     _loadDropdowns();
     if (recordId != null) {
       _loadRecord();
@@ -339,9 +335,7 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
                           width: double.infinity,
                           height: 52,
                           child: ElevatedButton.icon(
-                            onPressed: (saving || !canAddRecord)
-                                ? null
-                                : _createRecord,
+                            onPressed: saving ? null : _createRecord,
                             icon: saving
                                 ? const SizedBox(
                                     width: 18,
@@ -352,16 +346,13 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
                             label: Text(
                                 saving
                                     ? 'Creating...'
-                                    : !canAddRecord
-                                        ? 'No permission to create'
-                                        : 'Create Dispatch Entry',
+                                    : 'Create Dispatch Entry',
                                 style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w700,
                                     fontSize: 15)),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: idaGreen,
-                              disabledBackgroundColor: Colors.grey.shade300,
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12)),
                             ),
@@ -1085,15 +1076,10 @@ class _SectionCardState extends State<_SectionCard> {
   String? mode;
   Map<String, dynamic> values = {};
   String? localError;
-  bool canUpdate = false;
 
   @override
   void initState() {
     super.initState();
-    ApiService.canUpdateSection('outward_register', widget.sectionKey)
-        .then((v) {
-      if (mounted) setState(() => canUpdate = v);
-    });
     _hydrate();
   }
 
@@ -1357,10 +1343,9 @@ class _SectionCardState extends State<_SectionCard> {
                   width: double.infinity,
                   height: 42,
                   child: ElevatedButton(
-                    onPressed: (saving || !canUpdate) ? null : _save,
+                    onPressed: saving ? null : _save,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: idaGreen,
-                      disabledBackgroundColor: Colors.grey.shade300,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10)),
                     ),
@@ -1370,8 +1355,8 @@ class _SectionCardState extends State<_SectionCard> {
                             height: 16,
                             child: CircularProgressIndicator(
                                 color: Colors.white, strokeWidth: 2))
-                        : Text(canUpdate ? 'Save Section' : 'No permission',
-                            style: const TextStyle(
+                        : const Text('Save Section',
+                            style: TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.w700,
                                 fontSize: 13)),
@@ -1578,16 +1563,12 @@ class _WeighSlipTileState extends State<_WeighSlipTile> {
   String? photoName;
   bool saving = false;
   String? localError;
-  bool canUpdate = false;
 
   bool get isFactory => widget.slipType == 'factory';
 
   @override
   void initState() {
     super.initState();
-    ApiService.canUpdateSection('outward_register', 'weighment').then((v) {
-      if (mounted) setState(() => canUpdate = v);
-    });
     tareCtrl.text = widget.slip?['tare_weight']?.toString() ?? '';
     grossCtrl.text = widget.slip?['gross_weight']?.toString() ?? '';
     netCtrl.text = widget.slip?['net_weight']?.toString() ?? '';
@@ -1864,7 +1845,7 @@ class _WeighSlipTileState extends State<_WeighSlipTile> {
             child: SizedBox(
               height: 36,
               child: OutlinedButton(
-                onPressed: (saving || !canUpdate) ? null : () => _save(),
+                onPressed: saving ? null : () => _save(),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: idaGreen,
                   side: const BorderSide(color: idaGreen),
@@ -1877,8 +1858,8 @@ class _WeighSlipTileState extends State<_WeighSlipTile> {
                         height: 14,
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: idaGreen))
-                    : Text(canUpdate ? 'Save' : 'No permission',
-                        style: const TextStyle(
+                    : const Text('Save',
+                        style: TextStyle(
                             fontSize: 12, fontWeight: FontWeight.w700)),
               ),
             ),
@@ -1888,9 +1869,8 @@ class _WeighSlipTileState extends State<_WeighSlipTile> {
             child: SizedBox(
               height: 36,
               child: ElevatedButton(
-                onPressed: (saving || isBasis || !canUpdate)
-                    ? null
-                    : () => _save(setAsBasis: true),
+                onPressed:
+                    saving || isBasis ? null : () => _save(setAsBasis: true),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: isBasis ? Colors.grey.shade300 : idaGreen,
                   shape: RoundedRectangleBorder(

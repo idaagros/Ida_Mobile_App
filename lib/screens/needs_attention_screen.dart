@@ -32,6 +32,7 @@ import 'tractor_screen.dart';
 import 'reading_reminder_settings_screen.dart';
 import '../services/responsive.dart';
 
+import '../config/app_config.dart';
 class NeedsAttentionScreen extends StatefulWidget {
   const NeedsAttentionScreen({super.key});
   @override
@@ -41,10 +42,9 @@ class NeedsAttentionScreen extends StatefulWidget {
 class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = 'https://excusable-moving-preorder.ngrok-free.dev/api';
+  static const baseUrl = AppConfig.apiBaseUrl;
 
   bool loading = true;
-  bool _isAdmin = false;
   String? error;
   List<Map<String, dynamic>> items = [];
 
@@ -65,13 +65,7 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
   @override
   void initState() {
     super.initState();
-    _loadIsAdmin();
     _load();
-  }
-
-  Future<void> _loadIsAdmin() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (mounted) setState(() => _isAdmin = prefs.getBool('is_admin') ?? false);
   }
 
   Future<void> _load() async {
@@ -161,15 +155,15 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
         break;
       case 'factory':
         screen = const AdminReviewScreen(
-            initialFilter: 'pending', initialTabIndex: 2);
+            initialFilter: 'pending', initialTabIndex: 3);
         break;
       case 'machine':
         screen = const AdminReviewScreen(
-            initialFilter: 'pending', initialTabIndex: 3);
+            initialFilter: 'pending', initialTabIndex: 4);
         break;
       case 'machine_pf':
         screen = const AdminReviewScreen(
-            initialFilter: 'pending', initialTabIndex: 4);
+            initialFilter: 'pending', initialTabIndex: 5);
         break;
       // Same reasoning - the approve/reject list lives in the History
       // tab (index 2), not the default Activities tab.
@@ -231,18 +225,17 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
         title: const Text('Needs Attention',
             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
         actions: [
-          if (_isAdmin)
-            IconButton(
-              icon: const Icon(Icons.settings_outlined),
-              tooltip: 'Reminder Settings',
-              onPressed: () async {
-                await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const ReadingReminderSettingsScreen()));
-                _load();
-              },
-            ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Reminder Settings',
+            onPressed: () async {
+              await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const ReadingReminderSettingsScreen()));
+              _load();
+            },
+          ),
         ],
       ),
       body: loading

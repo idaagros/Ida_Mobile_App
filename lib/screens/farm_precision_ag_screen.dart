@@ -22,6 +22,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'farm_boundary_map_screen.dart';
 
+import '../config/app_config.dart';
+
 class FarmPrecisionAgScreen extends StatefulWidget {
   final int farmId;
   final String farmName;
@@ -39,9 +41,9 @@ class FarmPrecisionAgScreen extends StatefulWidget {
 class _FarmPrecisionAgScreenState extends State<FarmPrecisionAgScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const apiBase = 'https://excusable-moving-preorder.ngrok-free.dev/api';
-  static const assetBase =
-      'https://excusable-moving-preorder.ngrok-free.dev'; // apiBase without /api - where /uploads/... images are served from
+  static const apiBase = AppConfig.apiBaseUrl;
+  static const assetBase = AppConfig
+      .apiHost; // apiBase without /api - where /uploads/... images are served from
 
   Map<String, dynamic>? _data;
   bool _loading = true;
@@ -396,28 +398,43 @@ class _VegetationHealthCard extends StatelessWidget {
               style: TextStyle(fontSize: 12, color: Colors.grey)));
     }
     final ndvi = double.tryParse(snapshot!['ndvi_mean'].toString()) ?? 0;
-    final (label, color) = _interpretNdvi(ndvi);
+    final ndviVerdict = _interpretNdvi(ndvi);
+    final ndmiRaw = snapshot!['ndmi_mean'];
+    final ndmi = ndmiRaw == null ? null : double.tryParse(ndmiRaw.toString());
+    final ndmiVerdict = ndmi == null ? null : _interpretNdmi(ndmi);
     return _Card(
       title: 'VEGETATION HEALTH',
+      onDetails: () =>
+          _showDetailModal(context, 'Vegetation Health — Details', [
+        _DetailEntry('NDVI: ${ndvi.toStringAsFixed(2)} (${ndviVerdict.label})',
+            ndviVerdict.detail),
+        if (ndmiVerdict != null)
+          _DetailEntry(
+              'Moisture index (NDMI): ${ndmi!.toStringAsFixed(2)} (${ndmiVerdict.label})',
+              ndmiVerdict.detail),
+      ]),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
           Text(ndvi.toStringAsFixed(2),
               style: TextStyle(
-                  fontSize: 30, fontWeight: FontWeight.w800, color: color)),
+                  fontSize: 30,
+                  fontWeight: FontWeight.w800,
+                  color: ndviVerdict.color)),
           const SizedBox(width: 6),
           const Padding(
               padding: EdgeInsets.only(bottom: 4),
               child: Text('NDVI',
                   style: TextStyle(fontSize: 11, color: Colors.grey))),
         ]),
-        Text(label,
+        Text(ndviVerdict.label,
             style: TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w700, color: color)),
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: ndviVerdict.color)),
         const SizedBox(height: 8),
         _kv('Range this period',
             '${_fmt(snapshot!['ndvi_min'])} – ${_fmt(snapshot!['ndvi_max'])}'),
-        if (snapshot!['ndmi_mean'] != null)
-          _kv('Moisture index (NDMI)', _fmt(snapshot!['ndmi_mean'])),
+        if (ndmi != null) _kv('Moisture index (NDMI)', ndmi.toStringAsFixed(2)),
         _kv('Cloud cover', '${snapshot!['cloud_pct']}%'),
         _kv('Imagery date', '${snapshot!['snapshot_date']}'),
       ]),
@@ -428,16 +445,111 @@ class _VegetationHealthCard extends StatelessWidget {
       ? '—'
       : (double.tryParse(v.toString())?.toStringAsFixed(2) ?? v.toString());
 
-  static (String, Color) _interpretNdvi(double ndvi) {
+  static _Verdict _interpretNdvi(double ndvi) {
     if (ndvi < 0.1)
-      return ('Bare soil / no vegetation', const Color(0xFFA8A29E));
+      return _Verdict(
+          'Bare soil / no vegetation',
+          const Color(0xFFA8A29E),
+          const _Detail(
+            "NDVI near zero indicates bare soil or essentially no live vegetation cover in this reading.",
+            "If a crop should be growing at this time, this points to a failed stand, very early growth stage, or a recently harvested/fallow field — it isn't itself a health problem unless a crop was expected to already be well-established.",
+            [
+              "If a crop was recently sown, this is likely just too early for a reading — vegetation index checks are most useful from a few weeks after emergence onward.",
+              "If a stand should already exist and doesn't, check the field itself for germination failure, waterlogging, or seedling-stage pest damage — the satellite reading can flag the problem but not diagnose the specific cause.",
+            ],
+          ));
     if (ndvi < 0.3)
-      return ('Sparse or stressed vegetation', const Color(0xFFF47D1E));
+      return _Verdict(
+          'Sparse or stressed vegetation',
+          const Color(0xFFF47D1E),
+          const _Detail(
+            "Low-to-moderate NDVI suggests sparse crop cover or vegetation under stress.",
+            "This range often reflects early growth stage, patchy germination, water stress, nutrient deficiency, or pest/disease pressure reducing canopy cover.",
+            [
+              "Walk the field to check for a specific cause — uneven germination, waterlogging, visible pest/disease symptoms, or nutrient deficiency signs (yellowing, stunting).",
+              "If early in the season, this may simply be normal for the crop's current growth stage — compare against the NDVI Trend chart rather than judging off one reading.",
+              "If the crop is irrigation-dependent and rainfall/irrigation has been short recently, this is a common signature of water stress.",
+            ],
+          ));
     if (ndvi < 0.5)
-      return ('Moderate vegetation vigor', const Color(0xFFEAB308));
+      return _Verdict(
+          'Moderate vegetation vigor',
+          const Color(0xFFEAB308),
+          const _Detail(
+            "Moderate NDVI indicates a developing, reasonably healthy canopy — not yet at peak vigor.",
+            "This is often just where a crop sits mid-season before full canopy closure, but it's also consistent with mild nutrient or water stress holding growth back.",
+            [
+              "Compare against the NDVI Trend chart — if it's climbing over recent readings, this is likely normal seasonal development, not a problem.",
+              "If it's flat or declining, check nitrogen nutrition and the irrigation schedule.",
+            ],
+          ));
     if (ndvi < 0.7)
-      return ('Healthy, dense vegetation', const Color(0xFF659442));
-    return ('Very dense, vigorous vegetation', const Color(0xFF253917));
+      return _Verdict(
+          'Healthy, dense vegetation',
+          const Color(0xFF659442),
+          const _Detail(
+            "This NDVI range reflects a healthy, well-developed crop canopy.",
+            "Vegetation is growing vigorously with good canopy cover — generally a positive sign for the season.",
+            ["No action needed — continue current management."],
+          ));
+    return _Verdict(
+        'Very dense, vigorous vegetation',
+        const Color(0xFF253917),
+        const _Detail(
+          "This is the highest NDVI band — very dense, vigorous vegetation.",
+          "Usually excellent crop health. In a few crops, however, an extremely dense canopy late in the season can mean excess vegetative growth at the expense of yield (e.g. too much nitrogen pushing leaf growth over grain/fruit fill), so it's worth knowing the crop's normal pattern at this growth stage.",
+          [
+            "Generally no action needed.",
+            "For crops prone to excess vegetative growth (e.g. cotton), confirm this dense canopy timing matches the crop's expected growth stage rather than an unusually late-season nitrogen-driven flush.",
+          ],
+        ));
+  }
+
+  static _Verdict _interpretNdmi(double ndmi) {
+    if (ndmi > 0.4)
+      return _Verdict(
+          'High canopy moisture',
+          const Color(0xFF659442),
+          const _Detail(
+            "High NDMI — the canopy is carrying a lot of water.",
+            "Usually a good sign of well-watered vegetation, though a very high value right after heavy rain can also just reflect standing water/waterlogging rather than healthy moisture inside the plant.",
+            [
+              "No action needed if this follows normal irrigation/rainfall.",
+              "If it follows heavy rain, check for waterlogged patches in the field — that's a drainage issue NDMI alone can't distinguish from healthy moisture.",
+            ],
+          ));
+    if (ndmi > 0.2)
+      return _Verdict(
+          'Adequate canopy moisture',
+          const Color(0xFF88BA63),
+          const _Detail(
+            "Moderate NDMI — adequate canopy moisture.",
+            "Vegetation moisture is in a comfortable range; not a cause for concern on its own.",
+            ["No action needed."],
+          ));
+    if (ndmi > 0)
+      return _Verdict(
+          'Mild moisture stress',
+          const Color(0xFFF47D1E),
+          const _Detail(
+            "Low-moderate NDMI — canopy moisture is on the lower side.",
+            "Can indicate the start of water stress, especially if irrigation or rainfall has been irregular recently.",
+            [
+              "Check the field and irrigation schedule — if the next irrigation/rain is more than a few days out, consider moving it up.",
+              "Cross-check against the NDVI reading — moisture stress showing up here often shows up as reduced NDVI soon after, if not addressed.",
+            ],
+          ));
+    return _Verdict(
+        'Significant moisture stress',
+        const Color(0xFFDC2626),
+        const _Detail(
+          "Negative NDMI indicates significant canopy moisture stress.",
+          "This is a fairly strong water-stress signal — expect visible wilting or leaf rolling in the field if this persists.",
+          [
+            "Irrigate as soon as practical if water is available.",
+            "If this is unexpected (irrigation was recent), check for a blockage/failure in the irrigation system or root damage limiting water uptake, rather than assuming the field is simply dry.",
+          ],
+        ));
   }
 }
 
@@ -519,6 +631,13 @@ class _SoilCard extends StatelessWidget {
       title: 'SOIL PROPERTIES',
       subtitle:
           'Modeled (SoilGrids, 250m resolution, topsoil 0–5cm) — a lab soil test will be more precise for this exact field',
+      onDetails: () => _showDetailModal(context, 'Soil Properties — Details', [
+        for (final r in rows)
+          if (r.detail != null)
+            _DetailEntry(
+                '${r.label}: ${r.value}${r.verdict != null ? ' (${r.verdict})' : ''}',
+                r.detail!),
+      ]),
       child: Column(children: [
         for (final r in rows) _SoilRow(data: r),
         const Divider(height: 20),
@@ -534,118 +653,263 @@ class _SoilCard extends StatelessWidget {
 
   static _SoilRowData _interpretPh(dynamic raw) {
     final v = raw == null ? null : double.tryParse(raw.toString());
-    if (v == null) return _SoilRowData('pH (H₂O)', '—', null, null, null);
+    if (v == null) return _SoilRowData('pH (H₂O)', '—', null, null, null, null);
     String verdict;
     Color tone;
     String? note;
+    _Detail detail;
     if (v < 5.5) {
       verdict = 'Acidic';
       tone = Colors.red;
       note = 'liming may help most field crops';
+      detail = const _Detail(
+        "Your soil is acidic — below the neutral point of 7.0.",
+        "Below this level, aluminium and manganese can become soluble enough to be toxic to root growth, and phosphorus gets chemically locked up, so crops often show poor root development and nutrient deficiency despite fertilization.",
+        [
+          "Apply agricultural lime (calcium carbonate) — broadcast and incorporate before sowing; a heavier, high-CEC soil needs more lime to shift pH than a sandy soil.",
+          "Use dolomitic lime instead if a soil test also shows low magnesium.",
+          "Avoid acidifying fertilizers (ammonium sulphate, excess urea) until pH recovers — they push pH lower.",
+          "Retest after a season, since lime reacts slowly.",
+        ],
+      );
     } else if (v < 6.5) {
       verdict = 'Slightly acidic';
       tone = Colors.orange;
       note = 'fine for most crops';
-    } else if (v <= 7.5) {
+      detail = const _Detail(
+        "Mildly acidic, on the safe side of neutral.",
+        "Most crops handle this comfortably — nutrient availability is close to optimal in this band.",
+        [
+          "No correction generally needed.",
+          "If growing a pH-sensitive crop, a light lime application can nudge it closer to neutral.",
+          "Keep monitoring — continuous use of acidifying nitrogen fertilizers over years can push this lower.",
+        ],
+      );
+    } else if (v < 7.5) {
       verdict = 'Neutral';
       tone = const Color(0xFF659442);
       note = 'ideal range for most field crops';
+      detail = const _Detail(
+        "Your soil is at or near the ideal pH — around 7.0 is perfectly neutral.",
+        "Nutrient availability is at its best in this range; almost nothing is chemically locked up.",
+        [
+          "No correction needed.",
+          "Maintain organic matter inputs (FYM/compost) to keep this stable long-term."
+        ],
+      );
     } else if (v <= 8.5) {
       verdict = 'Slightly alkaline';
       tone = Colors.orange;
       note = 'watch zinc/iron availability over time';
+      detail = const _Detail(
+        "Your soil is mildly alkaline (7.0 is perfectly neutral).",
+        "Most major crops tolerate this level well. However, some essential micronutrients like iron, zinc, and manganese start getting locked up in the soil, making them harder for plants to absorb.",
+        [
+          "Use acidifying fertilizers: when applying macronutrients, use nitrogen sources like ammonium sulphate or urea instead of calcium ammonium nitrate — these naturally lower pH right around the root zone.",
+          "Apply elemental sulphur for a long-term fix — broadcast onto the field; soil bacteria slowly convert it to sulphuric acid, lowering the overall pH. (A high-CEC soil needs more sulphur than a sandy soil to shift pH by the same amount.)",
+          "Use chelated micronutrients — if crops show yellowing leaves (micronutrient deficiency), apply micronutrients in chelated form or as foliar sprays so the plant bypasses the alkaline soil entirely.",
+        ],
+      );
     } else {
       verdict = 'Alkaline';
       tone = Colors.red;
       note = 'can limit micronutrient uptake';
+      detail = const _Detail(
+        "Your soil is strongly alkaline.",
+        "At this level, iron, zinc, manganese and phosphorus availability drops sharply — expect visible micronutrient deficiency symptoms (interveinal yellowing) even with normal fertilization, and some crops may struggle to establish at all.",
+        [
+          "Apply elemental sulphur or gypsum (gypsum helps more where sodium is also a problem) — this is a slow, multi-season correction, not a quick fix.",
+          "Lean on foliar/chelated micronutrient sprays every season until soil pH comes down, since root uptake will stay poor in the meantime.",
+          "Improve drainage — high alkalinity is often paired with poor drainage/salt accumulation in this region; ensure fields aren't waterlogged after irrigation.",
+          "Consider a proper soil test to check for a sodicity problem (high exchangeable sodium), which needs a different remedy (gypsum) than plain alkalinity.",
+        ],
+      );
     }
-    return _SoilRowData('pH (H₂O)', v.toString(), verdict, tone, note);
+    return _SoilRowData('pH (H₂O)', v.toString(), verdict, tone, note, detail);
   }
 
   static _SoilRowData _interpretOrganicCarbon(dynamic raw) {
     final v = raw == null ? null : double.tryParse(raw.toString());
-    if (v == null) return _SoilRowData('Organic carbon', '—', null, null, null);
+    if (v == null)
+      return _SoilRowData('Organic carbon', '—', null, null, null, null);
     String verdict;
     Color tone;
     String? note;
+    _Detail detail;
     if (v < 5) {
       verdict = 'Low';
       tone = Colors.red;
       note = 'consider FYM/compost to build fertility';
+      detail = const _Detail(
+        "Your soil's organic carbon reserve is low.",
+        "Low organic carbon means poor natural fertility, weaker water-holding capacity, and less microbial activity — you'll depend more heavily on chemical fertilizer for the same yield, and the soil will dry out faster between irrigations/rain.",
+        [
+          "Apply farmyard manure (FYM) or compost every season — this is the single biggest lever for organic carbon.",
+          "Incorporate crop residue instead of burning it — residue burning is exactly what keeps organic carbon low.",
+          "Consider green manuring (e.g. dhaincha, sunhemp) ploughed in before the main crop.",
+          "Reduce tillage where practical — organic carbon breaks down faster under heavy, repeated tillage.",
+        ],
+      );
     } else if (v < 7.5) {
       verdict = 'Medium';
       tone = Colors.orange;
       note = null;
+      detail = const _Detail(
+        "Your soil's organic carbon is in a moderate, workable range.",
+        "Fertility is reasonable but not a strong buffer — yields depend more on season-to-season fertilizer management.",
+        [
+          "Keep up regular FYM/compost applications to build this further rather than let it plateau.",
+          "Continue residue incorporation."
+        ],
+      );
     } else {
       verdict = 'High';
       tone = const Color(0xFF659442);
       note = 'good fertility reserve';
+      detail = const _Detail(
+        "Your soil has a strong organic carbon reserve.",
+        "Good natural fertility, better water-holding capacity, and more resilient microbial activity — this soil buffers fertilizer mistakes better than most.",
+        [
+          "Maintain current organic matter practices — this is a genuine asset, worth protecting rather than mining through continuous heavy tillage."
+        ],
+      );
     }
-    return _SoilRowData('Organic carbon', '$v g/kg', verdict, tone, note);
+    return _SoilRowData(
+        'Organic carbon', '$v g/kg', verdict, tone, note, detail);
   }
 
   static _SoilRowData _interpretNitrogen(dynamic raw) {
     final v = raw == null ? null : double.tryParse(raw.toString());
     if (v == null)
-      return _SoilRowData('Nitrogen (total)', '—', null, null, null);
+      return _SoilRowData('Nitrogen (total)', '—', null, null, null, null);
     String verdict;
     Color tone;
+    _Detail detail;
     if (v < 0.5) {
       verdict = 'Low reserve';
       tone = Colors.red;
+      detail = const _Detail(
+        "Total nitrogen reserve in the soil is low.",
+        "This measures the soil's total nitrogen stock, not what's immediately available this season — but a low reserve generally means the field depends almost entirely on applied fertilizer for nitrogen, with little natural buffering.",
+        [
+          "Follow the full recommended nitrogen dose for the crop — don't cut corners assuming residual nitrogen is present.",
+          "Split nitrogen doses across growth stages instead of one large basal dose — this reduces leaching loss and matches a low-reserve soil better.",
+          "Build organic matter over time (FYM, green manure) — this is what actually raises the total reserve, not a single season of fertilizer.",
+        ],
+      );
     } else if (v < 1.5) {
       verdict = 'Medium reserve';
       tone = Colors.orange;
+      detail = const _Detail(
+        "Total nitrogen reserve is moderate.",
+        "Reasonable natural nitrogen supply, but still needs full seasonal fertilization for good yields — don't rely on this reserve alone.",
+        [
+          "Standard recommended nitrogen dose for the crop is fine; no special adjustment needed."
+        ],
+      );
     } else {
       verdict = 'High reserve';
       tone = const Color(0xFF659442);
+      detail = const _Detail(
+        "Total nitrogen reserve is strong.",
+        "Good natural nitrogen supply — some crops (especially after a legume rotation) may need slightly less applied nitrogen than the standard recommendation.",
+        [
+          "Consider a soil/tissue test before the season to fine-tune down from standard fertilizer doses — over-applying nitrogen on an already-rich soil wastes money and can encourage lodging/excess vegetative growth in some crops."
+        ],
+      );
     }
-    return _SoilRowData('Nitrogen (total)', '$v g/kg', verdict, tone, null);
+    return _SoilRowData(
+        'Nitrogen (total)', '$v g/kg', verdict, tone, null, detail);
   }
 
   static _SoilRowData _interpretCec(dynamic raw) {
     final v = raw == null ? null : double.tryParse(raw.toString());
-    if (v == null) return _SoilRowData('CEC', '—', null, null, null);
+    if (v == null) return _SoilRowData('CEC', '—', null, null, null, null);
     String verdict;
     Color tone;
     String? note;
+    _Detail detail;
     if (v < 10) {
       verdict = 'Low';
       tone = Colors.red;
       note = 'nutrients leach fast — fertilize little and often';
+      detail = const _Detail(
+        "Cation exchange capacity (CEC) is low — this is the soil's ability to hold onto and supply positively-charged nutrients (potassium, calcium, magnesium, ammonium) against leaching.",
+        "A low-CEC soil loses nutrients to leaching quickly after heavy rain or irrigation, even when enough fertilizer has been applied — fertilizer can seem to \"not work as well\" as expected.",
+        [
+          "Fertilize in smaller, more frequent doses instead of one large application — matches how little the soil can hold at once.",
+          "Build organic matter (FYM/compost) — organic matter itself contributes significant CEC, so this is a long-term fix as well as a fertility one.",
+          "Avoid heavy fertilizer application right before expected heavy rain.",
+        ],
+      );
     } else if (v < 25) {
       verdict = 'Medium';
       tone = Colors.orange;
       note = null;
+      detail = const _Detail(
+        "CEC is in a moderate, workable range.",
+        "Reasonable nutrient-holding capacity — standard fertilizer scheduling should work without major losses.",
+        ["No special adjustment needed; continue normal practice."],
+      );
     } else {
       verdict = 'High';
       tone = const Color(0xFF659442);
       note = 'holds nutrients well, less leaching';
+      detail = const _Detail(
+        "CEC is high — this soil holds onto nutrients well.",
+        "Less nutrient loss to leaching, so fertilizer applications are used more efficiently — but a high-CEC soil (usually with heavier clay content) also needs proportionally more lime or sulphur to shift its pH than a lighter soil, since it \"holds onto\" its current pH too.",
+        [
+          "Standard fertilizer scheduling is fine.",
+          "If also correcting pH (liming or sulphur), budget for a larger quantity than a generic recommendation assumes, precisely because of this high CEC.",
+        ],
+      );
     }
-    return _SoilRowData('CEC', '$v cmol/kg', verdict, tone, note);
+    return _SoilRowData('CEC', '$v cmol/kg', verdict, tone, note, detail);
   }
 
   static _SoilRowData _interpretBulkDensity(dynamic raw) {
     final v = raw == null ? null : double.tryParse(raw.toString());
-    if (v == null) return _SoilRowData('Bulk density', '—', null, null, null);
+    if (v == null)
+      return _SoilRowData('Bulk density', '—', null, null, null, null);
     String verdict;
     Color tone;
     String? note;
+    _Detail detail;
     if (v < 1.3) {
       verdict = 'Loose / well-aerated';
       tone = const Color(0xFF659442);
       note = null;
+      detail = const _Detail(
+        "Soil bulk density is low — the soil is loose and well-aerated.",
+        "Good for root penetration and water infiltration; generally a favorable sign, though very low density can occasionally mean weaker structural stability in a sandy soil.",
+        ["No correction needed for most crops."],
+      );
     } else if (v <= 1.6) {
       verdict = 'Normal for cultivated soil';
       tone = Colors.orange;
       note = null;
+      detail = const _Detail(
+        "Bulk density is in the normal range for cultivated soil.",
+        "Roots and water should move through this soil without much resistance.",
+        ["No correction needed; maintain current tillage practice."],
+      );
     } else {
       verdict = 'Compacted';
       tone = Colors.red;
       note =
           'may restrict roots/water — deep tillage or organic matter can help';
+      detail = const _Detail(
+        "Bulk density is high — the soil is compacted.",
+        "Compacted soil restricts root penetration and water infiltration, which can show up as stunted growth, waterlogged patches after rain, and poor response to fertilizer (since roots can't reach it).",
+        [
+          "Deep tillage (subsoiling/chiseling) before the next season to break up the compacted layer — most effective when the soil is at the right moisture (not too wet, not bone dry).",
+          "Build organic matter over time (FYM/compost, green manure, residue incorporation) — this is the long-term fix; deep tillage alone re-compacts within a season or two without it.",
+          "Avoid field traffic (tractor, tillage implements) when the soil is wet — this is usually what causes compaction in the first place.",
+        ],
+      );
     }
-    return _SoilRowData('Bulk density', '$v g/cm³', verdict, tone, note);
+    return _SoilRowData(
+        'Bulk density', '$v g/cm³', verdict, tone, note, detail);
   }
 
   static _SoilRowData _interpretTexture(Map soil) {
@@ -657,24 +921,56 @@ class _SoilCard extends StatelessWidget {
         : double.tryParse(soil['sand_pct'].toString());
     final silt = soil['silt_pct'];
     if (clay == null || sand == null)
-      return _SoilRowData('Texture', '—', null, null, null);
+      return _SoilRowData('Texture', '—', null, null, null, null);
     final value = 'Clay ${clay}% · Sand ${sand}% · Silt ${_n(silt)}%';
-    if (clay >= 40)
+    if (clay >= 40) {
       return _SoilRowData(
           'Texture',
           value,
           'Clayey (heavy soil)',
           Colors.blueGrey,
-          'holds water/nutrients well but drains slowly — matches typical Vidarbha black-cotton soil; watch waterlogging in monsoon');
-    if (sand >= 60)
+          'holds water/nutrients well but drains slowly — matches typical Vidarbha black-cotton soil; watch waterlogging in monsoon',
+          const _Detail(
+            "Your soil is clay-heavy — this matches the typical Vidarbha black-cotton soil profile.",
+            "Clayey soil holds water and nutrients well (a good nutrient reserve) but drains slowly, so it's prone to waterlogging in heavy monsoon spells and can crack and become hard to work when it dries out.",
+            [
+              "Ensure field drainage channels are clear before monsoon — waterlogging is the main risk with this texture, not dryness.",
+              "Avoid working the field (tillage, sowing) when it's too wet — clayey soil compacts badly under machinery/bullock traffic at the wrong moisture.",
+              "Add organic matter (FYM/compost) over time — it improves clay soil's structure and workability without changing its water-holding strength.",
+              "Time irrigation carefully — this soil holds moisture longer than most, so over-irrigating is a common mistake here.",
+            ],
+          ));
+    }
+    if (sand >= 60) {
       return _SoilRowData(
           'Texture',
           value,
           'Sandy (light soil)',
           Colors.blueGrey,
-          'drains fast — water and fertilize in smaller, more frequent doses');
-    return _SoilRowData('Texture', value, 'Loamy (balanced)',
-        const Color(0xFF659442), 'generally easy to manage for most crops');
+          'drains fast — water and fertilize in smaller, more frequent doses',
+          const _Detail(
+            "Your soil is sandy — light and fast-draining.",
+            "Water and nutrients move through sandy soil quickly, so both dry out and leach away faster than in a clay or loam soil — expect more frequent irrigation and fertilizer needs.",
+            [
+              "Water and fertilize in smaller, more frequent doses rather than large infrequent ones — big doses leach straight through before the crop can use them.",
+              "Build organic matter (FYM/compost) — this is the most effective way to improve a sandy soil's water and nutrient holding capacity over time.",
+              "Mulch to help retain soil moisture between irrigations.",
+            ],
+          ));
+    }
+    return _SoilRowData(
+        'Texture',
+        value,
+        'Loamy (balanced)',
+        const Color(0xFF659442),
+        'generally easy to manage for most crops',
+        const _Detail(
+          "Your soil has a balanced loamy texture.",
+          "This is generally the easiest texture to manage — reasonable water retention without the drainage problems of clay or the leaching problems of sand.",
+          [
+            "Standard irrigation and fertilizer scheduling for the crop should work well; no texture-driven adjustment needed."
+          ],
+        ));
   }
 }
 
@@ -684,7 +980,9 @@ class _SoilRowData {
   final String? verdict;
   final Color? tone;
   final String? note;
-  _SoilRowData(this.label, this.value, this.verdict, this.tone, this.note);
+  final _Detail? detail;
+  _SoilRowData(
+      this.label, this.value, this.verdict, this.tone, this.note, this.detail);
 }
 
 class _SoilRow extends StatelessWidget {
@@ -740,7 +1038,12 @@ class _Card extends StatelessWidget {
   final String title;
   final String? subtitle;
   final Widget child;
-  const _Card({required this.title, this.subtitle, required this.child});
+  final VoidCallback? onDetails;
+  const _Card(
+      {required this.title,
+      this.subtitle,
+      required this.child,
+      this.onDetails});
 
   @override
   Widget build(BuildContext context) {
@@ -752,12 +1055,33 @@ class _Card extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: const Color(0xFFE0E7D8))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title,
-            style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.6,
-                color: Color(0xFF6B7280))),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(title,
+                style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                    color: Color(0xFF6B7280))),
+            if (onDetails != null)
+              OutlinedButton(
+                onPressed: onDetails,
+                style: OutlinedButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  minimumSize: const Size(0, 0),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  side: const BorderSide(color: Color(0x6688BA63)),
+                ),
+                child: const Text('Details',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF659442))),
+              ),
+          ],
+        ),
         if (subtitle != null)
           Padding(
               padding: const EdgeInsets.only(top: 2, bottom: 6),
@@ -766,6 +1090,149 @@ class _Card extends StatelessWidget {
         const SizedBox(height: 6),
         child,
       ]),
+    );
+  }
+}
+
+// ── Detail modal (Vegetation Health / Soil Properties "Details" button) ──
+// A plain-language meaning/impact/remedy breakdown for whichever
+// reading(s) a card is currently showing, matched to the same range
+// bands used for the compact verdict/tone shown inline in the card.
+class _Detail {
+  final String meaning;
+  final String impact;
+  final List<String> remedy;
+  const _Detail(this.meaning, this.impact, this.remedy);
+}
+
+class _Verdict {
+  final String label;
+  final Color color;
+  final _Detail detail;
+  const _Verdict(this.label, this.color, this.detail);
+}
+
+class _DetailEntry {
+  final String label;
+  final _Detail detail;
+  const _DetailEntry(this.label, this.detail);
+}
+
+void _showDetailModal(
+    BuildContext context, String title, List<_DetailEntry> entries) {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+    builder: (ctx) => DraggableScrollableSheet(
+      initialChildSize: 0.75,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (ctx, scrollController) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                    child: Text(title,
+                        style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF253917)))),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 20),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  onPressed: () => Navigator.pop(ctx),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: entries.isEmpty
+                  ? const Text('No details available yet.',
+                      style: TextStyle(fontSize: 12, color: Colors.grey))
+                  : ListView.separated(
+                      controller: scrollController,
+                      itemCount: entries.length,
+                      separatorBuilder: (_, __) => const Divider(height: 26),
+                      itemBuilder: (_, i) => _DetailSection(entry: entries[i]),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _DetailSection extends StatelessWidget {
+  final _DetailEntry entry;
+  const _DetailSection({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(entry.label,
+            style: const TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF253917))),
+        const SizedBox(height: 6),
+        RichText(
+            text: TextSpan(
+                style: const TextStyle(
+                    fontSize: 12, color: Colors.black87, height: 1.45),
+                children: [
+              const TextSpan(
+                  text: 'What it means: ',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700, color: Colors.grey)),
+              TextSpan(text: entry.detail.meaning),
+            ])),
+        const SizedBox(height: 6),
+        RichText(
+            text: TextSpan(
+                style: const TextStyle(
+                    fontSize: 12, color: Colors.black87, height: 1.45),
+                children: [
+              const TextSpan(
+                  text: 'Impact: ',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700, color: Colors.grey)),
+              TextSpan(text: entry.detail.impact),
+            ])),
+        if (entry.detail.remedy.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(entry.detail.remedy.length > 1 ? 'The remedy:' : 'Remedy:',
+              style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.grey)),
+          const SizedBox(height: 4),
+          for (final r in entry.detail.remedy)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 5),
+              child:
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('•  ',
+                    style: TextStyle(fontSize: 12, color: Colors.black87)),
+                Expanded(
+                    child: Text(r,
+                        style: const TextStyle(
+                            fontSize: 12, color: Colors.black87, height: 1.4))),
+              ]),
+            ),
+        ],
+      ],
     );
   }
 }

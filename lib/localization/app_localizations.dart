@@ -306,6 +306,8 @@ class AppLocalizations {
   String get faNoFarmWorkersYet => _t('fa_no_farm_workers_yet');
   String get faMaleFull => _t('fa_male_full');
   String get faFemaleFull => _t('fa_female_full');
+  String get faPermanentFull => _t('fa_permanent_full');
+  String get faTotalWorkersAvailable => _t('fa_total_workers_available');
 
   // Farm Tractor
   String get ftSetupTitle => _t('ft_setup_title');
@@ -530,7 +532,7 @@ class AppLocalizations {
       'invalid_credentials_error': 'Invalid credentials. Please try again.',
       'welcome_back': 'Welcome back',
       'section_daily_entries': 'Daily Entries',
-      'section_reports_analytics': 'Reports',
+      'section_reports_analytics': 'Reports & Analytics',
       'section_payroll': 'Payroll',
       'section_farm_operations': 'Farm Operations',
       'section_administrative': 'Administrative',
@@ -544,6 +546,8 @@ class AppLocalizations {
       'fa_female': 'Female',
       'fa_male_full': 'Male',
       'fa_female_full': 'Female',
+      'fa_permanent_full': 'Permanent',
+      'fa_total_workers_available': 'Total workers available',
       'fa_male_short': 'male',
       'fa_female_short': 'female',
       'fa_set': 'Set',
@@ -1023,6 +1027,8 @@ class AppLocalizations {
       'fa_female': 'महिला',
       'fa_male_full': 'पुरुष',
       'fa_female_full': 'महिला',
+      'fa_permanent_full': 'कायम',
+      'fa_total_workers_available': 'एकूण उपलब्ध मजूर',
       'fa_male_short': 'पुरुष',
       'fa_female_short': 'महिला',
       'fa_set': 'सेट करा',
