@@ -34,15 +34,19 @@ import 'crop_reports_screen.dart';
 import 'sector_picker_screen.dart';
 import 'needs_attention_screen.dart';
 import 'weather_screen.dart';
+import 'mandi/mandi_prices_screen.dart';
 import 'electricity_bill_projection_screen.dart';
 import '../localization/app_localizations.dart';
 import '../localization/app_locale.dart';
 import '../services/api_service.dart';
+import '../services/push_service.dart';
+import 'notifications_screen.dart';
 import 'transport_screen.dart';
 import 'password_screen.dart';
 import 'otp_approvals_screen.dart';
 
 import '../config/app_config.dart';
+
 // ── Returned record model ─────────────────────────────────────────────────────
 class ReturnedRecord {
   final String id;
@@ -91,6 +95,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   List<ReturnedRecord> _returned = [];
   Timer? _pollTimer;
   Timer? _needsAttentionTimer;
+  Timer? _unreadTimer;
 
   // Pulse animation for banner
   late AnimationController _pulseCtrl;
@@ -116,6 +121,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   void dispose() {
     _pollTimer?.cancel();
     _needsAttentionTimer?.cancel();
+    _unreadTimer?.cancel();
     _pulseCtrl.dispose();
     super.dispose();
   }
@@ -190,6 +196,15 @@ class _DashboardScreenState extends State<DashboardScreen>
       const Duration(seconds: 60),
       (_) => _fetchNeedsAttention(),
     );
+
+    // Push notifications: register this phone for the logged-in user,
+    // open the screen of a notification that launched the app, and keep
+    // the bell's unread count fresh.
+    PushService.registerDevice();
+    PushService.handleLaunchNotification();
+    PushService.refreshUnread();
+    _unreadTimer = Timer.periodic(
+        const Duration(seconds: 60), (_) => PushService.refreshUnread());
   }
 
   Future<void> _switchSector() async {
@@ -405,6 +420,10 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
     if (ok == true) {
       _pollTimer?.cancel();
+      _unreadTimer?.cancel();
+      // Stop this phone receiving the signed-out user's notifications
+      // (must run before the saved login is cleared).
+      await PushService.unregisterDevice();
       final prefs = await SharedPreferences.getInstance();
       await prefs.clear();
       if (mounted) Navigator.pushReplacementNamed(context, '/');
@@ -440,7 +459,44 @@ class _DashboardScreenState extends State<DashboardScreen>
           ),
         ]),
         actions: [
-          // Bell icon with count badge for non-admin
+          // Notifications (push history) — everyone
+          ValueListenableBuilder<int>(
+            valueListenable: PushService.unreadCount,
+            builder: (context, unread, _) => Stack(children: [
+              IconButton(
+                icon: const Icon(Icons.notifications_none, color: Colors.white),
+                tooltip: 'Notifications',
+                onPressed: () async {
+                  await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const NotificationsScreen()));
+                  PushService.refreshUnread();
+                },
+              ),
+              if (unread > 0)
+                Positioned(
+                  right: 6,
+                  top: 6,
+                  child: Container(
+                    constraints: const BoxConstraints(minWidth: 16),
+                    height: 16,
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    decoration: BoxDecoration(
+                        color: Colors.orange.shade700,
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Center(
+                      child: Text(unread > 99 ? '99+' : '$unread',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ),
+            ]),
+          ),
+          // Returned-records shortcut for non-admin (scrolls to banner)
           if (!_isAdmin && _activeReturned.isNotEmpty)
             Stack(children: [
               IconButton(
@@ -861,7 +917,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                 if (_can('farm_attendance') ||
                     _can('farm_masters') ||
                     _can('farm_tractor') ||
-                    _can('agri')) ...[
+                    _can('agri') ||
+                    _can('mandi_prices')) ...[
                   _sectionHeader(
                       AppLocalizations.of(context)!.sectionFarmOperations),
                   const SizedBox(height: 12),
@@ -885,7 +942,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                       _tile(
                         icon: Icons.agriculture_outlined,
                         label: 'Farm Masters',
-                        sub: 'Manage the farm list, worker list & permanent workers',
+                        sub:
+                            'Manage the farm list, worker list & permanent workers',
                         iconBg: const Color(0xFFE8F5E2),
                         iconColor: idaGreen,
                         onTap: () => Navigator.push(
@@ -896,7 +954,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                       _tile(
                         icon: Icons.satellite_alt_outlined,
                         label: 'Precision Agriculture',
-                        sub: 'Farm boundaries, vegetation health & soil analysis',
+                        sub:
+                            'Farm boundaries, vegetation health & soil analysis',
                         iconBg: const Color(0xFFE3F2FD),
                         iconColor: const Color(0xFF1565C0),
                         onTap: () => Navigator.push(
@@ -919,7 +978,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                             MaterialPageRoute(
                                 builder: (_) => const FarmTractorWorkScreen())),
                       ),
-                    if (_can('agri')) ...[
+                    if (_can('agri'))
                       _tile(
                         icon: Icons.wb_sunny_outlined,
                         label: 'Weather',
@@ -931,6 +990,22 @@ class _DashboardScreenState extends State<DashboardScreen>
                             MaterialPageRoute(
                                 builder: (_) => const WeatherScreen())),
                       ),
+                    if (_can('mandi_prices'))
+                      _tile(
+                        icon: Icons.show_chart,
+                        label: AppLocalizations.of(context)!
+                            .moduleLabel('mandi_prices', 'Mandi Prices'),
+                        sub: AppLocalizations.of(context)!.moduleDescription(
+                            'mandi_prices',
+                            'Today\'s APMC prices, trends & best time to sell'),
+                        iconBg: const Color(0xFFE8F5E2),
+                        iconColor: idaGreen,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const MandiPricesScreen())),
+                      ),
+                    if (_can('agri')) ...[
                       _tile(
                         icon: Icons.eco_outlined,
                         label:

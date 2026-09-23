@@ -19,7 +19,9 @@ dependencies:
   intl: ^0.20.2
   path_provider: ^2.1.3
   open_filex: ^4.5.0
-  share_plus: ^9.0.0
+  # 10.1+ needed alongside Firebase (both use package:web 1.x).
+  # Share.shareXFiles works the same as in 9.x.
+  share_plus: ^10.1.4
   image: ^4.1.7
   url_launcher: ^6.3.0
   camera: ^0.11.0
@@ -33,6 +35,10 @@ dependencies:
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
   fl_chart: ^0.69.0
+  # Push notifications (Firebase Cloud Messaging — free). Needs
+  # android/app/google-services.json from the Firebase console.
+  firebase_core: ^4.1.0
+  firebase_messaging: ^16.0.0
 
 dev_dependencies:
   flutter_test:
@@ -44,3 +50,10 @@ flutter:
   assets:
     - assets/images/idalogo.png
     - assets/models/mobilefacenet.tflite
+# FlutLab's package cache has incomplete copies of string_scanner 1.4.1 /
+# term_glyph 1.2.2 (missing files → compile errors). Pin the previous
+# versions. Safe to remove when building with a normal Flutter install.
+dependency_overrides:
+  string_scanner: 1.3.0
+  term_glyph: 1.2.1
+  source_span: 1.10.0

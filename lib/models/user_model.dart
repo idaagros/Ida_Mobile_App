@@ -78,6 +78,15 @@ const List<Map<String, String>> kModuleDefinitions = [
     'icon': 'eco',
   },
   {
+    'key': 'mandi_prices',
+    'levels': 'view,add,update',
+    'label': 'Mandi Prices',
+    'description':
+        'Daily APMC prices for our crops, trends and the best time to sell. Add/update = manage tracked commodities, markets and MSP',
+    'route': '/mandi-prices',
+    'icon': 'show_chart',
+  },
+  {
     'key': 'machine',
     'levels': 'view,add,update,approve',
     'label': 'Machine Hours Reading',
@@ -259,6 +268,7 @@ const List<String> kAgricultureModuleKeys = [
   'farm_masters',
   'farm_tractor',
   'agri',
+  'mandi_prices',
 ];
 
 // ─── AppUser ───────────────────────────────────────────────────────────────

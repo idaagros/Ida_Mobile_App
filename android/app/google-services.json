@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "571789708042",
+    "project_id": "ida-agrico",
+    "storage_bucket": "ida-agrico.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:571789708042:android:55991121130659b0a388f3",
+        "android_client_info": {
+          "package_name": "com.ida.agrico"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDGs5ABB7vDoJkm6i4MSFaQpcgFyCE8SWQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
