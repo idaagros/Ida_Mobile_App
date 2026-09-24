@@ -1,10 +1,9 @@
 // lib/screens/attendance_screen.dart
 //
 // Stage A — Attendance Marking. Two-stage workflow, direct-save is
-// gone (per the redesign): set the day's male/female headcount (plus
-// an optional expected total wage, used only as an advisory check
-// later, never a hard block), pick who's present from the worker
-// master (search + checkbox, with an inline "+ Add Worker" for anyone
+// gone (per the redesign). No headcount step any more (removed 24 Sep
+// 2026): pick who's present from the worker master (search +
+// checkbox, with an inline "+ Add Worker" for anyone
 // missing), save. That SUBMITS the whole day for approval and locks
 // it. An admin approves or rejects (one decision covering the whole
 // day, not per worker) right here. Approved unlocks Stage B — Work
@@ -46,14 +45,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   bool loadingDay = false;
   String? error;
 
-  final maleCountCtrl = TextEditingController();
-  final femaleCountCtrl = TextEditingController();
-  // Read-only - never typed into, just displayed via the same
-  // TextField styling as male/female for visual consistency. Its text
-  // is set whenever permanentCount is updated (see _loadDay).
-  final permanentCountCtrl = TextEditingController();
-  bool savingHeadcount = false;
-
   final Set<int> selectedWorkerIds = {};
   final Map<int, TextEditingController> presentWageCtrls = {};
   String workerFilter = 'All'; // 'All' | 'M' | 'F'
@@ -63,13 +54,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   String? attendanceStatus; // null | pending | approved | returned
   String? attendanceAdminNote;
   String? allocationStatus;
-  double? confirmedExpectedTotal; // last submitted total, once locked
+  // Totals of the submitted present list (from the server), shown once
+  // the day is submitted: total, male, female, permanent, total_wage.
+  Map<String, dynamic>? presentSummary;
   List<Map<String, dynamic>> presentWorkers = [];
-  // Live count of currently-active permanent workers, shown read-only
-  // next to the male/female fields (mirrors the web app's headcount
-  // card) - not typed in by the user, always whatever the server says
-  // is currently marked permanent.
-  int permanentCount = 0;
   bool permanentAutoSuggested =
       false; // present_workers came from permanent-worker suggestions, not an actual saved submission
 
@@ -97,9 +85,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   @override
   void dispose() {
-    maleCountCtrl.dispose();
-    femaleCountCtrl.dispose();
-    permanentCountCtrl.dispose();
     for (final c in presentWageCtrls.values) c.dispose();
     super.dispose();
   }
@@ -152,17 +137,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
-          maleCountCtrl.text = data['male_count']?.toString() ?? '';
-          femaleCountCtrl.text = data['female_count']?.toString() ?? '';
-          confirmedExpectedTotal = data['expected_total_wage'] != null
-              ? double.tryParse(data['expected_total_wage'].toString())
+          presentSummary = data['present_summary'] is Map
+              ? Map<String, dynamic>.from(data['present_summary'])
               : null;
           attendanceStatus = data['attendance_status'];
           attendanceAdminNote = data['attendance_admin_note'];
           allocationStatus = data['allocation_status'];
           permanentAutoSuggested = data['permanent_auto_suggested'] == true;
-          permanentCount = int.tryParse(data['permanent_count']?.toString() ?? '') ?? 0;
-          permanentCountCtrl.text = permanentCount.toString();
 
           presentWorkers =
               List<Map<String, dynamic>>.from(data['present_workers'] ?? []);
@@ -210,43 +191,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
-  bool get _canEditHeadcount =>
+  bool get _canEditAttendance =>
       canUpdateStageA &&
       (attendanceStatus == null || attendanceStatus == 'returned');
-
-  Future<void> _saveHeadcount() async {
-    final male = int.tryParse(maleCountCtrl.text.trim());
-    final female = int.tryParse(femaleCountCtrl.text.trim());
-    if (male == null || female == null || male < 0 || female < 0) {
-      setState(() =>
-          error = 'Enter a valid male and female worker count (0 or more)');
-      return;
-    }
-    setState(() {
-      savingHeadcount = true;
-      error = null;
-    });
-    try {
-      final h = await _headers;
-      final res = await http.put(
-        Uri.parse('$baseUrl/attendance/headcount'),
-        headers: {...h, 'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'attendance_date': _dateStr,
-          'male_count': male,
-          'female_count': female,
-        }),
-      );
-      if (res.statusCode != 200) {
-        final data = jsonDecode(res.body);
-        setState(() => error = data['error'] ?? 'Failed to save headcount');
-      }
-    } catch (e) {
-      setState(() => error = 'Could not reach server: $e');
-    } finally {
-      if (mounted) setState(() => savingHeadcount = false);
-    }
-  }
 
   void _addWorker(int id) {
     setState(() {
@@ -302,6 +249,87 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   double get _computedTotal => presentWageCtrls.values
       .fold(0.0, (s, c) => s + (double.tryParse(c.text.trim()) ?? 0));
+
+  int get _selectedPermanent => selectedWorkerIds.where((id) {
+        final w = workers.firstWhere((w) => w['id'] == id, orElse: () => {});
+        return w['is_permanent'] == 1 || w['is_permanent'] == true;
+      }).length;
+
+  // The day's totals after submission — from the server's
+  // present_summary, or worked out from the present list if missing.
+  Widget _submittedTotals(AppLocalizations loc) {
+    final s = presentSummary;
+    int n(dynamic v) => int.tryParse(v?.toString() ?? '') ?? 0;
+    if (s != null) {
+      return _dayTotals(loc,
+          title: loc.faPresentToday,
+          total: n(s['total']),
+          male: n(s['male']),
+          female: n(s['female']),
+          permanent: n(s['permanent']),
+          wage: double.tryParse(s['total_wage']?.toString() ?? '') ?? 0);
+    }
+    if (presentWorkers.isEmpty) return const SizedBox.shrink();
+    return _dayTotals(loc,
+        title: loc.faPresentToday,
+        total: presentWorkers.length,
+        male: presentWorkers.where((p) => p['gender'] == 'M').length,
+        female: presentWorkers.where((p) => p['gender'] == 'F').length,
+        permanent: presentWorkers
+            .where((p) => p['is_permanent'] == 1 || p['is_permanent'] == true)
+            .length,
+        wage: presentWorkers.fold(
+            0.0,
+            (sum, p) =>
+                sum +
+                (double.tryParse(
+                        (p['morning_amount'] ?? p['daily_wage'])?.toString() ??
+                            '') ??
+                    0)));
+  }
+
+  // Total workers, male/female split, permanent (included in the
+  // total) and total wage. Same box on the web.
+  Widget _dayTotals(AppLocalizations loc,
+      {required String title,
+      required int total,
+      required int male,
+      required int female,
+      required int permanent,
+      required double wage}) {
+    const grey = TextStyle(fontSize: 12, color: Color(0xFF4B5563));
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+          color: const Color(0xFFF3F7EF),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFC9D6BF))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('$title: $total ${loc.faWorkersWord}',
+            style: const TextStyle(
+                fontSize: 13.5, fontWeight: FontWeight.w700, color: idaDark)),
+        const SizedBox(height: 4),
+        Wrap(spacing: 14, runSpacing: 2, children: [
+          Text('♂ $male ${loc.faMaleFull.toLowerCase()}', style: grey),
+          Text('♀ $female ${loc.faFemaleFull.toLowerCase()}', style: grey),
+          Text('📌 $permanent ${loc.faPermanentIncluded}', style: grey),
+        ]),
+        const SizedBox(height: 6),
+        Row(children: [
+          Expanded(
+              child: Text(loc.faTotalWage,
+                  style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: idaDark))),
+          Text('₹${wage.toStringAsFixed(2)}',
+              style: const TextStyle(
+                  fontSize: 14, fontWeight: FontWeight.w700, color: idaGreen)),
+        ]),
+      ]),
+    );
+  }
 
   Future<void> _reviewAndSubmit() async {
     if (selectedWorkerIds.isEmpty) {
@@ -388,17 +416,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           )),
                     ],
                     const Divider(height: 20),
-                    Row(children: [
-                      Expanded(
-                          child: Text(loc.faTotal,
-                              style: const TextStyle(
-                                  fontSize: 14, fontWeight: FontWeight.w700))),
-                      Text('₹${_computedTotal.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: idaGreen)),
-                    ]),
+                    _dayTotals(loc,
+                        title: loc.faPresentToday,
+                        total: selectedWorkerIds.length,
+                        male: maleList.length,
+                        female: femaleList.length,
+                        permanent: _selectedPermanent,
+                        wage: _computedTotal),
                   ]),
             ),
           ),
@@ -718,8 +742,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                 child:
                                     CircularProgressIndicator(color: idaGreen)))
                       else ...[
-                        _headcountCard(loc),
-                        const SizedBox(height: 16),
                         _presentWorkersCard(loc),
                       ],
                       if (error != null) ...[
@@ -735,51 +757,51 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   // Shows where today's entry stands in the two-gate pipeline:
-  // Headcount -> Attendance submitted -> Attendance approved ->
+  // Attendance marked/submitted -> Attendance approved ->
   // Allocation submitted -> Allocation approved. A compact segmented
-  // bar rather than 5 individually-labeled steps, since 5 labels
+  // bar rather than 4 individually-labeled steps, since 4 labels
   // don't fit comfortably on a narrow phone screen - one clear
   // current-stage sentence below the bar carries the actual meaning.
   Widget _workflowStepper(AppLocalizations loc) {
-    int stage; // 1-5, how many segments are "reached"
+    int stage; // 1-4, how many segments are "reached"
     String label;
     Color activeColor = idaGreen;
 
     if (attendanceStatus == null) {
       stage = 1;
-      label = loc.faStepHeadcount;
+      label = loc.faStepMarkPresent;
     } else if (attendanceStatus == 'returned') {
-      stage = 2;
+      stage = 1;
       label = loc.faStepAttendanceReturned;
       activeColor = const Color(0xFFC0392B);
     } else if (attendanceStatus == 'pending') {
-      stage = 2;
+      stage = 1;
       label = loc.faStepAttendancePending;
       activeColor = const Color(0xFF92600A);
     } else if (allocationStatus == null) {
-      stage = 3;
+      stage = 2;
       label = loc.faStepAttendanceApproved;
     } else if (allocationStatus == 'returned') {
-      stage = 4;
+      stage = 3;
       label = loc.faStepAllocationReturned;
       activeColor = const Color(0xFFC0392B);
     } else if (allocationStatus == 'pending') {
-      stage = 4;
+      stage = 3;
       label = loc.faStepAllocationPending;
       activeColor = const Color(0xFF92600A);
     } else {
-      stage = 5;
+      stage = 4;
       label = loc.faStepComplete;
     }
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(
-        children: List.generate(5, (i) {
+        children: List.generate(4, (i) {
           final reached = i < stage;
           return Expanded(
             child: Container(
               height: 5,
-              margin: EdgeInsets.only(right: i < 4 ? 4 : 0),
+              margin: EdgeInsets.only(right: i < 3 ? 4 : 0),
               decoration: BoxDecoration(
                 color: reached ? activeColor : const Color(0xFFE0E7D8),
                 borderRadius: BorderRadius.circular(3),
@@ -893,120 +915,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
   }
 
-  Widget _headcountCard(AppLocalizations loc) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFE0E7D8))),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(loc.faWorkersAvailableToday,
-            style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF6B7280),
-                letterSpacing: 0.6)),
-        const SizedBox(height: 10),
-        Row(children: [
-          Expanded(
-              child: _numField(maleCountCtrl, loc.faMaleFull,
-                  enabled: _canEditHeadcount,
-                  // Just forces a rebuild so the Total box below
-                  // updates live as the user types - the actual value
-                  // is still read straight from the controller.
-                  onChanged: _canEditHeadcount ? (_) => setState(() {}) : null)),
-          const SizedBox(width: 10),
-          Expanded(
-              child: _numField(femaleCountCtrl, loc.faFemaleFull,
-                  enabled: _canEditHeadcount,
-                  onChanged: _canEditHeadcount ? (_) => setState(() {}) : null)),
-        ]),
-        const SizedBox(height: 10),
-        Row(children: [
-          Expanded(
-              // Always disabled - it's a live count from the permanent
-              // workers list, never something entered here.
-              child: _numField(permanentCountCtrl, loc.faPermanentFull,
-                  enabled: false)),
-          const SizedBox(width: 10),
-          Expanded(
-            flex: 2,
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-              decoration: BoxDecoration(
-                  color: const Color(0xFFF4F7F2),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFE0E7D8))),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(loc.faTotalWorkersAvailable,
-                      style: const TextStyle(
-                          fontSize: 12, color: Color(0xFF6B7280))),
-                  Text(
-                    '${(int.tryParse(maleCountCtrl.text) ?? 0) + (int.tryParse(femaleCountCtrl.text) ?? 0) + permanentCount}',
-                    style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: idaDark),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ]),
-        if (_canEditHeadcount) ...[
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: idaGreen,
-                  padding: const EdgeInsets.symmetric(vertical: 12)),
-              onPressed: savingHeadcount ? null : _saveHeadcount,
-              child: savingHeadcount
-                  ? const SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : Text(loc.faSet,
-                      style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w700)),
-            ),
-          ),
-        ],
-      ]),
-    );
-  }
-
-  Widget _numField(TextEditingController ctrl, String label,
-      {required bool enabled, bool decimal = false, ValueChanged<String>? onChanged}) {
-    return TextField(
-      controller: ctrl,
-      enabled: enabled,
-      onChanged: onChanged,
-      keyboardType: decimal
-          ? const TextInputType.numberWithOptions(decimal: true)
-          : TextInputType.number,
-      decoration: InputDecoration(
-        labelText: label,
-        filled: true,
-        fillColor: enabled ? Colors.white : const Color(0xFFF4F7F2),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: Color(0xFFE0E7D8))),
-        focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: idaGreen, width: 1.5)),
-      ),
-    );
-  }
-
   // Same reasoning as Dashboard's tile grid: one column on mobile
   // (unchanged behavior), reflowing to 2-3 columns on wider screens.
   // Each row card is wrapped in a fixed-width SizedBox before going
@@ -1030,8 +938,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   Widget _presentWorkersCard(AppLocalizations loc) {
-    final male = int.tryParse(maleCountCtrl.text) ?? 0;
-    final female = int.tryParse(femaleCountCtrl.text) ?? 0;
     final selectedMale = selectedWorkerIds
         .where((id) =>
             workers.firstWhere((w) => w['id'] == id,
@@ -1059,7 +965,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   fontWeight: FontWeight.w700,
                   color: Color(0xFF6B7280),
                   letterSpacing: 0.6)),
-          if (_canEditHeadcount)
+          if (_canEditAttendance)
             Expanded(
               child: Wrap(
                 alignment: WrapAlignment.end,
@@ -1097,16 +1003,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               ),
             ),
         ]),
-        const SizedBox(height: 4),
-        Text(
-            '${loc.faSelectedLabel}: $selectedMale/$male ${loc.faMale.toLowerCase()} · $selectedFemale/$female ${loc.faFemale.toLowerCase()}',
-            style: TextStyle(
-                fontSize: 12,
-                color: (selectedMale > male || selectedFemale > female)
-                    ? Colors.red
-                    : Colors.grey.shade600,
-                fontWeight: FontWeight.w600)),
-        if (permanentAutoSuggested && _canEditHeadcount) ...[
+        if (!_canEditAttendance) ...[
+          const SizedBox(height: 10),
+          _submittedTotals(loc),
+        ],
+        if (permanentAutoSuggested && _canEditAttendance) ...[
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -1128,7 +1029,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           ),
         ],
         const SizedBox(height: 10),
-        if (_canEditHeadcount) ...[
+        if (_canEditAttendance) ...[
           _genderFilterToggle(loc),
           const SizedBox(height: 10),
           _WorkerPicker(
@@ -1214,25 +1115,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   );
                 }).toList()),
             const SizedBox(height: 4),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                  color: idaDark.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(10)),
-              child: Row(children: [
-                Expanded(
-                    child: Text(loc.faExpectedTotalWage,
-                        style: const TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                            color: idaDark))),
-                Text('₹${_computedTotal.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: idaGreen)),
-              ]),
-            ),
+            _dayTotals(loc,
+                title: loc.faSelectedSoFar,
+                total: selectedWorkerIds.length,
+                male: selectedMale,
+                female: selectedFemale,
+                permanent: _selectedPermanent,
+                wage: _computedTotal),
           ],
         ] else
           Column(
@@ -1256,7 +1145,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           ),
                           const SizedBox(width: 8),
                           Flexible(
-                            child: Text('₹${p['daily_wage']}',
+                            child: Text(
+                                '₹${p['morning_amount'] ?? p['daily_wage']}',
                                 style: TextStyle(
                                     fontSize: 12.5,
                                     color: Colors.grey.shade600),
@@ -1268,16 +1158,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     ))
                 .toList(),
           ),
-        if (!_canEditHeadcount && confirmedExpectedTotal != null) ...[
-          const SizedBox(height: 8),
-          Text(
-              '${loc.faExpectedTotalWage}: ₹${confirmedExpectedTotal!.toStringAsFixed(2)}',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey.shade600,
-                  fontWeight: FontWeight.w600)),
-        ],
-        if (_canEditHeadcount) ...[
+        if (_canEditAttendance) ...[
           const SizedBox(height: 14),
           SizedBox(
             width: double.infinity,

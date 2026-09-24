@@ -157,6 +157,12 @@ class AppLocalizations {
   String get faStepAllocationReturned => _t('fa_step_allocation_returned');
   String get faStepComplete => _t('fa_step_complete');
   String get faSelectedLabel => _t('fa_selected_label');
+  String get faStepMarkPresent => _t('fa_step_mark_present');
+  String get faSelectedSoFar => _t('fa_selected_so_far');
+  String get faPresentToday => _t('fa_present_today');
+  String get faWorkersWord => _t('fa_workers_word');
+  String get faPermanentIncluded => _t('fa_permanent_included');
+  String get faTotalWage => _t('fa_total_wage');
   String get faWaTitle => _t('fa_wa_title');
   String get faWaMustApproveFirst => _t('fa_wa_must_approve_first');
   String get faWaPresentToAllocate => _t('fa_wa_present_to_allocate');
@@ -622,17 +628,23 @@ class AppLocalizations {
       'fa_worker_added': 'Worker added',
       'fa_step_headcount': 'Step 1 of 5 — Set today\'s headcount',
       'fa_step_attendance_pending':
-          'Step 2 of 5 — Attendance awaiting approval',
+          'Step 1 of 4 — Attendance awaiting approval',
       'fa_step_attendance_returned':
-          'Step 2 of 5 — Attendance returned, needs correction',
+          'Step 1 of 4 — Attendance returned, needs correction',
       'fa_step_attendance_approved':
-          'Step 3 of 5 — Attendance approved, ready to allocate work',
+          'Step 2 of 4 — Attendance approved, ready to allocate work',
       'fa_step_allocation_pending':
-          'Step 4 of 5 — Work allocation awaiting approval',
+          'Step 3 of 4 — Work allocation awaiting approval',
       'fa_step_allocation_returned':
-          'Step 4 of 5 — Work allocation returned, needs correction',
-      'fa_step_complete': 'Step 5 of 5 — Complete',
+          'Step 3 of 4 — Work allocation returned, needs correction',
+      'fa_step_complete': 'Step 4 of 4 — Complete',
       'fa_selected_label': 'Selected',
+      'fa_step_mark_present': 'Step 1 of 4 — Mark who is present today',
+      'fa_selected_so_far': 'Selected so far',
+      'fa_present_today': 'Present today',
+      'fa_workers_word': 'workers',
+      'fa_permanent_included': 'permanent (included)',
+      'fa_total_wage': 'Total wage',
       'fa_wa_title': 'Work Allocation',
       'fa_wa_must_approve_first':
           "Today's attendance must be approved before work can be allocated.",
@@ -1097,17 +1109,23 @@ class AppLocalizations {
       'fa_attendance_submitted': 'हजेरी मंजुरीसाठी सादर केली',
       'fa_worker_added': 'मजूर जोडला',
       'fa_step_headcount': 'पायरी १ / ५ — आजची संख्या सेट करा',
-      'fa_step_attendance_pending': 'पायरी २ / ५ — हजेरी मंजुरीच्या प्रतीक्षेत',
+      'fa_step_attendance_pending': 'पायरी १ / ४ — हजेरी मंजुरीच्या प्रतीक्षेत',
       'fa_step_attendance_returned':
-          'पायरी २ / ५ — हजेरी परत पाठवली, दुरुस्ती आवश्यक',
+          'पायरी १ / ४ — हजेरी परत पाठवली, दुरुस्ती आवश्यक',
       'fa_step_attendance_approved':
-          'पायरी ३ / ५ — हजेरी मंजूर, काम वाटपासाठी तयार',
+          'पायरी २ / ४ — हजेरी मंजूर, काम वाटपासाठी तयार',
       'fa_step_allocation_pending':
-          'पायरी ४ / ५ — काम वाटप मंजुरीच्या प्रतीक्षेत',
+          'पायरी ३ / ४ — काम वाटप मंजुरीच्या प्रतीक्षेत',
       'fa_step_allocation_returned':
-          'पायरी ४ / ५ — काम वाटप परत पाठवले, दुरुस्ती आवश्यक',
-      'fa_step_complete': 'पायरी ५ / ५ — पूर्ण',
+          'पायरी ३ / ४ — काम वाटप परत पाठवले, दुरुस्ती आवश्यक',
+      'fa_step_complete': 'पायरी ४ / ४ — पूर्ण',
       'fa_selected_label': 'निवडलेले',
+      'fa_step_mark_present': 'पायरी १ / ४ — आज हजर असलेले मजूर निवडा',
+      'fa_selected_so_far': 'आतापर्यंत निवडलेले',
+      'fa_present_today': 'आज हजर',
+      'fa_workers_word': 'मजूर',
+      'fa_permanent_included': 'कायम (यात समाविष्ट)',
+      'fa_total_wage': 'एकूण मजुरी',
       'fa_wa_title': 'काम वाटप',
       'fa_wa_must_approve_first':
           'काम वाटप करण्यापूर्वी आजची हजेरी मंजूर असणे आवश्यक आहे.',
