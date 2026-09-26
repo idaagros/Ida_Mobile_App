@@ -12,7 +12,8 @@
 class AppConfig {
   // The backend's root address - no trailing slash, no '/api' suffix.
   // Change ONLY this line when switching tunnels/hosting.
-  static const String apiHost = 'https://excusable-moving-preorder.ngrok-free.dev';
+  // Self-hosted since Sep 2026 (was the ngrok tunnel before).
+  static const String apiHost = 'https://idaagrico.duckdns.org';
 
   // What almost every screen actually wants for its HTTP calls.
   static const String apiBaseUrl = '$apiHost/api';

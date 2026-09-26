@@ -48,13 +48,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       error = null;
     });
     try {
-      final res = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/notifications?limit=100'), headers: await _headers);
+      final res = await http.get(
+          Uri.parse('${AppConfig.apiBaseUrl}/notifications?limit=100'),
+          headers: await _headers);
       if (res.statusCode == 200) {
         final d = jsonDecode(res.body);
-        setState(() => items = List<Map<String, dynamic>>.from(d['items'] ?? []));
+        setState(
+            () => items = List<Map<String, dynamic>>.from(d['items'] ?? []));
         PushService.unreadCount.value = (d['unread'] as num?)?.toInt() ?? 0;
       } else {
-        setState(() => error = 'Could not load notifications (${res.statusCode})');
+        setState(
+            () => error = 'Could not load notifications (${res.statusCode})');
       }
     } catch (e) {
       setState(() => error = 'Could not reach server: $e');
@@ -65,7 +69,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Future<void> _markAllRead() async {
     try {
-      await http.patch(Uri.parse('${AppConfig.apiBaseUrl}/notifications/read-all'), headers: await _headers);
+      await http.patch(
+          Uri.parse('${AppConfig.apiBaseUrl}/notifications/read-all'),
+          headers: await _headers);
     } catch (_) {}
     await _load();
   }
@@ -73,12 +79,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Future<void> _sendTest() async {
     final messenger = ScaffoldMessenger.of(context);
     if (!PushService.isReady) {
-      messenger.showSnackBar(const SnackBar(content: Text('Push is not set up in this app build yet (Firebase config missing).')));
+      messenger.showSnackBar(const SnackBar(
+          content: Text(
+              'Push is not set up in this app build yet (Firebase config missing).')));
       return;
     }
     await PushService.registerDevice();
     try {
-      final res = await http.post(Uri.parse('${AppConfig.apiBaseUrl}/notifications/test'), headers: await _headers);
+      final res = await http.post(
+          Uri.parse('${AppConfig.apiBaseUrl}/notifications/test'),
+          headers: await _headers);
       final d = jsonDecode(res.body);
       final status = d['result']?['push_status'] ?? '?';
       final err = d['result']?['push_error'];
@@ -116,6 +126,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         return Icons.alarm;
       case 'otp_request':
         return Icons.vpn_key_outlined;
+      case 'mandi_price_alert':
+        return Icons.trending_up;
       default:
         return Icons.notifications_outlined;
     }
@@ -137,7 +149,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final d = DateTime.tryParse(s?.toString() ?? '')?.toLocal();
     if (d == null) return '';
     final now = DateTime.now();
-    if (d.year == now.year && d.month == now.month && d.day == now.day) return DateFormat('h:mm a').format(d);
+    if (d.year == now.year && d.month == now.month && d.day == now.day)
+      return DateFormat('h:mm a').format(d);
     return DateFormat('d MMM, h:mm a').format(d);
   }
 
@@ -152,12 +165,18 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         foregroundColor: Colors.white,
         actions: [
           if (unread > 0)
-            TextButton(onPressed: _markAllRead, child: const Text('Mark all read', style: TextStyle(color: Colors.white))),
+            TextButton(
+                onPressed: _markAllRead,
+                child: const Text('Mark all read',
+                    style: TextStyle(color: Colors.white))),
           PopupMenuButton<String>(
             onSelected: (v) {
               if (v == 'test') _sendTest();
             },
-            itemBuilder: (_) => const [PopupMenuItem(value: 'test', child: Text('Send test notification'))],
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                  value: 'test', child: Text('Send test notification'))
+            ],
           ),
         ],
       ),
@@ -169,11 +188,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 children: [
                   if (error != null)
-                    Padding(padding: const EdgeInsets.all(16), child: Text(error!, style: TextStyle(color: Colors.red.shade700))),
+                    Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(error!,
+                            style: TextStyle(color: Colors.red.shade700))),
                   if (items.isEmpty && error == null)
                     const Padding(
                       padding: EdgeInsets.all(40),
-                      child: Center(child: Text('No notifications yet', style: TextStyle(color: Colors.grey))),
+                      child: Center(
+                          child: Text('No notifications yet',
+                              style: TextStyle(color: Colors.grey))),
                     ),
                   ...items.map((n) {
                     final isUnread = n['read_at'] == null;
@@ -182,16 +206,28 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       child: ListTile(
                         onTap: () => _open(n),
                         leading: CircleAvatar(
-                          backgroundColor: _color(n['type']).withValues(alpha: 0.12),
-                          child: Icon(_icon(n['type']), color: _color(n['type']), size: 20),
+                          backgroundColor:
+                              _color(n['type']).withValues(alpha: 0.12),
+                          child: Icon(_icon(n['type']),
+                              color: _color(n['type']), size: 20),
                         ),
                         title: Text(n['title']?.toString() ?? '',
-                            style: TextStyle(fontSize: 14, fontWeight: isUnread ? FontWeight.w700 : FontWeight.w500)),
-                        subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(n['body']?.toString() ?? '', style: const TextStyle(fontSize: 12)),
-                          const SizedBox(height: 2),
-                          Text(_when(n['created_at']), style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
-                        ]),
+                            style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: isUnread
+                                    ? FontWeight.w700
+                                    : FontWeight.w500)),
+                        subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(n['body']?.toString() ?? '',
+                                  style: const TextStyle(fontSize: 12)),
+                              const SizedBox(height: 2),
+                              Text(_when(n['created_at']),
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey.shade500)),
+                            ]),
                         isThreeLine: true,
                       ),
                     );

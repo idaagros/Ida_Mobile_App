@@ -7,12 +7,15 @@
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'mandi_alerts.dart';
 import 'mandi_common.dart';
 
 class MandiCommodityScreen extends StatefulWidget {
   final int commodityId;
   final String title;
-  const MandiCommodityScreen({super.key, required this.commodityId, required this.title});
+  // Opened from a price-alert notification: go straight to the alerts.
+  final bool openAlerts;
+  const MandiCommodityScreen({super.key, required this.commodityId, required this.title, this.openAlerts = false});
   @override
   State<MandiCommodityScreen> createState() => _MandiCommodityScreenState();
 }
@@ -27,6 +30,19 @@ class _MandiCommodityScreenState extends State<MandiCommodityScreen> {
   void initState() {
     super.initState();
     _loadFilters();
+    if (widget.openAlerts) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openAlerts();
+      });
+    }
+  }
+
+  void _openAlerts() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) => MandiAlertsScreen(commodityId: widget.commodityId, commodityName: widget.title)),
+    );
   }
 
   Future<void> _loadFilters() async {
@@ -54,6 +70,13 @@ class _MandiCommodityScreenState extends State<MandiCommodityScreen> {
           title: Text(widget.title),
           backgroundColor: mandiDark,
           foregroundColor: Colors.white,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.notifications_active_outlined),
+              tooltip: 'Price alerts',
+              onPressed: _openAlerts,
+            ),
+          ],
           bottom: const TabBar(
             labelColor: Colors.white,
             unselectedLabelColor: Colors.white60,

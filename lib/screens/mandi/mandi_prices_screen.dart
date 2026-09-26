@@ -9,6 +9,7 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
+import 'mandi_alerts.dart';
 import 'mandi_common.dart';
 import 'mandi_commodity_screen.dart';
 import 'mandi_settings_screen.dart';
@@ -23,6 +24,7 @@ class _MandiPricesScreenState extends State<MandiPricesScreen> {
   bool loading = true;
   String? error;
   List<Map<String, dynamic>> commodities = [];
+  List<Map<String, dynamic>> alerts = [];
   bool canManage = false;
 
   @override
@@ -47,11 +49,27 @@ class _MandiPricesScreenState extends State<MandiPricesScreen> {
     try {
       final data = await MandiApi.get('/mandi/overview');
       setState(() => commodities = List<Map<String, dynamic>>.from(data['commodities'] ?? []));
+      _loadAlerts();
     } catch (e) {
       setState(() => error = e.toString());
     } finally {
       if (mounted) setState(() => loading = false);
     }
+  }
+
+  Future<void> _loadAlerts() async {
+    try {
+      final a = await MandiApi.get('/mandi/alerts');
+      if (mounted) setState(() => alerts = List<Map<String, dynamic>>.from(a));
+    } catch (_) {
+      // The overview still works without the alerts card.
+    }
+  }
+
+  Future<void> _openCommodity(int id, String title) async {
+    await Navigator.push(
+        context, MaterialPageRoute(builder: (_) => MandiCommodityScreen(commodityId: id, title: title)));
+    _loadAlerts();
   }
 
   @override
@@ -84,6 +102,11 @@ class _MandiPricesScreenState extends State<MandiPricesScreen> {
               style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
             ),
             const SizedBox(height: 12),
+            MyAlertsCard(
+              alerts: alerts,
+              onTap: (a) => _openCommodity(
+                  int.tryParse(a['commodity_id'].toString()) ?? 0, (a['commodity_name'] ?? '').toString()),
+            ),
             if (error != null) ErrorBox(error!),
             if (loading && commodities.isEmpty)
               const Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator()))
@@ -122,10 +145,7 @@ class _MandiPricesScreenState extends State<MandiPricesScreen> {
 
     return InkWell(
       borderRadius: BorderRadius.circular(12),
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => MandiCommodityScreen(commodityId: c['id'] as int, title: display)),
-      ),
+      onTap: () => _openCommodity(c['id'] as int, display),
       child: MandiCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

@@ -32,6 +32,7 @@ import '../screens/machine_maintenance_screen.dart';
 import '../screens/machine_pf_screen.dart';
 import '../screens/machine_reading_screen.dart';
 import '../screens/maintenance_screen.dart';
+import '../screens/mandi/mandi_commodity_screen.dart';
 import '../screens/notifications_screen.dart';
 import '../screens/otp_approvals_screen.dart';
 import '../screens/outward_register_review_screen.dart';
@@ -203,6 +204,7 @@ class PushService {
     final approval = type == 'approval_request';
     final date = DateTime.tryParse((data['date'] ?? '').toString());
     final recordId = int.tryParse((data['record_id'] ?? '').toString());
+    final commodityId = int.tryParse((data['commodity_id'] ?? '').toString());
 
     // Same tab order as AdminReviewScreen / NeedsAttentionScreen.
     const reviewTab = {'electricity': 0, 'tractor': 1, 'factory': 3, 'machine': 4, 'machine_pf': 5};
@@ -249,6 +251,14 @@ class PushService {
         break;
       case 'otp_approvals':
         screen = const OtpApprovalsScreen();
+        break;
+      case 'mandi_commodity':
+        screen = commodityId != null
+            ? MandiCommodityScreen(
+                commodityId: commodityId,
+                title: (data['commodity_name'] ?? 'Mandi price').toString(),
+                openAlerts: true)
+            : const NotificationsScreen();
         break;
       default:
         screen = const NotificationsScreen();
