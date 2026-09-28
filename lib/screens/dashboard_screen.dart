@@ -30,6 +30,7 @@ import 'farm_tractor_work_screen.dart';
 import 'admin/crop_masters_screen.dart';
 import 'admin/agronomy_setup_screen.dart';
 import 'crop_cycles_screen.dart';
+import 'orchard_blocks_screen.dart';
 import 'crop_reports_screen.dart';
 import 'sector_picker_screen.dart';
 import 'needs_attention_screen.dart';
@@ -46,7 +47,6 @@ import 'password_screen.dart';
 import 'otp_approvals_screen.dart';
 
 import '../config/app_config.dart';
-
 // ── Returned record model ─────────────────────────────────────────────────────
 class ReturnedRecord {
   final String id;
@@ -203,8 +203,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     PushService.registerDevice();
     PushService.handleLaunchNotification();
     PushService.refreshUnread();
-    _unreadTimer = Timer.periodic(
-        const Duration(seconds: 60), (_) => PushService.refreshUnread());
+    _unreadTimer = Timer.periodic(const Duration(seconds: 60), (_) => PushService.refreshUnread());
   }
 
   Future<void> _switchSector() async {
@@ -467,10 +466,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                 icon: const Icon(Icons.notifications_none, color: Colors.white),
                 tooltip: 'Notifications',
                 onPressed: () async {
-                  await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const NotificationsScreen()));
+                  await Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const NotificationsScreen()));
                   PushService.refreshUnread();
                 },
               ),
@@ -483,14 +480,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                     height: 16,
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     decoration: BoxDecoration(
-                        color: Colors.orange.shade700,
-                        borderRadius: BorderRadius.circular(8)),
+                        color: Colors.orange.shade700, borderRadius: BorderRadius.circular(8)),
                     child: Center(
                       child: Text(unread > 99 ? '99+' : '$unread',
                           style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700)),
+                              color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700)),
                     ),
                   ),
                 ),
@@ -942,8 +936,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                       _tile(
                         icon: Icons.agriculture_outlined,
                         label: 'Farm Masters',
-                        sub:
-                            'Manage the farm list, worker list & permanent workers',
+                        sub: 'Manage the farm list, worker list & permanent workers',
                         iconBg: const Color(0xFFE8F5E2),
                         iconColor: idaGreen,
                         onTap: () => Navigator.push(
@@ -954,8 +947,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                       _tile(
                         icon: Icons.satellite_alt_outlined,
                         label: 'Precision Agriculture',
-                        sub:
-                            'Farm boundaries, vegetation health & soil analysis',
+                        sub: 'Farm boundaries, vegetation health & soil analysis',
                         iconBg: const Color(0xFFE3F2FD),
                         iconColor: const Color(0xFF1565C0),
                         onTap: () => Navigator.push(
@@ -1022,13 +1014,25 @@ class _DashboardScreenState extends State<DashboardScreen>
                         icon: Icons.spa_outlined,
                         label: AppLocalizations.of(context)!
                             .agriAgronomySetupTitle,
-                        sub: 'Orchard blocks and agronomy schedule templates',
+                        sub: 'Crop plans (spray & fertiliser steps) and products',
                         iconBg: const Color(0xFFE8F5E2),
                         iconColor: idaGreen,
                         onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
                                 builder: (_) => const AgronomySetupScreen())),
+                      ),
+                      _tile(
+                        icon: Icons.park_outlined,
+                        label: AppLocalizations.of(context)!
+                            .agriOrchardBlocksTab,
+                        sub: 'Blocks of trees: variety, planting date, trees',
+                        iconBg: const Color(0xFFE8F5E2),
+                        iconColor: idaGreen,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const OrchardBlocksScreen())),
                       ),
                       _tile(
                         icon: Icons.calendar_month_outlined,

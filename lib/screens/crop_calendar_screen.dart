@@ -29,6 +29,8 @@ import '../localization/transliterate.dart';
 import '../services/responsive.dart';
 
 import '../config/app_config.dart';
+import 'agronomy/agronomy_common.dart' show fmtQty, trimNum, toD, KindChip, SmallChip, mainKind;
+import 'agronomy/record_spray_screen.dart';
 class CropCalendarScreen extends StatefulWidget {
   final String cycleType; // 'seasonal' | 'orchard'
   final int cycleId;
@@ -133,7 +135,7 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
             title: Text(loc.agriMarkComplete),
             onTap: () {
               Navigator.pop(context);
-              _showCompleteDialog(item);
+              _markDone(item);
             },
           ),
           ListTile(
@@ -147,6 +149,34 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
         ]),
       ),
     );
+  }
+
+  // Step number of a spray / pruning item, in plan order.
+  int? _stepNo(Map item) {
+    final list = items.where((i) => i['source_type'] != 'stage').toList()
+      ..sort((a, b) => ((a['sequence_order'] ?? 0) as num).compareTo((b['sequence_order'] ?? 0) as num));
+    final i = list.indexWhere((x) => x['id'] == item['id']);
+    return i < 0 ? null : i + 1;
+  }
+
+  // Spray steps with products from the Products list open the full
+  // "Mark done" screen (brand used, recommended vs actual per product);
+  // everything else keeps the short dialog.
+  Future<void> _markDone(Map item) async {
+    final prods = (item['products'] as List?) ?? [];
+    if (item['source_type'] == 'spray' && prods.isNotEmpty) {
+      final saved = await Navigator.push<bool>(
+          context,
+          MaterialPageRoute(
+              builder: (_) => RecordSprayScreen(
+                  item: item, stepNo: _stepNo(item), cycleType: widget.cycleType, cycleId: widget.cycleId, workers: workers)));
+      if (saved == true) {
+        _load();
+        if (mounted) _showSnack(AppLocalizations.of(context)!.agriSaved);
+      }
+      return;
+    }
+    _showCompleteDialog(item);
   }
 
   void _showCompleteDialog(Map item) {
@@ -1143,6 +1173,7 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
           else
             Text('Due ${item['planned_date']}',
                 style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+          ..._productLines(item),
           if (item['weather_advisory'] != null &&
               item['weather_advisory']['message'] != null)
             _weatherAdvisoryBadge(item['weather_advisory'],
@@ -1150,6 +1181,65 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
         ]),
       ),
     );
+  }
+
+  // Products of a spray step with the recommended quantity for this
+  // field, or — once done — what was recorded (actual of recommended).
+  List<Widget> _productLines(Map item) {
+    final perTree = item['basis'] == 'tree';
+    final rec = item['recorded'] as Map?;
+    final prods = (item['products'] as List?) ?? [];
+    final out = <Widget>[];
+    if (rec != null && ((rec['products'] as List?) ?? []).isNotEmpty) {
+      final area = rec['area_covered_acre'] != null
+          ? ' · ${trimNum(toD(rec['area_covered_acre']))} acres'
+          : rec['trees_covered'] != null
+              ? ' · ${rec['trees_covered']} trees'
+              : '';
+      out.add(Padding(
+        padding: const EdgeInsets.only(top: 6, bottom: 2),
+        child: Text('Recorded$area', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.grey.shade600)),
+      ));
+      for (final p in rec['products'] as List) {
+        final r = toD(p['recommended_qty']);
+        final a = toD(p['actual_qty']) ?? 0;
+        final pct = r != null && r > 0 ? (a - r) / r * 100 : null;
+        out.add(Row(children: [
+          Expanded(
+            child: Text('${p['name']}${p['brand_name'] != null ? ' · ${p['brand_name']}' : ''}',
+                style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis),
+          ),
+          Text('${fmtQty(a, p['unit'] ?? 'ml')} of ${fmtQty(r, p['unit'] ?? 'ml')}',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+          if (pct != null && pct.abs() >= 0.5) ...[
+            const SizedBox(width: 6),
+            SmallChip('${pct.abs().round()}% ${pct > 0 ? 'more' : 'less'}',
+                bg: pct > 0 ? const Color(0xFFFDE6D2) : const Color(0xFFDDE9F7),
+                fg: pct > 0 ? const Color(0xFF8C3F06) : const Color(0xFF1D4D86)),
+          ],
+        ]));
+      }
+      return out;
+    }
+    if (item['source_type'] != 'spray' || prods.isEmpty) return out;
+    out.add(Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 2),
+      child: Wrap(spacing: 4, children: [
+        KindChip(mainKind({...item, 'products': prods})),
+        if (prods.length > 1) const SmallChip('Tank mix'),
+      ]),
+    ));
+    for (final p in prods) {
+      out.add(Row(children: [
+        Expanded(
+          child: Text('${p['name']} · ${p['preferred_brand_name'] ?? 'no brand'}',
+              style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis),
+        ),
+        Text('${trimNum(toD(p['dose']), 3)} ${p['unit']}/${perTree ? 'tree' : 'acre'} → ${fmtQty(toD(p['recommended_qty']), p['unit'] ?? 'ml')}',
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+      ]));
+    }
+    return out;
   }
 
   Widget _weatherAdvisoryBadge(Map advisory, {required bool isOverdue}) {
