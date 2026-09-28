@@ -21,7 +21,7 @@ import '../../localization/transliterate.dart';
 import '../../services/responsive.dart';
 
 import '../../config/app_config.dart';
-enum _Tab { tractors, rateCard }
+enum _Tab { tractors, rateCard, loads }
 
 class FarmTractorMasterScreen extends StatefulWidget {
   const FarmTractorMasterScreen({super.key});
@@ -39,6 +39,7 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
   List tractors = [];
   List workTypes = [];
   List rateCard = [];
+  List loads = []; // work types with load level (Heavy / Medium / Light)
   bool loading = true;
 
   static const billingUnits = ['hour', 'acre', 'bag', 'trip', 'day'];
@@ -66,7 +67,11 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
         http.get(Uri.parse('$baseUrl/work-types?applies_to=tractor'),
             headers: h),
         http.get(Uri.parse('$baseUrl/farm-tractor/rate-card'), headers: h),
+        http.get(Uri.parse('$baseUrl/farm-tractor/work-loads'), headers: h),
       ]);
+      if (results[3].statusCode == 200) {
+        loads = (jsonDecode(results[3].body)['items'] as List?) ?? [];
+      }
       if (results[0].statusCode == 200) tractors = jsonDecode(results[0].body);
       if (results[1].statusCode == 200) workTypes = jsonDecode(results[1].body);
       if (results[2].statusCode == 200) rateCard = jsonDecode(results[2].body);
@@ -95,13 +100,16 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
         TextEditingController(text: tractor?['registration_number'] ?? '');
     final hpCtrl =
         TextEditingController(text: tractor?['hp']?.toString() ?? '');
+    final modelCtrl = TextEditingController(text: tractor?['model'] ?? '');
+    final tankCtrl = TextEditingController(
+        text: tractor?['tank_capacity_l']?.toString() ?? '');
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(tractor == null ? loc.ftAddTractor : loc.ftEditTractor,
             style: const TextStyle(fontWeight: FontWeight.w700)),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
+        content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(
             controller: nameCtrl,
             autofocus: true,
@@ -124,10 +132,29 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: InputDecoration(
                 labelText: loc.ftHpLabel,
+                helperText: 'Needed for the diesel estimate',
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10))),
           ),
-        ]),
+          const SizedBox(height: 12),
+          TextField(
+            controller: modelCtrl,
+            decoration: InputDecoration(
+                labelText: 'Model (e.g. 3630 TX Super)',
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10))),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: tankCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+                labelText: 'Diesel tank (litres)',
+                helperText: 'Needed to work out diesel left',
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10))),
+          ),
+        ])),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
@@ -139,7 +166,9 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
               final body = jsonEncode({
                 'name': nameCtrl.text.trim(),
                 'registration_number': regCtrl.text.trim(),
-                'hp': double.tryParse(hpCtrl.text.trim())
+                'hp': double.tryParse(hpCtrl.text.trim()),
+                'model': modelCtrl.text.trim().isEmpty ? null : modelCtrl.text.trim(),
+                'tank_capacity_l': double.tryParse(tankCtrl.text.trim()),
               });
               final res = tractor == null
                   ? await http.post(Uri.parse('$baseUrl/farm-tractor/tractors'),
@@ -294,6 +323,19 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
     );
   }
 
+  Future<void> _setLoad(Map w, String? level) async {
+    if (level == null) return;
+    final h = await _headers;
+    final res = await http.put(Uri.parse('$baseUrl/farm-tractor/work-loads'),
+        headers: {...h, 'Content-Type': 'application/json'},
+        body: jsonEncode({'work_type_id': w['work_type_id'], 'load_level': level}));
+    if (res.statusCode == 200) {
+      setState(() => w['load_level'] = level);
+    } else {
+      _showSnack('Could not save', isError: true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context)!;
@@ -306,20 +348,19 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
         title: Text(loc.ftSetupTitle,
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: idaGreen,
-        onPressed: () {
-          switch (_tab) {
-            case _Tab.tractors:
-              _showTractorDialog();
-              break;
-            case _Tab.rateCard:
-              _showRateDialog();
-              break;
-          }
-        },
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
+      floatingActionButton: _tab == _Tab.loads
+          ? null
+          : FloatingActionButton(
+              backgroundColor: idaGreen,
+              onPressed: () {
+                if (_tab == _Tab.tractors) {
+                  _showTractorDialog();
+                } else {
+                  _showRateDialog();
+                }
+              },
+              child: const Icon(Icons.add, color: Colors.white),
+            ),
       body: Column(children: [
         Container(
           color: idaDark,
@@ -328,6 +369,8 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
             _segment(loc.ftTractorsTab, _Tab.tractors, tractors.length),
             const SizedBox(width: 8),
             _segment(loc.ftRatesTab, _Tab.rateCard, rateCard.length),
+            const SizedBox(width: 8),
+            _segment('How hard', _Tab.loads, loads.length),
           ]),
         ),
         Expanded(
@@ -377,14 +420,52 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
                   return _row(
                     title: tl(context, t['name'] ?? ''),
                     subtitle: [
+                      if (t['model'] != null) t['model'],
                       if (t['registration_number'] != null)
                         t['registration_number'],
-                      if (t['hp'] != null) '${t['hp']} HP'
+                      if (t['hp'] != null) '${t['hp']} HP',
+                      if (t['tank_capacity_l'] != null)
+                        '${t['tank_capacity_l']} L tank',
                     ].join(' · '),
                     onTap: () => _showTractorDialog(tractor: t),
                   );
                 },
               );
+      case _Tab.loads:
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
+          children: [
+            Text(
+                'How hard each work is on the tractor. Sets the diesel estimate: Heavy 0.12, Medium 0.09, Light 0.065 litres per HP per hour, until a tractor has its own figure from "filled to full" fill-ups.',
+                style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700)),
+            const SizedBox(height: 12),
+            for (final w in loads)
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.fromLTRB(14, 4, 10, 4),
+                decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE0E7D8))),
+                child: Row(children: [
+                  Expanded(
+                      child: Text(tl(context, w['work_type_name'] ?? ''),
+                          style: const TextStyle(
+                              fontSize: 14, fontWeight: FontWeight.w600))),
+                  DropdownButton<String>(
+                    value: w['load_level'] ?? 'medium',
+                    underline: const SizedBox(),
+                    items: const [
+                      DropdownMenuItem(value: 'heavy', child: Text('Heavy')),
+                      DropdownMenuItem(value: 'medium', child: Text('Medium')),
+                      DropdownMenuItem(value: 'light', child: Text('Light')),
+                    ],
+                    onChanged: (v) => _setLoad(w, v),
+                  ),
+                ]),
+              ),
+          ],
+        );
       case _Tab.rateCard:
         return rateCard.isEmpty
             ? _empty(loc.ftNoRatesYet)

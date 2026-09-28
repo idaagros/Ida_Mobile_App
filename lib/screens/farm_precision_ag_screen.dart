@@ -105,8 +105,9 @@ class _FarmPrecisionAgScreenState extends State<FarmPrecisionAgScreen> {
         _refreshNote = errors.isEmpty
             ? 'Analysis updated.'
             : errors.entries
-                .map((e) => '${e.key.toString().toUpperCase()}: ${e.value}')
-                .join(' · ');
+                .map((e) =>
+                    _friendlyRefreshError(e.key.toString(), '${e.value}'))
+                .join(' ');
       } else {
         _refreshNote = data['error'] ?? 'Refresh failed';
       }
@@ -232,7 +233,9 @@ class _FarmPrecisionAgScreenState extends State<FarmPrecisionAgScreen> {
         const SizedBox(height: 12),
         _VegetationHealthCard(snapshot: data['latest_ndvi']),
         const SizedBox(height: 12),
-        _NdviTrendCard(history: (data['ndvi_history'] as List?) ?? []),
+        _NdviTrendCard(
+            history: (data['ndvi_history'] as List?) ?? [],
+            crops: (data['crops'] as List?) ?? []),
         const SizedBox(height: 12),
         _SoilCard(soil: data['soil']),
       ],
@@ -554,56 +557,394 @@ class _VegetationHealthCard extends StatelessWidget {
 }
 
 // ── NDVI trend ─────────────────────────────────────────────────────
+// Chart plus a plain-words reading of it (same rules as the web page):
+// which way NDVI is going, whether that is normal for the crop's stage
+// (from the farm's active sowing plan) and what to check.
 class _NdviTrendCard extends StatelessWidget {
   final List history;
-  const _NdviTrendCard({required this.history});
+  final List crops;
+  const _NdviTrendCard({required this.history, this.crops = const []});
 
   @override
   Widget build(BuildContext context) {
-    final points = history
+    final pts = history
         .where((h) => h['ndvi_mean'] != null)
-        .map((h) => double.tryParse(h['ndvi_mean'].toString()) ?? 0.0)
+        .map((h) => _TrendPoint(
+              date:
+                  DateTime.tryParse('${h['snapshot_date']}') ?? DateTime.now(),
+              ndvi: double.tryParse(h['ndvi_mean'].toString()) ?? 0.0,
+              ndmi: h['ndmi_mean'] == null
+                  ? null
+                  : double.tryParse(h['ndmi_mean'].toString()),
+              cloud: h['cloud_pct'] == null
+                  ? null
+                  : double.tryParse(h['cloud_pct'].toString()),
+              partial:
+                  h['partial_coverage'] == true || h['partial_coverage'] == 1,
+            ))
         .toList();
+    final points = pts.map((p) => p.ndvi).toList();
+    final t = pts.length >= 2 ? _interpretTrend(pts, crops) : null;
 
     return _Card(
       title: 'NDVI TREND',
+      subtitle:
+          'How green and dense the crop canopy has been at each reading (0 = bare soil, 1 = very dense green). Above 0.5 is a healthy full canopy.',
       child: points.length < 2
           ? const Text('Need at least two refreshes over time to show a trend.',
               style: TextStyle(fontSize: 12, color: Colors.grey))
-          : SizedBox(
-              height: 160,
-              child: LineChart(LineChartData(
-                minY: 0,
-                maxY: 1,
-                gridData: const FlGridData(show: true, drawVerticalLine: false),
-                titlesData: const FlTitlesData(
-                  topTitles:
-                      AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  rightTitles:
-                      AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  bottomTitles:
-                      AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  leftTitles: AxisTitles(
-                      sideTitles:
-                          SideTitles(showTitles: true, reservedSize: 30)),
-                ),
-                borderData: FlBorderData(show: false),
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: [
-                      for (var i = 0; i < points.length; i++)
-                        FlSpot(i.toDouble(), points[i])
-                    ],
-                    isCurved: true,
-                    color: const Color(0xFF659442),
-                    barWidth: 2,
-                    dotData: const FlDotData(show: true),
+          : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              SizedBox(
+                height: 160,
+                child: LineChart(LineChartData(
+                  minY: 0,
+                  maxY: 1,
+                  gridData:
+                      const FlGridData(show: true, drawVerticalLine: false),
+                  titlesData: const FlTitlesData(
+                    topTitles:
+                        AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles:
+                        AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    bottomTitles:
+                        AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    leftTitles: AxisTitles(
+                        sideTitles:
+                            SideTitles(showTitles: true, reservedSize: 30)),
                   ),
-                ],
-              )),
-            ),
+                  borderData: FlBorderData(show: false),
+                  lineBarsData: [
+                    LineChartBarData(
+                      spots: [
+                        for (var i = 0; i < points.length; i++)
+                          FlSpot(i.toDouble(), points[i])
+                      ],
+                      isCurved: true,
+                      color: const Color(0xFF659442),
+                      barWidth: 2,
+                      dotData: const FlDotData(show: true),
+                    ),
+                  ],
+                )),
+              ),
+              if (t != null) _TrendVerdictBox(t: t),
+            ]),
     );
   }
+}
+
+class _TrendPoint {
+  final DateTime date;
+  final double ndvi;
+  final double? ndmi;
+  final double? cloud;
+  final bool partial;
+  _TrendPoint(
+      {required this.date,
+      required this.ndvi,
+      this.ndmi,
+      this.cloud,
+      this.partial = false});
+}
+
+class _TrendVerdict {
+  final String tone; // good | normal | watch | act | neutral
+  final String headline;
+  final String? context;
+  final String meaning;
+  final List<String> actions;
+  final List<String> notes;
+  _TrendVerdict(this.tone, this.headline, this.context, this.meaning,
+      this.actions, this.notes);
+}
+
+class _TrendVerdictBox extends StatelessWidget {
+  final _TrendVerdict t;
+  const _TrendVerdictBox({required this.t});
+  @override
+  Widget build(BuildContext context) {
+    const tones = {
+      'good': ['Looks good', 0xFF2C5E17, 0xFFF5FAF1, 0xFFCFE3C0],
+      'normal': ['Normal for this stage', 0xFF2C5E17, 0xFFF5FAF1, 0xFFCFE3C0],
+      'watch': ['Keep an eye', 0xFF7A4D00, 0xFFFFFAF0, 0xFFF3D7A6],
+      'act': ['Needs attention', 0xFF9E2419, 0xFFFFF5F4, 0xFFEFB9B3],
+      'neutral': ['Not enough to judge', 0xFF4A5643, 0xFFF8F9F6, 0xFFE2E6DC],
+    };
+    final tn = tones[t.tone] ?? tones['neutral']!;
+    final fg = Color(tn[1] as int);
+    const small =
+        TextStyle(fontSize: 12, color: Color(0xFF374151), height: 1.35);
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+          color: Color(tn[2] as int),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Color(tn[3] as int))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+              child: Text(t.headline,
+                  style: TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w800, color: fg))),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+                color: fg.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(20)),
+            child: Text(tn[0] as String,
+                style: TextStyle(
+                    fontSize: 10.5, fontWeight: FontWeight.w700, color: fg)),
+          ),
+        ]),
+        if (t.context != null) ...[
+          const SizedBox(height: 4),
+          Text(t.context!,
+              style: const TextStyle(fontSize: 11.5, color: Colors.grey)),
+        ],
+        const SizedBox(height: 6),
+        Text.rich(
+            TextSpan(children: [
+              const TextSpan(
+                  text: 'What it means: ',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              TextSpan(text: t.meaning),
+            ]),
+            style: small),
+        if (t.actions.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          const Text('What to do:',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+          for (final a in t.actions)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child:
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('•  ', style: small),
+                Expanded(child: Text(a, style: small)),
+              ]),
+            ),
+        ],
+        for (final n in t.notes)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text('ⓘ $n',
+                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          ),
+      ]),
+    );
+  }
+}
+
+String _friendlyRefreshError(String kind, String msg) {
+  final what = kind == 'soil'
+      ? 'The soil data service (SoilGrids)'
+      : 'The satellite service';
+  final keep = kind == 'soil'
+      ? 'The soil values below are from the last successful check.'
+      : 'The readings below are from the last successful check.';
+  if (RegExp(r'\b50[234]\b|time-?out|timed out|ETIMEDOUT|ECONNRESET',
+          caseSensitive: false)
+      .hasMatch(msg)) {
+    return "$what didn't answer in time. $keep Try Refresh again later.";
+  }
+  var clean = msg
+      .replaceAll(RegExp(r'<[^>]*>'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  if (clean.length > 160) clean = clean.substring(0, 160);
+  return '$what had a problem: $clean. $keep';
+}
+
+// Changes smaller than 0.05 are treated as noise — satellite readings
+// wobble that much from haze and sun angle.
+_TrendVerdict _interpretTrend(List<_TrendPoint> points, List crops) {
+  final first = points.first;
+  final last = points.last;
+  final prev = points[points.length - 2];
+  final span = last.date.difference(first.date).inDays;
+  final delta = last.ndvi - first.ndvi;
+  final recent = last.ndvi - prev.ndvi;
+  final dir = delta > 0.05 ? 'up' : (delta < -0.05 ? 'down' : 'flat');
+  final sharp = recent <= -0.1;
+  String f(double n) => n.toStringAsFixed(2);
+  final moved =
+      'NDVI went from ${f(first.ndvi)} to ${f(last.ndvi)} over $span days';
+  final ndmiFalling = first.ndmi != null &&
+      last.ndmi != null &&
+      last.ndmi! - first.ndmi! < -0.05;
+
+  final seasonal = crops
+      .where((c) =>
+          c['kind'] == 'seasonal' &&
+          c['days_since_start'] != null &&
+          (c['days_since_start'] as num) >= 0)
+      .toList();
+  final orchard = crops.where((c) => c['kind'] == 'orchard').toList();
+  final main = seasonal.isNotEmpty ? seasonal.first as Map : null;
+  final notes = <String>[];
+  if (seasonal.length > 1 || (seasonal.isNotEmpty && orchard.isNotEmpty)) {
+    notes.add(
+        'This farm has more than one crop, so the reading is an average across them. The main crop is used here.');
+  }
+  if (points.any((p) => p.partial || (p.cloud != null && p.cloud! > 50))) {
+    notes.add(
+        'Some readings were taken through partial cloud, so small ups and downs can be noise. Look at the overall direction.');
+  }
+  final age = DateTime.now().difference(last.date).inDays;
+  if (age > 15)
+    notes.add(
+        'The latest reading is $age days old — tap Refresh for a newer one.');
+
+  String? stage;
+  String? context;
+  final cropName = main == null ? '' : '${main['crop_name']}';
+  final isCotton = cropName.toLowerCase().contains('cotton');
+  if (main != null) {
+    final m = (main['maturity_days'] as num?)?.toDouble() ?? 150;
+    final d = (main['days_since_start'] as num).toDouble();
+    final frac = d / (m <= 0 ? 150 : m);
+    stage = frac < 0.3
+        ? 'early'
+        : (frac < 0.75 ? 'mid' : (frac <= 1.1 ? 'late' : 'past'));
+    const words = {
+      'early': 'early growth',
+      'mid': 'mid-season (canopy should be at or near its peak)',
+      'late': 'late season (crop maturing)',
+      'past': 'past its expected harvest',
+    };
+    context =
+        '$cropName (${main['variety_name']}) · day ${d.round()} of about ${m.round()} since sowing · ${words[stage]}.';
+  } else if (orchard.isNotEmpty) {
+    context =
+        '${orchard.first['crop_name']} orchard — trees change slowly; watch for drops after flowering and fruit set.';
+  }
+
+  const walk =
+      'Walk the field, especially the parts that look yellow on the Field Health Map, and look for the cause before spending on inputs.';
+  final water = ndmiFalling
+      ? 'The moisture index (NDMI) is falling too, which points to water stress — check soil moisture and bring the next irrigation forward if water is available.'
+      : 'Check soil moisture and the irrigation schedule.';
+  final pests = isCotton
+      ? 'Check for sucking pests (whitefly, jassids, thrips), pink bollworm and leaf reddening; these commonly thin the cotton canopy at this time.'
+      : 'Check leaves for pest or disease damage (spots, curling, holes, yellowing).';
+  const nutrition =
+      'Check whether the planned fertiliser steps in the crop calendar are done — a missed nitrogen or potash dose often shows up as a slow or falling canopy.';
+
+  if (stage == 'past') {
+    return _TrendVerdict(
+        'neutral',
+        'Crop should be harvested by now',
+        context,
+        "$moved. The sowing plan is older than the variety's expected crop duration, so a falling or low reading is expected after harvest.",
+        [
+          'If the crop is harvested, mark the sowing plan as completed so this screen stops comparing against it.'
+        ],
+        notes);
+  }
+  if (dir == 'down') {
+    if (stage == 'late') {
+      return _TrendVerdict(
+          'normal',
+          'Falling — normal as the crop matures',
+          context,
+          '$moved. Near harvest, leaves dry and drop, so NDVI naturally falls.',
+          [
+            'No action needed unless the fall started much earlier than usual for this variety.'
+          ],
+          notes);
+    }
+    if (sharp || stage == 'early') {
+      return _TrendVerdict(
+          'act',
+          sharp
+              ? 'Sharp drop — check the field soon'
+              : 'Canopy shrinking early in the season',
+          context,
+          '$moved${sharp ? ', including a drop of ${f(-recent)} since the previous reading' : ''}. A healthy crop should be getting greener at this stage, so something is holding it back.',
+          [
+            walk,
+            water,
+            pests,
+            nutrition,
+            'If it rained heavily, look for waterlogged patches.'
+          ],
+          notes);
+    }
+    return _TrendVerdict(
+        'watch',
+        'Slowly falling when it should hold steady',
+        context,
+        '$moved. ${stage == 'mid' ? 'In mid-season the canopy should be holding at its peak, so a steady fall is an early warning' : 'A steady fall usually means the crop is under some stress'} — often water, pests or nutrition.',
+        [walk, water, pests, nutrition],
+        notes);
+  }
+  if (dir == 'up') {
+    return _TrendVerdict(
+        'good',
+        stage == 'late'
+            ? 'Still green late in the season'
+            : 'Getting greener — looks good',
+        context,
+        '$moved. The canopy is growing${stage == 'early' ? ', as expected while the crop establishes' : ''}.',
+        stage == 'late' && isCotton
+            ? [
+                'Fine in most cases. For cotton, very late fresh growth can delay boll opening — avoid extra nitrogen now.'
+              ]
+            : ['No action needed — keep following the crop plan.'],
+        notes);
+  }
+  if (last.ndvi >= 0.5) {
+    return _TrendVerdict(
+        'good',
+        'Steady and healthy',
+        context,
+        '$moved — about the same, and in the healthy range (above 0.5).',
+        ['No action needed — keep following the crop plan.'],
+        notes);
+  }
+  if (stage == 'late') {
+    return _TrendVerdict(
+        'normal',
+        'Steady — fine for a maturing crop',
+        context,
+        '$moved — about the same. Late in the season the canopy no longer grows.',
+        ['No action needed.'],
+        notes);
+  }
+  if (stage == 'early' && last.ndvi < 0.2) {
+    return _TrendVerdict(
+        'watch',
+        'Not greening up yet',
+        context,
+        '$moved — still low. Early on this can be normal, but it should start rising within 2–3 weeks of emergence.',
+        [
+          'Check germination and plant stand in the field.',
+          water,
+          'Refresh again in a week or two to see if it starts rising.'
+        ],
+        notes);
+  }
+  if (stage == null) {
+    return _TrendVerdict(
+        last.ndvi < 0.3 ? 'watch' : 'neutral',
+        'About the same',
+        context ??
+            "No active sowing plan on this farm, so the crop stage isn't known.",
+        "$moved — about the same. Whether that is good depends on the crop's stage.",
+        [
+          "Add a sowing plan for this farm (Crop cycles) so this can be judged against the crop's stage."
+        ],
+        notes);
+  }
+  return _TrendVerdict(
+      'watch',
+      'Flat and below a full canopy',
+      context,
+      '$moved — not rising, and still below the healthy range (0.5). ${stage == 'mid' ? 'By mid-season most crops should be at or near full canopy.' : 'The crop should be growing at this stage.'}',
+      [walk, nutrition, water, pests],
+      notes);
 }
 
 // ── Soil properties (same interpretation bands as web) ────────────

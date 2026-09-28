@@ -53,6 +53,8 @@ class AgriApi {
       _decode(await http.get(Uri.parse('$baseUrl$path'), headers: await _headers()));
   static Future<dynamic> post(String path, Map body) async => _decode(await http
       .post(Uri.parse('$baseUrl$path'), headers: await _headers(), body: jsonEncode(body)));
+  static Future<dynamic> put(String path, Map body) async => _decode(await http
+      .put(Uri.parse('$baseUrl$path'), headers: await _headers(), body: jsonEncode(body)));
   static Future<dynamic> patch(String path, Map body) async => _decode(await http
       .patch(Uri.parse('$baseUrl$path'), headers: await _headers(), body: jsonEncode(body)));
   static Future<dynamic> delete(String path) async =>

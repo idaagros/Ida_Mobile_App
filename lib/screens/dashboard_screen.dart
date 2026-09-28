@@ -26,7 +26,7 @@ import 'admin/farm_masters_screen.dart';
 import 'farm_picker_screen.dart';
 import 'tv_dashboard_screen.dart';
 import 'attendance_screen.dart';
-import 'farm_tractor_work_screen.dart';
+import 'farm_tractor_day_screen.dart';
 import 'admin/crop_masters_screen.dart';
 import 'admin/agronomy_setup_screen.dart';
 import 'crop_cycles_screen.dart';
@@ -962,13 +962,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                         icon: Icons.agriculture,
                         label: 'Farm Tractor',
                         sub:
-                            'Assign tractor field work and log hours, diesel and billing',
+                            'Day meter, jobs, estimated diesel and diesel left',
                         iconBg: const Color(0xFFFEF3DC),
                         iconColor: Colors.orange.shade800,
                         onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
-                                builder: (_) => const FarmTractorWorkScreen())),
+                                builder: (_) => const FarmTractorDayScreen())),
                       ),
                     if (_can('agri'))
                       _tile(
