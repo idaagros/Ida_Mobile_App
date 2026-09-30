@@ -49,7 +49,7 @@ class _TaskGroup {
 class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   bool loading = true;
   bool saving = false;
@@ -88,7 +88,6 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

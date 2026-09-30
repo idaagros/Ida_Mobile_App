@@ -21,7 +21,7 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
   static const red = Color(0xFFE24B4A);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   late TabController _tabs;
   List activities = [];
@@ -51,7 +51,6 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
     return {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer ${p.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

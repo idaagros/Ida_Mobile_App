@@ -25,7 +25,7 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   final readingCtrl = TextEditingController();
   final notesCtrl = TextEditingController();
@@ -111,7 +111,6 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
         Uri.parse('$baseUrl/electricity/${widget.returnedRecordId}'),
         headers: {
           'Authorization': 'Bearer $token',
-          'ngrok-skip-browser-warning': 'true',
         },
       );
       if (res.statusCode == 200) {
@@ -218,7 +217,6 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
         Uri.parse('$baseUrl/electricity/previous?date=$dateStr'),
         headers: {
           'Authorization': 'Bearer $token',
-          'ngrok-skip-browser-warning': 'true',
         },
       );
       if (res.statusCode == 200 && res.body != 'null') {
@@ -344,7 +342,6 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
         Uri.parse('$baseUrl/electricity/check-date?date=$dateStr'),
         headers: {
           'Authorization': 'Bearer $token',
-          'ngrok-skip-browser-warning': 'true',
         },
       );
       if (res.statusCode == 200) {
@@ -416,7 +413,6 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
       final request =
           http.MultipartRequest(isCorrection ? 'PUT' : 'POST', reqUrl)
             ..headers['Authorization'] = 'Bearer $token'
-            ..headers['ngrok-skip-browser-warning'] = 'true'
             ..fields['reading_date'] = dateStr
             ..fields['reading_time'] = timeStr
             ..fields['meter_reading'] = readingCtrl.text

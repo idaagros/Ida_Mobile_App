@@ -27,13 +27,12 @@ class MandiApiException implements Exception {
 }
 
 class MandiApi {
-  static const _base = AppConfig.apiBaseUrl;
+  static String get _base => AppConfig.apiBaseUrl;
 
   static Future<Map<String, String>> _headers({bool json = false}) async {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
       if (json) 'Content-Type': 'application/json',
     };
   }

@@ -38,7 +38,6 @@ class _UsersScreenState extends State<UsersScreen> {
         Uri.parse('${ApiService.baseUrl}/api/admin/users'),
         headers: {
           'Authorization': 'Bearer $token',
-          'ngrok-skip-browser-warning': 'true',
         },
       );
       if (res.statusCode == 200) {
@@ -64,7 +63,6 @@ class _UsersScreenState extends State<UsersScreen> {
         Uri.parse('${ApiService.baseUrl}/api/admin/users/${user.id}/toggle'),
         headers: {
           'Authorization': 'Bearer $token',
-          'ngrok-skip-browser-warning': 'true',
         },
       );
       if (res.statusCode == 200) {

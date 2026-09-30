@@ -25,7 +25,7 @@ class CropMastersScreen extends StatefulWidget {
 class _CropMastersScreenState extends State<CropMastersScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   _Tab _tab = _Tab.crops;
   List crops = [];
@@ -46,7 +46,6 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

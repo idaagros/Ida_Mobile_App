@@ -35,7 +35,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   late DateTime selectedDate = widget.initialDate ?? DateTime.now();
   bool isAdmin = false;
@@ -99,7 +99,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 
@@ -1145,8 +1144,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           ),
                           const SizedBox(width: 8),
                           Flexible(
-                            child: Text(
-                                '₹${p['morning_amount'] ?? p['daily_wage']}',
+                            child: Text('₹${p['morning_amount'] ?? p['daily_wage']}',
                                 style: TextStyle(
                                     fontSize: 12.5,
                                     color: Colors.grey.shade600),

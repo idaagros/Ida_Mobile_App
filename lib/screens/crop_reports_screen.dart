@@ -35,7 +35,7 @@ class _CropReportsScreenState extends State<CropReportsScreen>
     with SingleTickerProviderStateMixin {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   late TabController _tabController;
   List farms = [];
@@ -75,7 +75,6 @@ class _CropReportsScreenState extends State<CropReportsScreen>
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

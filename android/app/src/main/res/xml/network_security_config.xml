@@ -6,12 +6,4 @@
             <certificates src="user" />
         </trust-anchors>
     </base-config>
-    <domain-config cleartextTrafficPermitted="false">
-        <domain includeSubdomains="true">ngrok-free.dev</domain>
-        <domain includeSubdomains="true">ngrok.io</domain>
-        <trust-anchors>
-            <certificates src="system" />
-            <certificates src="user" />
-        </trust-anchors>
-    </domain-config>
 </network-security-config>

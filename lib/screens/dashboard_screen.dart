@@ -22,6 +22,7 @@ import 'outward_register_review_screen.dart';
 import 'machine_pf_screen.dart';
 import 'admin/parties_screen.dart';
 import 'admin/destinations_screen.dart';
+import 'admin/app_settings_screen.dart';
 import 'admin/farm_masters_screen.dart';
 import 'farm_picker_screen.dart';
 import 'tv_dashboard_screen.dart';
@@ -80,7 +81,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static const _base = AppConfig.apiBaseUrl;
+  static String get _base => AppConfig.apiBaseUrl;
 
   String _displayName = '';
   bool _isAdmin = false;
@@ -226,7 +227,6 @@ class _DashboardScreenState extends State<DashboardScreen>
 
     final headers = {
       'Authorization': 'Bearer $token',
-      'ngrok-skip-browser-warning': 'true',
     };
 
     final modules = {
@@ -292,7 +292,6 @@ class _DashboardScreenState extends State<DashboardScreen>
         Uri.parse('$_base/needs-attention'),
         headers: {
           'Authorization': 'Bearer $token',
-          'ngrok-skip-browser-warning': 'true'
         },
       ).timeout(const Duration(seconds: 6));
       if (res.statusCode == 200) {
@@ -1164,6 +1163,17 @@ class _DashboardScreenState extends State<DashboardScreen>
                         context,
                         MaterialPageRoute(
                             builder: (_) => const TvDashboardScreen())),
+                  ),
+                  _tile(
+                    icon: Icons.settings_outlined,
+                    label: 'App Settings',
+                    sub: 'Face login sensitivity, server address',
+                    iconBg: const Color(0xFFF1F3F4),
+                    iconColor: const Color(0xFF455A64),
+                    onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const AppSettingsScreen())),
                   ),
                 ]),
               ],

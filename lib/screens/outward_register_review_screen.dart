@@ -28,7 +28,7 @@ class _OutwardRegisterReviewListScreenState
     extends State<OutwardRegisterReviewListScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   List records = [];
   bool loading = true;
@@ -44,7 +44,6 @@ class _OutwardRegisterReviewListScreenState
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 
@@ -268,7 +267,7 @@ class _OutwardRegisterReviewScreenState
     extends State<OutwardRegisterReviewScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   bool loading = true;
   Map<String, dynamic>? record;
@@ -285,7 +284,6 @@ class _OutwardRegisterReviewScreenState
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

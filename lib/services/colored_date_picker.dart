@@ -84,7 +84,6 @@ class _ColoredCalendarDialogState extends State<_ColoredCalendarDialog> {
             '${widget.baseUrl}/${widget.module}/month-status?year=${_visibleMonth.year}&month=${_visibleMonth.month}'),
         headers: {
           'Authorization': 'Bearer $token',
-          'ngrok-skip-browser-warning': 'true',
         },
       );
       if (res.statusCode == 200) {

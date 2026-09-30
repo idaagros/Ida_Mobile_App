@@ -36,7 +36,7 @@ class _AttendanceCalendarScreenState extends State<AttendanceCalendarScreen> {
   static const violet = Color(0xFF7C4DFF);
   static const red = Color(0xFFC0392B);
   static const orange = Color(0xFFE67E22);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   late DateTime _visibleMonth =
       DateTime(DateTime.now().year, DateTime.now().month, 1);
@@ -54,7 +54,6 @@ class _AttendanceCalendarScreenState extends State<AttendanceCalendarScreen> {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

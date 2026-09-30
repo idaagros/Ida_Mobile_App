@@ -43,7 +43,7 @@ class NeedsAttentionScreen extends StatefulWidget {
 class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   bool loading = true;
   String? error;
@@ -53,7 +53,6 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

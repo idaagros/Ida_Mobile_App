@@ -18,7 +18,7 @@ class _LabourScreenState extends State<LabourScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   List labourList = [];
   Map summary = {};
@@ -35,7 +35,6 @@ class _LabourScreenState extends State<LabourScreen> {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

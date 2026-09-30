@@ -27,7 +27,7 @@ class FaceEnrollmentScreen extends StatefulWidget {
 class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   CameraController? _controller;
   final _faceService = FaceRecognitionService();
@@ -109,7 +109,6 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
         headers: {
           'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
           'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
         },
         body:
             jsonEncode({'worker_id': widget.workerId, 'embedding': embedding}),

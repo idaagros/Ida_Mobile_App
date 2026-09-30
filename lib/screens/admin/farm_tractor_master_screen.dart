@@ -33,7 +33,7 @@ class FarmTractorMasterScreen extends StatefulWidget {
 class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   _Tab _tab = _Tab.tractors;
   List tractors = [];
@@ -54,7 +54,6 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

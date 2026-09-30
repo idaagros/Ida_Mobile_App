@@ -39,7 +39,7 @@ class FarmBoundaryMapScreen extends StatefulWidget {
 class _FarmBoundaryMapScreenState extends State<FarmBoundaryMapScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
   static const _defaultCenter = ll.LatLng(21.0, 77.75); // Amravati district, Maharashtra fallback
 
   final _mapController = MapController();
@@ -69,7 +69,6 @@ class _FarmBoundaryMapScreenState extends State<FarmBoundaryMapScreen> {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

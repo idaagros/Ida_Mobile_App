@@ -20,7 +20,7 @@ class TransportScreen extends StatefulWidget {
 }
 
 class _TransportScreenState extends State<TransportScreen> {
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
   static const primaryColor = Color(0xFF1E4012);
 
   bool _isSearching = false;
@@ -42,7 +42,6 @@ class _TransportScreenState extends State<TransportScreen> {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
       'Content-Type': 'application/json',
     };
   }

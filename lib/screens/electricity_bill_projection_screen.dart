@@ -24,13 +24,12 @@ class _ElectricityBillProjectionScreenState
     extends State<ElectricityBillProjectionScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   Future<Map<String, String>> get _headers async {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 
@@ -293,13 +292,12 @@ class TariffSettingsScreen extends StatefulWidget {
 class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   Future<Map<String, String>> get _headers async {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
       'Content-Type': 'application/json',
     };
   }

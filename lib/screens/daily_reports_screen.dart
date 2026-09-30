@@ -27,7 +27,7 @@ class _DailyReportsScreenState extends State<DailyReportsScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   // Module multi-select — key -> (label, icon, color)
   static const _moduleOptions = [
@@ -62,7 +62,6 @@ class _DailyReportsScreenState extends State<DailyReportsScreen> {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

@@ -24,13 +24,12 @@ const Color agMuted = Color(0xFF5F6A58);
 
 // ── API ────────────────────────────────────────────────────────────────
 class AgriApi {
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   static Future<Map<String, String>> _headers() async {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
       'Content-Type': 'application/json',
     };
   }

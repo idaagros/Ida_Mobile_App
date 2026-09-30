@@ -112,7 +112,6 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
         Uri.parse('${ApiService.baseUrl}/api/auth/face-login'),
         headers: {
           'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
         },
         // Deliberately no Authorization header - this IS the login,
         // there's no token to send yet.

@@ -8,7 +8,7 @@ import '../localization/app_locale.dart';
 import '../models/user_model.dart';
 
 class ApiService {
-  static const baseUrl = AppConfig.apiHost; // from lib/config/app_config.dart
+  static String get baseUrl => AppConfig.apiHost; // from lib/config/app_config.dart
 
   // ── Session ────────────────────────────────────────────────────────────────
 
@@ -167,7 +167,6 @@ class ApiService {
     return {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $token',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

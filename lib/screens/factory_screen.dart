@@ -6,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
 
 import '../config/app_config.dart';
-
 // ── Downtime reason options ───────────────────────────────
 const _reasonOptions = [
   {'value': 'lunch', 'label': 'Lunch break', 'icon': '🍱'},
@@ -174,8 +173,9 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
       if (!mounted) return;
       if (res.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-              close ? 'Marked as plant closed' : 'Plant closed mark removed'),
+          content: Text(close
+              ? 'Marked as plant closed'
+              : 'Plant closed mark removed'),
           backgroundColor: idaGreen,
         ));
       } else {
@@ -357,45 +357,40 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
                   entries.isEmpty && closedDay != null
                       ? SliverToBoxAdapter(
                           child: Padding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                              padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
                               child: _closedCard()))
                       : entries.isEmpty
-                          ? SliverToBoxAdapter(
-                              child: Center(
-                                  child: Padding(
-                              padding: const EdgeInsets.all(48),
-                              child: Column(children: [
-                                Icon(Icons.factory_outlined,
-                                    size: 56, color: Colors.grey.shade300),
-                                const SizedBox(height: 16),
-                                Text('No entries for this date',
-                                    style: TextStyle(
-                                        color: Colors.grey.shade500,
-                                        fontSize: 15)),
-                                const SizedBox(height: 8),
-                                Text('Tap + Add Entry to get started',
-                                    style: TextStyle(
-                                        color: Colors.grey.shade400,
-                                        fontSize: 13)),
-                                const SizedBox(height: 16),
-                                OutlinedButton.icon(
-                                  onPressed: _markClosed,
-                                  icon: const Icon(Icons.block, size: 18),
-                                  label: const Text(
-                                      'Plant did not run – mark closed'),
-                                ),
-                              ]),
-                            )))
-                          : SliverPadding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(20, 0, 20, 100),
-                              sliver: SliverList(
-                                  delegate: SliverChildBuilderDelegate(
-                                (ctx, i) => _entryCard(entries[i], i + 1),
-                                childCount: entries.length,
-                              )),
+                      ? SliverToBoxAdapter(
+                          child: Center(
+                              child: Padding(
+                          padding: const EdgeInsets.all(48),
+                          child: Column(children: [
+                            Icon(Icons.factory_outlined,
+                                size: 56, color: Colors.grey.shade300),
+                            const SizedBox(height: 16),
+                            Text('No entries for this date',
+                                style: TextStyle(
+                                    color: Colors.grey.shade500, fontSize: 15)),
+                            const SizedBox(height: 8),
+                            Text('Tap + Add Entry to get started',
+                                style: TextStyle(
+                                    color: Colors.grey.shade400, fontSize: 13)),
+                            const SizedBox(height: 16),
+                            OutlinedButton.icon(
+                              onPressed: _markClosed,
+                              icon: const Icon(Icons.block, size: 18),
+                              label: const Text('Plant did not run – mark closed'),
                             ),
+                          ]),
+                        )))
+                      : SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                          sliver: SliverList(
+                              delegate: SliverChildBuilderDelegate(
+                            (ctx, i) => _entryCard(entries[i], i + 1),
+                            childCount: entries.length,
+                          )),
+                        ),
                 ]),
               )),
     );

@@ -8,6 +8,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../localization/app_localizations.dart';
 import 'face_login_screen.dart';
+import '../config/app_config.dart';
+import '../widgets/server_address_dialog.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -69,7 +71,6 @@ class _LoginScreenState extends State<LoginScreen>
         Uri.parse('${ApiService.baseUrl}/api/auth/login'),
         headers: {
           'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
         },
         body: jsonEncode({
           'email': userInput, // current backend expects 'email'
@@ -284,11 +285,32 @@ class _LoginScreenState extends State<LoginScreen>
                       ],
 
                       const SizedBox(height: 32),
+                      // Long-press opens "Server address" - for a phone
+                      // whose old server address no longer works (it
+                      // can't log in to reach App settings).
                       Center(
-                        child: Text(
-                          '© ${DateTime.now().year} Ida AgriCo',
-                          style:
-                              const TextStyle(fontSize: 12, color: Colors.grey),
+                        child: GestureDetector(
+                          onLongPress: () async {
+                            final changed =
+                                await showServerAddressDialog(context);
+                            if (changed && mounted) setState(() {});
+                          },
+                          child: Column(children: [
+                            Text(
+                              '© ${DateTime.now().year} Ida AgriCo',
+                              style: const TextStyle(
+                                  fontSize: 12, color: Colors.grey),
+                            ),
+                            if (AppConfig.isCustomHost)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text(
+                                  'Server: ${AppConfig.displayHost}',
+                                  style: const TextStyle(
+                                      fontSize: 11, color: Colors.grey),
+                                ),
+                              ),
+                          ]),
                         ),
                       ),
                     ],

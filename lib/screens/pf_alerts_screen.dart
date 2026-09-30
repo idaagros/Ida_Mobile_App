@@ -22,7 +22,7 @@ class PfAlertsScreen extends StatefulWidget {
 class _PfAlertsScreenState extends State<PfAlertsScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   List _alerts = [];
   bool _loading = true;
@@ -38,7 +38,6 @@ class _PfAlertsScreenState extends State<PfAlertsScreen> {
     final p = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${p.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

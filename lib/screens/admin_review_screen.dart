@@ -26,7 +26,7 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   late TabController _tabs;
 
@@ -72,7 +72,6 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
     return {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer ${p.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

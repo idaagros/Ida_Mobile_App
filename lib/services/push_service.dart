@@ -100,7 +100,6 @@ class PushService {
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
       'Content-Type': 'application/json',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

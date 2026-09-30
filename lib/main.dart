@@ -8,9 +8,14 @@ import 'screens/review/review_queue_screen.dart';
 import 'localization/app_locale.dart';
 import 'localization/app_localizations.dart';
 import 'services/push_service.dart';
+import 'config/app_config.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Server address: the built-in one, or one an admin saved on this
+  // phone (App settings -> Server address). Must load before anything
+  // calls the API.
+  await AppConfig.load();
   // Apply whatever language was cached from the last session before the
   // first frame, so returning users don't see a flash of English before
   // their real account preference (set again after login) is applied.

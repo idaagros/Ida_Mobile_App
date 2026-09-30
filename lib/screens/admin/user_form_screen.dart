@@ -119,14 +119,12 @@ class _UserFormScreenState extends State<UserFormScreen> {
               headers: {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer $token',
-                'ngrok-skip-browser-warning': 'true',
               },
               body: jsonEncode(body))
           : await http.post(uri,
               headers: {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer $token',
-                'ngrok-skip-browser-warning': 'true',
               },
               body: jsonEncode(body));
 

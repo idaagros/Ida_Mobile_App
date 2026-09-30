@@ -109,7 +109,6 @@ class _UserFaceEnrollmentScreenState extends State<UserFaceEnrollmentScreen> {
         headers: {
           'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
           'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
         },
         body: jsonEncode({'user_id': widget.userId, 'embedding': embedding}),
       );

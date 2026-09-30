@@ -20,7 +20,7 @@ class PasswordScreen extends StatefulWidget {
 }
 
 class _PasswordScreenState extends State<PasswordScreen> {
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
   static const primaryColor = Color(0xFF1565C0); // matching the CCA blue
 
   List _categories = [];
@@ -41,7 +41,6 @@ class _PasswordScreenState extends State<PasswordScreen> {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
       'Content-Type': 'application/json',
     };
   }

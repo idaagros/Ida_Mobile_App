@@ -26,7 +26,7 @@ class _OutwardRegisterReportScreenState
     extends State<OutwardRegisterReportScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   DateTime fromDate = DateTime.now().subtract(const Duration(days: 7));
   DateTime toDate = DateTime.now();
@@ -38,7 +38,6 @@ class _OutwardRegisterReportScreenState
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

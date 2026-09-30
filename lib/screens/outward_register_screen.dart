@@ -35,7 +35,7 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
   static const grey = Color(0xFF9CA3AF);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   int? recordId;
   bool loading = true;
@@ -95,7 +95,6 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
     };
   }
 

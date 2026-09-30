@@ -23,7 +23,7 @@ class OtpApprovalsScreen extends StatefulWidget {
 class _OtpApprovalsScreenState extends State<OtpApprovalsScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   List _requests = [];
   bool _loading = true;
@@ -40,7 +40,6 @@ class _OtpApprovalsScreenState extends State<OtpApprovalsScreen> {
     final prefs = await SharedPreferences.getInstance();
     return {
       'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'ngrok-skip-browser-warning': 'true',
       'Content-Type': 'application/json',
     };
   }

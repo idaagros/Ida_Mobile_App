@@ -40,7 +40,7 @@ class _FaceAttendanceCaptureScreenState
     extends State<FaceAttendanceCaptureScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   CameraController? _controller;
   final _faceService = FaceRecognitionService();
@@ -110,7 +110,6 @@ class _FaceAttendanceCaptureScreenState
         headers: {
           'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
           'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
         },
         body: jsonEncode({'embedding': embedding}),
       );

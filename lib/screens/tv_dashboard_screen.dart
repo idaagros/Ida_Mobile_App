@@ -32,7 +32,7 @@ class TvDashboardScreen extends StatefulWidget {
 }
 
 class _TvDashboardScreenState extends State<TvDashboardScreen> {
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   Map<String, dynamic>? data;
   bool loading = true;
@@ -71,7 +71,6 @@ class _TvDashboardScreenState extends State<TvDashboardScreen> {
         Uri.parse('$baseUrl/tv-dashboard/'),
         headers: {
           'Authorization': 'Bearer $token',
-          'ngrok-skip-browser-warning': 'true'
         },
       );
       if (res.statusCode == 200) {
