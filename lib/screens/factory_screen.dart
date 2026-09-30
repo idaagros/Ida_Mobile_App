@@ -6,14 +6,23 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
 
 import '../config/app_config.dart';
+
 // ── Downtime reason options ───────────────────────────────
 const _reasonOptions = [
   {'value': 'lunch', 'label': 'Lunch break', 'icon': '🍱'},
   {'value': 'dinner', 'label': 'Dinner break', 'icon': '🍽️'},
   {'value': 'power_failure', 'label': 'Power failure', 'icon': '⚡'},
   {'value': 'maintenance', 'label': 'Maintenance', 'icon': '🔧'},
+  // Added Sep 2026 so phone and web use the same reasons.
+  {'value': 'breakdown', 'label': 'Breakdown', 'icon': '🛠️'},
+  {'value': 'raw_material_shortage', 'label': 'No raw material', 'icon': '📦'},
   {'value': 'other', 'label': 'Other', 'icon': '📝'},
 ];
+
+// The old web page saved a power cut as 'power_cut'; show it like the
+// phone's 'power_failure'.
+String _normReason(dynamic v) =>
+    v == 'power_cut' ? 'power_failure' : (v ?? 'other').toString();
 
 class FactoryRunScreen extends StatefulWidget {
   const FactoryRunScreen({super.key});
@@ -25,12 +34,14 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static const baseUrl = AppConfig.apiBaseUrl;
+  static String get baseUrl => AppConfig.apiBaseUrl;
 
   DateTime selectedDate = DateTime.now().subtract(const Duration(days: 1));
   List entries = [];
   Map summary = {};
   bool loading = true;
+  // "Plant closed" mark for the chosen day (Sep 2026). Null = not closed.
+  Map? closedDay;
 
   @override
   void initState() {
@@ -46,7 +57,6 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
   Map<String, String> _hdrs(String token) => {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',
-        'ngrok-skip-browser-warning': 'true',
       };
 
   String get _dateStr => DateFormat('yyyy-MM-dd').format(selectedDate);
@@ -65,6 +75,18 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
         setState(() => entries = jsonDecode(results[0].body));
       if (results[1].statusCode == 200)
         setState(() => summary = jsonDecode(results[1].body));
+      // Older servers don't have closed days: just treat as not closed.
+      try {
+        final c = await http.get(
+            Uri.parse(
+                '$baseUrl/factory/closed-days?from=$_dateStr&to=$_dateStr'),
+            headers: h);
+        final list = c.statusCode == 200 ? jsonDecode(c.body) : null;
+        setState(() => closedDay =
+            (list is List && list.isNotEmpty) ? Map.from(list.first) : null);
+      } catch (_) {
+        setState(() => closedDay = null);
+      }
     } catch (e) {
       debugPrint('Load error: $e');
     } finally {
@@ -100,6 +122,105 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
           getToken: () => _token,
           onSaved: _loadData,
         ),
+      );
+
+  Future<void> _markClosed() async {
+    final reasonCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Plant closed on this day?'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text(
+              'Marks this day as a day the plant did not run, so it is not '
+              'counted as a missing entry.',
+              style: TextStyle(fontSize: 13, color: Color(0xFF6B7280))),
+          const SizedBox(height: 12),
+          TextField(
+            controller: reasonCtrl,
+            decoration: const InputDecoration(
+                labelText: 'Why was it closed? (optional)',
+                hintText: 'e.g. Diwali holiday, no power all day',
+                border: OutlineInputBorder()),
+          ),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: idaGreen),
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Mark plant closed')),
+        ],
+      ),
+    );
+    final reason = reasonCtrl.text.trim();
+    reasonCtrl.dispose();
+    if (ok != true) return;
+    await _sendClosed(true, reason);
+  }
+
+  Future<void> _sendClosed(bool close, [String reason = '']) async {
+    try {
+      final h = _hdrs(await _token);
+      final res = close
+          ? await http.post(Uri.parse('$baseUrl/factory/closed-days'),
+              headers: h,
+              body: jsonEncode({'date': _dateStr, 'reason': reason}))
+          : await http.delete(
+              Uri.parse('$baseUrl/factory/closed-days/$_dateStr'),
+              headers: h);
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              close ? 'Marked as plant closed' : 'Plant closed mark removed'),
+          backgroundColor: idaGreen,
+        ));
+      } else {
+        String msg = 'Could not save';
+        try {
+          msg = jsonDecode(res.body)['error'] ?? msg;
+        } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(msg), backgroundColor: Colors.red));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+      }
+    }
+    await _loadData();
+  }
+
+  Widget _closedCard() => Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+            color: const Color(0xFFF1F3EE),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFDDE3D6))),
+        child: Column(children: [
+          Icon(Icons.factory_outlined, size: 40, color: Colors.grey.shade600),
+          const SizedBox(height: 8),
+          const Text('The plant was closed on this day',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          if ((closedDay?['reason'] ?? '').toString().isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text('"${closedDay!['reason']}"',
+                style: const TextStyle(fontSize: 13)),
+          ],
+          if (closedDay?['marked_by'] != null) ...[
+            const SizedBox(height: 4),
+            Text('Marked by ${closedDay!['marked_by']}',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+          ],
+          const SizedBox(height: 10),
+          OutlinedButton(
+              onPressed: () => _sendClosed(false),
+              child: const Text('Remove the closed mark')),
+        ]),
       );
 
   String _fmtTime(dynamic t) {
@@ -233,32 +354,48 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
                           const SizedBox(height: 12),
                         ]),
                   )),
-                  entries.isEmpty
+                  entries.isEmpty && closedDay != null
                       ? SliverToBoxAdapter(
-                          child: Center(
-                              child: Padding(
-                          padding: const EdgeInsets.all(48),
-                          child: Column(children: [
-                            Icon(Icons.factory_outlined,
-                                size: 56, color: Colors.grey.shade300),
-                            const SizedBox(height: 16),
-                            Text('No entries for this date',
-                                style: TextStyle(
-                                    color: Colors.grey.shade500, fontSize: 15)),
-                            const SizedBox(height: 8),
-                            Text('Tap + Add Entry to get started',
-                                style: TextStyle(
-                                    color: Colors.grey.shade400, fontSize: 13)),
-                          ]),
-                        )))
-                      : SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-                          sliver: SliverList(
-                              delegate: SliverChildBuilderDelegate(
-                            (ctx, i) => _entryCard(entries[i], i + 1),
-                            childCount: entries.length,
-                          )),
-                        ),
+                          child: Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                              child: _closedCard()))
+                      : entries.isEmpty
+                          ? SliverToBoxAdapter(
+                              child: Center(
+                                  child: Padding(
+                              padding: const EdgeInsets.all(48),
+                              child: Column(children: [
+                                Icon(Icons.factory_outlined,
+                                    size: 56, color: Colors.grey.shade300),
+                                const SizedBox(height: 16),
+                                Text('No entries for this date',
+                                    style: TextStyle(
+                                        color: Colors.grey.shade500,
+                                        fontSize: 15)),
+                                const SizedBox(height: 8),
+                                Text('Tap + Add Entry to get started',
+                                    style: TextStyle(
+                                        color: Colors.grey.shade400,
+                                        fontSize: 13)),
+                                const SizedBox(height: 16),
+                                OutlinedButton.icon(
+                                  onPressed: _markClosed,
+                                  icon: const Icon(Icons.block, size: 18),
+                                  label: const Text(
+                                      'Plant did not run – mark closed'),
+                                ),
+                              ]),
+                            )))
+                          : SliverPadding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                              sliver: SliverList(
+                                  delegate: SliverChildBuilderDelegate(
+                                (ctx, i) => _entryCard(entries[i], i + 1),
+                                childCount: entries.length,
+                              )),
+                            ),
                 ]),
               )),
     );
@@ -328,7 +465,7 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
             child: Column(
                 children: downtimes.map<Widget>((d) {
               final reason = _reasonOptions.firstWhere(
-                (r) => r['value'] == d['reason_type'],
+                (r) => r['value'] == _normReason(d['reason_type']),
                 orElse: () => {'label': 'Other', 'icon': '📝'},
               );
               return Container(
@@ -605,7 +742,6 @@ class _FactoryEntryFormState extends State<_FactoryEntryForm> {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
-          'ngrok-skip-browser-warning': 'true',
         },
         body: body,
       );

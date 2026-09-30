@@ -20,7 +20,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'attendance_screen.dart';
 import 'work_allocation_screen.dart';
-import 'admin_review_screen.dart';
+import 'review/review_queue_screen.dart';
 import 'machine_maintenance_screen.dart';
 import 'maintenance_screen.dart';
 import 'outward_register_review_screen.dart';
@@ -28,6 +28,7 @@ import 'otp_approvals_screen.dart';
 import 'electricity_screen.dart';
 import 'machine_reading_screen.dart';
 import 'machine_pf_screen.dart';
+import 'pf_alerts_screen.dart';
 import 'tractor_screen.dart';
 import 'reading_reminder_settings_screen.dart';
 import '../services/responsive.dart';
@@ -132,6 +133,27 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
       return;
     }
 
+    // Alerts not seen yet (low power factor, maintenance due) open the
+    // module's own screen, where they are acknowledged.
+    if (item['item_type'] == 'alert') {
+      switch (module) {
+        case 'machine_pf':
+          screen = const PfAlertsScreen();
+          break;
+        case 'machine_maintenance':
+          screen = const MachineMaintScreen(initialTabIndex: 1);
+          break;
+        case 'tractor_maintenance':
+          screen = const MaintenanceScreen(initialTabIndex: 1);
+          break;
+      }
+      if (screen != null) {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => screen!))
+            .then((_) => _load());
+      }
+      return;
+    }
+
     switch (module) {
       case 'farm_attendance':
         final date = _parseDate(params['date']) ?? _parseDate(item['date']);
@@ -140,38 +162,25 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
             ? WorkAllocationScreen(attendanceDate: date)
             : AttendanceScreen(initialDate: date);
         break;
-      // These five all share one review screen with a tab per module -
-      // landing on the bare entry screen would show a blank "new
-      // entry" form, not the pending record. AdminReviewScreen already
-      // has the approve/reject buttons; it just needs to open on the
-      // right tab instead of always defaulting to Electricity.
+      // Readings, factory runs and maintenance "done" entries open the
+      // Review submissions screen (Sep 2026) on that entry: photo, the
+      // entry before, the usual range and a "look closely" check.
       case 'electricity':
-        screen = const AdminReviewScreen(
-            initialFilter: 'pending', initialTabIndex: 0);
-        break;
       case 'tractor':
-        screen = const AdminReviewScreen(
-            initialFilter: 'pending', initialTabIndex: 1);
-        break;
       case 'factory':
-        screen = const AdminReviewScreen(
-            initialFilter: 'pending', initialTabIndex: 3);
-        break;
       case 'machine':
-        screen = const AdminReviewScreen(
-            initialFilter: 'pending', initialTabIndex: 4);
-        break;
       case 'machine_pf':
-        screen = const AdminReviewScreen(
-            initialFilter: 'pending', initialTabIndex: 5);
+        screen = ReviewQueueScreen(
+            module: module,
+            openKey: params['id'] == null ? null : '$module:${params['id']}',
+            openDate: (params['date'] ?? item['date'])?.toString());
         break;
-      // Same reasoning - the approve/reject list lives in the History
-      // tab (index 2), not the default Activities tab.
       case 'machine_maintenance':
-        screen = const MachineMaintScreen(initialTabIndex: 2);
-        break;
       case 'tractor_maintenance':
-        screen = const MaintenanceScreen(initialTabIndex: 2);
+        final logId = params['log_id'];
+        screen = ReviewQueueScreen(
+            module: 'maintenance',
+            openKey: logId == null ? null : '$module:$logId');
         break;
       // Outward Register's review UI takes the specific record - this
       // is the one place a plain list wouldn't even show which record
@@ -310,6 +319,7 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
 
   Widget _itemCard(Map<String, dynamic> item) {
     final isMissing = item['item_type'] == 'missing_entry';
+    final isAlert = item['item_type'] == 'alert';
     return InkWell(
       onTap: () => _openItem(item),
       borderRadius: BorderRadius.circular(12),
@@ -324,7 +334,10 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
           isMissing
               ? const Icon(Icons.edit_off_outlined,
                   size: 16, color: Color(0xFFC0392B))
-              : Container(
+              : isAlert
+                  ? const Icon(Icons.notifications_active_outlined,
+                      size: 16, color: Color(0xFFB45309))
+                  : Container(
                   width: 8,
                   height: 8,
                   margin: const EdgeInsets.only(top: 4),

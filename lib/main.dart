@@ -4,7 +4,7 @@ import 'screens/welcome_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/admin/users_screen.dart';
-import 'screens/admin_review_screen.dart';
+import 'screens/review/review_queue_screen.dart';
 import 'localization/app_locale.dart';
 import 'localization/app_localizations.dart';
 import 'services/push_service.dart';
@@ -53,7 +53,7 @@ class IdaAgriCoApp extends StatelessWidget {
             '/login': (_) => const LoginScreen(),
             '/dashboard': (_) => const DashboardScreen(),
             '/admin/users': (_) => const UsersScreen(),
-            '/admin/review': (_) => const AdminReviewScreen(),
+            '/admin/review': (_) => const ReviewQueueScreen(),
           },
         );
       },

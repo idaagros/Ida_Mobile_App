@@ -13,7 +13,7 @@ import 'factory_screen.dart';
 import 'maintenance_screen.dart';
 import 'machine_reading_screen.dart';
 import 'machine_maintenance_screen.dart';
-import 'admin_review_screen.dart';
+import 'review/review_queue_screen.dart';
 import 'daily_reports_screen.dart';
 import 'pf_alerts_screen.dart';
 import 'outward_register_report_screen.dart';
@@ -1094,13 +1094,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                   _tile(
                     icon: Icons.fact_check_outlined,
                     label: 'Review Submissions',
-                    sub: 'Approve, reject or return records to staff',
+                    sub: 'Check photo and usual range, then approve or return',
                     iconBg: const Color(0xFFE8F0FE),
                     iconColor: const Color(0xFF1A73E8),
                     onTap: () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                            builder: (_) => const AdminReviewScreen())),
+                            builder: (_) => const ReviewQueueScreen())),
                   ),
                   _tile(
                     icon: Icons.local_shipping_outlined,

@@ -23,7 +23,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
-import '../screens/admin_review_screen.dart';
+import '../screens/review/review_queue_screen.dart';
 import '../screens/attendance_screen.dart';
 import '../screens/electricity_screen.dart';
 import '../screens/factory_screen.dart';
@@ -206,13 +206,16 @@ class PushService {
     final recordId = int.tryParse((data['record_id'] ?? '').toString());
     final commodityId = int.tryParse((data['commodity_id'] ?? '').toString());
 
-    // Same tab order as AdminReviewScreen / NeedsAttentionScreen.
-    const reviewTab = {'electricity': 0, 'tractor': 1, 'factory': 3, 'machine': 4, 'machine_pf': 5};
+    // Modules the Review submissions screen can filter to.
+    const reviewTab = {'electricity', 'tractor', 'factory', 'machine', 'machine_pf', 'machine_maintenance', 'tractor_maintenance'};
 
     Widget screen;
     switch (route) {
       case 'admin_review':
-        screen = AdminReviewScreen(initialFilter: 'pending', initialTabIndex: reviewTab[module] ?? 0);
+        screen = ReviewQueueScreen(
+            module: !reviewTab.contains(module) ? null : module.endsWith('_maintenance') ? 'maintenance' : module,
+            openKey: id.isNotEmpty && reviewTab.contains(module) ? '$module:$id' : null,
+            openDate: date == null ? null : date.toIso8601String().substring(0, 10));
         break;
       case 'electricity':
         screen = returned ? ElectricityReadingScreen(returnedRecordId: id, adminNote: note) : const ElectricityReadingScreen();
