@@ -1,31 +1,46 @@
 # android/app/proguard-rules.pro
 #
-# google_mlkit_text_recognition's plugin registration code references
-# ALL script-specific recognizer option classes (Chinese, Devanagari,
-# Japanese, Korean, Latin) in its initialize() method, even though
-# this app only uses TextRecognitionScript.latin. Only the Latin
-# recognizer's actual dependency is pulled in by the plugin, so R8's
-# minifier (running because this is a release/assembleRelease build)
-# strips the other four as unused - then fails because the plugin
-# code still references them. This does NOT mean those languages are
-# bundled or usable; it just stops R8 from erroring on a reference
-# path the plugin always includes regardless of which script you
-# actually configured.
+# Rules for the release build's shrinking step (R8).
 #
-# This is a common, well-documented issue for this exact plugin
-# (confirmed directly against multiple real reports of this identical
-# error). The broad keep below is the widely-used, proven fix -
-# narrower per-package rules risk missing some other ML Kit reference
-# path and re-failing on a different missing class.
+# -dontwarn = "this class is referenced but deliberately not in the app -
+# don't stop the build". It never removes anything; it only lets R8 finish.
+# -keep     = "don't strip or rename this", for code that is looked up by
+# name at run time (plugins, native libraries).
+
+# ── ML Kit text recognition ─────────────────────────────────────────────
+# The plugin's code refers to the recognisers for every script (Chinese,
+# Devanagari, Japanese, Korean, Latin), but the app only includes Latin and
+# Devanagari. Without these lines R8 stops with "Missing class
+# com.google.mlkit.vision.text.chinese..." (30 Sep 2026 build).
+-dontwarn com.google.mlkit.vision.text.chinese.**
+-dontwarn com.google.mlkit.vision.text.japanese.**
+-dontwarn com.google.mlkit.vision.text.korean.**
+-dontwarn com.google.mlkit.vision.text.devanagari.**
 -keep class com.google.mlkit.** { *; }
--dontwarn com.google.mlkit.**
+-keep class com.google.android.gms.internal.mlkit_vision_** { *; }
 
-# Same category of issue can surface for the Play Services layer ML
-# Kit builds on.
--keep class com.google.android.gms.internal.mlkit_vision_text_common.** { *; }
--dontwarn com.google.android.gms.internal.mlkit_vision_text_common.**
+# ── Flutter engine: Play Store split-install (deferred components) ─────
+# Referenced by Flutter's engine but not used by this app.
+-dontwarn com.google.android.play.core.**
 
-# flutter_local_notifications: keep its classes (and the generic type
-# information it relies on) so release builds don't strip them.
+# ── LiteRT / TensorFlow Lite (face recognition) ─────────────────────────
+# The GPU helper classes are optional and not bundled.
+-keep class org.tensorflow.lite.** { *; }
+-dontwarn org.tensorflow.lite.gpu.**
+-keep class com.google.ai.edge.litert.** { *; }
+-dontwarn com.google.ai.edge.litert.gpu.**
+
+# ── Phone notifications (flutter_local_notifications) ──────────────────
+# Keep its classes and the generic type information it relies on.
 -keep class com.dexterous.** { *; }
 -keepattributes Signature
+-keepattributes *Annotation*
+
+# ── Background notification check (workmanager) ────────────────────────
+-keep class dev.fluttercommunity.workmanager.** { *; }
+-keep class androidx.work.** { *; }
+
+# ── Harmless missing annotation classes some libraries refer to ────────
+-dontwarn javax.annotation.**
+-dontwarn org.checkerframework.**
+-dontwarn com.google.errorprone.annotations.**
