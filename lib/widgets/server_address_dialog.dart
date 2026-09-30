@@ -1,7 +1,7 @@
 // lib/widgets/server_address_dialog.dart
 //
-// Change which server this phone talks to (e.g. when moving from
-// duckdns to a Cloudflare domain). Opened from App settings -> Server
+// Change which server this phone talks to (e.g. if the domain ever
+// changes again). Opened from App settings -> Server
 // address, and from a long-press on the (c) line at the bottom of the
 // login screen (for a phone whose old address no longer works, so it
 // can't log in to reach App settings).
@@ -44,11 +44,10 @@ class _ServerAddressDialogState extends State<_ServerAddressDialog> {
 
   Future<void> _save(String? typed) async {
     // typed == null means "go back to the built-in address"
-    final host = typed == null
-        ? AppConfig.defaultApiHost
-        : AppConfig.normalize(typed);
+    final host =
+        typed == null ? AppConfig.defaultApiHost : AppConfig.normalize(typed);
     if (host == null) {
-      setState(() => _error = 'Type a web address, e.g. app.idaagrico.in');
+      setState(() => _error = 'Type a web address, e.g. ida.idaagrico.com');
       return;
     }
     if (host == AppConfig.apiHost) {
@@ -102,9 +101,9 @@ class _ServerAddressDialogState extends State<_ServerAddressDialog> {
               autocorrect: false,
               decoration: InputDecoration(
                 labelText: 'Address',
-                hintText: 'https://app.idaagrico.in',
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10)),
+                hintText: 'https://ida.idaagrico.com',
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                 isDense: true,
               ),
               onSubmitted: (v) => _save(v),

@@ -1,7 +1,7 @@
 // lib/screens/transport_screen.dart
 //
 // Transport Directory — categorised list of transporters with call and
-// WhatsApp support. Ported from the CCA Firebase project to use the
+// WhatsApp support. Ported from the CCA project to use the
 // Ida AgriCo Node.js/MySQL backend.
 
 import 'dart:convert';

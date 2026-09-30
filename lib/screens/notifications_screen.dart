@@ -71,20 +71,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Future<void> _sendTest() async {
     final messenger = ScaffoldMessenger.of(context);
-    if (!PushService.isReady) {
-      messenger.showSnackBar(const SnackBar(content: Text('Push is not set up in this app build yet (Firebase config missing).')));
-      return;
-    }
     await PushService.registerDevice();
     try {
-      final res = await http.post(Uri.parse('${AppConfig.apiBaseUrl}/notifications/test'), headers: await _headers);
-      final d = jsonDecode(res.body);
-      final status = d['result']?['push_status'] ?? '?';
-      final err = d['result']?['push_error'];
-      messenger.showSnackBar(SnackBar(
-        content: Text(status == 'sent'
-            ? 'Test sent — it should appear in a few seconds.'
-            : 'Test saved, but push status is "$status"${err != null ? ': $err' : ''}'),
+      await http.post(Uri.parse('${AppConfig.apiBaseUrl}/notifications/test'), headers: await _headers);
+      await PushService.checkNow();
+      messenger.showSnackBar(const SnackBar(
+        content: Text('Test sent. With the app closed, new notifications show within about 15 minutes.'),
       ));
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Test failed: $e')));

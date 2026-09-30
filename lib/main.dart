@@ -20,8 +20,8 @@ Future<void> main() async {
   // first frame, so returning users don't see a flash of English before
   // their real account preference (set again after login) is applied.
   await AppLocale.loadCachedLanguage();
-  // Push notifications (Firebase). Safe if Firebase isn't configured yet —
-  // the app runs normally without push.
+  // Notifications: the app checks the server itself (no outside push
+  // service). Safe if anything fails - the app runs normally without them.
   await PushService.init();
   runApp(const IdaAgriCoApp());
 }

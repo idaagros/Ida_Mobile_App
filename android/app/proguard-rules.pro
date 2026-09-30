@@ -21,8 +21,11 @@
 -dontwarn com.google.mlkit.**
 
 # Same category of issue can surface for the Play Services layer ML
-# Kit builds on - cover the whole mlkit_vision_text family, not just
-# _common, since different script bindings pull in sibling packages.
+# Kit builds on.
 -keep class com.google.android.gms.internal.mlkit_vision_text_common.** { *; }
 -dontwarn com.google.android.gms.internal.mlkit_vision_text_common.**
--dontwarn com.google.android.gms.internal.mlkit_vision_text_bundled_common.**
+
+# flutter_local_notifications: keep its classes (and the generic type
+# information it relies on) so release builds don't strip them.
+-keep class com.dexterous.** { *; }
+-keepattributes Signature

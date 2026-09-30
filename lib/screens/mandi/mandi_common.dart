@@ -126,8 +126,9 @@ String dayMonth(dynamic s) {
   return d == null ? '' : DateFormat('d MMM').format(d);
 }
 
-String marketName(Map m) =>
-    (m['display_name'] ?? '').toString().isNotEmpty ? m['display_name'].toString() : (m['market'] ?? '').toString();
+String marketName(Map m) => (m['display_name'] ?? '').toString().isNotEmpty
+    ? m['display_name'].toString()
+    : (m['market'] ?? '').toString();
 
 // ── Widgets ──────────────────────────────────────────────────────────
 class ChangeChip extends StatelessWidget {
@@ -140,11 +141,14 @@ class ChangeChip extends StatelessWidget {
     final v = toD(value);
     if (v == null) return const SizedBox.shrink();
     final up = v > 0, flat = v == 0;
-    final bg = flat ? Colors.grey.shade100 : (up ? mandiTint : Colors.red.shade50);
-    final fg = flat ? Colors.grey.shade600 : (up ? mandiGreen : Colors.red.shade700);
+    final bg =
+        flat ? Colors.grey.shade100 : (up ? mandiTint : Colors.red.shade50);
+    final fg =
+        flat ? Colors.grey.shade600 : (up ? mandiGreen : Colors.red.shade700);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
       child: Text(
         '${flat ? '•' : (up ? '▲' : '▼')} ${v.abs().toStringAsFixed(1)}%$label',
         style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: fg),
@@ -158,7 +162,12 @@ class MandiCard extends StatelessWidget {
   final EdgeInsets padding;
   final Color? color;
   final Color? borderColor;
-  const MandiCard({super.key, required this.child, this.padding = const EdgeInsets.all(14), this.color, this.borderColor});
+  const MandiCard(
+      {super.key,
+      required this.child,
+      this.padding = const EdgeInsets.all(14),
+      this.color,
+      this.borderColor});
 
   @override
   Widget build(BuildContext context) {
@@ -183,7 +192,11 @@ class SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
         child: Text(text.toUpperCase(),
-            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.grey.shade500, letterSpacing: 0.8)),
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: Colors.grey.shade500,
+                letterSpacing: 0.8)),
       );
 }
 
@@ -199,6 +212,7 @@ class ErrorBox extends StatelessWidget {
             color: Colors.red.shade50,
             border: Border.all(color: Colors.red.shade200),
             borderRadius: BorderRadius.circular(8)),
-        child: Text(message, style: TextStyle(fontSize: 13, color: Colors.red.shade800)),
+        child: Text(message,
+            style: TextStyle(fontSize: 13, color: Colors.red.shade800)),
       );
 }

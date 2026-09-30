@@ -198,9 +198,9 @@ class _DashboardScreenState extends State<DashboardScreen>
       (_) => _fetchNeedsAttention(),
     );
 
-    // Push notifications: register this phone for the logged-in user,
-    // open the screen of a notification that launched the app, and keep
-    // the bell's unread count fresh.
+    // Notifications: start this phone's check for the logged-in user, open
+    // the screen of a notification that launched the app, and keep the
+    // bell's unread count fresh (checks every minute while open).
     PushService.registerDevice();
     PushService.handleLaunchNotification();
     PushService.refreshUnread();

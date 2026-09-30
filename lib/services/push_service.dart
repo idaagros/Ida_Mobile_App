@@ -1,27 +1,34 @@
 // lib/services/push_service.dart
 //
-// Push notifications through Firebase Cloud Messaging (free).
+// Phone notifications without any outside push service (Sep 2026).
 //
-//  - init() once at app start (main.dart). Safe if Firebase isn't set up
-//    yet (no google-services.json): push is simply off and the app runs.
-//  - registerDevice() after login (called from the dashboard): asks for
-//    notification permission (Android 13+), gets this phone's FCM token
-//    and sends it to the backend so notifications reach this device.
+// The phone asks the server for new notifications itself:
+//  - when the app is open: every minute (the dashboard's timer) — a new
+//    one shows as a banner at the bottom with an "Open" button;
+//  - when the app is closed or in the background: about every 15 minutes
+//    (Android's shortest interval for background work, via workmanager) —
+//    a new one shows as a normal phone notification. Android may delay
+//    this on battery saver, and some phones (Xiaomi, Oppo, Vivo, Realme)
+//    need battery "No restrictions" + Autostart for it to run at all.
+//  - Tapping a notification opens the matching screen via openRoute().
+//
+//  - init() once at app start (main.dart).
+//  - registerDevice() after login (dashboard): asks for notification
+//    permission (Android 13+), starts the background check and tells the
+//    server this phone is checking (admin's "Notification setup" list).
 //  - unregisterDevice() on sign-out, so the next person to log in on this
-//    phone doesn't receive the previous user's notifications.
-//  - Tapping a notification (app closed, in background, or the in-app
-//    banner when open) opens the matching screen via openRoute().
+//    phone doesn't get the previous user's notifications.
 //
-// When the app is closed or in the background, Android shows the
-// notification in the tray by itself. When the app is open, it appears
-// as a banner at the bottom of the screen with an "Open" button.
+// Server side: GET /api/notifications (the same list as the bell).
 
 import 'dart:convert';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'dart:math';
+import 'dart:ui' show DartPluginRegistrant;
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:workmanager/workmanager.dart';
 import '../config/app_config.dart';
 import '../screens/review/review_queue_screen.dart';
 import '../screens/attendance_screen.dart';
@@ -45,54 +52,57 @@ import '../screens/work_allocation_screen.dart';
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 final GlobalKey<ScaffoldMessengerState> appMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
-// Background messages: Android shows the tray notification itself; the
-// handler only has to exist (and be a top-level function).
+const String _checkTask = 'ida-notification-check';
+const String _prefLastId = 'notif_last_shown_id';
+const String _prefDeviceId = 'notif_device_id';
+const String _channelId = 'ida_notifications';
+const String _channelName = 'Ida AgriCo';
+
+final FlutterLocalNotificationsPlugin _local = FlutterLocalNotificationsPlugin();
+
+// Background check (runs in its own isolate, app closed or not).
 @pragma('vm:entry-point')
-Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
-  try {
-    await Firebase.initializeApp();
-  } catch (_) {}
+void notificationCheckDispatcher() {
+  Workmanager().executeTask((task, inputData) async {
+    try {
+      DartPluginRegistrant.ensureInitialized();
+      await AppConfig.load();
+      await PushService._initLocal();
+      await PushService.checkNow(background: true);
+    } catch (_) {}
+    return true; // never ask Android to retry; the next run comes anyway
+  });
 }
 
 class PushService {
   static bool _ready = false;
   static bool get isReady => _ready;
+  static bool _checking = false;
   static final ValueNotifier<int> unreadCount = ValueNotifier<int>(0);
+
+  static Future<void> _initLocal({void Function(NotificationResponse)? onTap}) async {
+    await _local.initialize(
+      const InitializationSettings(android: AndroidInitializationSettings('@mipmap/ic_launcher')),
+      onDidReceiveNotificationResponse: onTap,
+    );
+  }
 
   static Future<void> init() async {
     try {
-      await Firebase.initializeApp();
-      FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
+      await _initLocal(onTap: (r) => _openPayload(r.payload));
+      await Workmanager().initialize(notificationCheckDispatcher);
       _ready = true;
     } catch (e) {
-      // No google-services.json yet, or Firebase not configured — the app
-      // works normally, just without push.
-      debugPrint('Push disabled: $e');
+      debugPrint('Notifications disabled: $e');
       _ready = false;
-      return;
     }
+  }
 
-    // App open → show an in-app banner.
-    FirebaseMessaging.onMessage.listen((message) {
-      final title = message.notification?.title ?? '';
-      final body = message.notification?.body ?? '';
-      refreshUnread();
-      appMessengerKey.currentState?.showSnackBar(SnackBar(
-        duration: const Duration(seconds: 6),
-        behavior: SnackBarBehavior.floating,
-        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-          if (body.isNotEmpty) Text(body, maxLines: 3, overflow: TextOverflow.ellipsis),
-        ]),
-        action: SnackBarAction(label: 'Open', onPressed: () => openFromData(message.data)),
-      ));
-    });
-
-    // Tapped while the app was in the background.
-    FirebaseMessaging.onMessageOpenedApp.listen((message) => openFromData(message.data));
-
-    // Tapped while the app was closed — handled once the dashboard is up
-    // (see handleLaunchNotification), since we need to be logged in first.
+  static void _openPayload(String? payload) {
+    if (payload == null || payload.isEmpty) return;
+    try {
+      openFromData(Map<String, dynamic>.from(jsonDecode(payload) as Map));
+    } catch (_) {}
   }
 
   static Future<Map<String, String>> _headers() async {
@@ -103,75 +113,166 @@ class PushService {
     };
   }
 
+  static Future<String> _deviceId() async {
+    final prefs = await SharedPreferences.getInstance();
+    var id = prefs.getString(_prefDeviceId);
+    if (id == null || id.isEmpty) {
+      final r = Random.secure();
+      id = List.generate(16, (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+      await prefs.setString(_prefDeviceId, id);
+    }
+    return id;
+  }
+
   /// Call after login (the dashboard does this on open).
   static Future<void> registerDevice() async {
     if (!_ready) return;
     try {
-      final messaging = FirebaseMessaging.instance;
-      final settings = await messaging.requestPermission(alert: true, badge: true, sound: true);
-      if (settings.authorizationStatus == AuthorizationStatus.denied) {
-        debugPrint('Notification permission denied');
-        return;
-      }
-      final token = await messaging.getToken();
-      if (token == null) return;
-      await _sendToken(token);
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('push_token', token);
-      messaging.onTokenRefresh.listen(_sendToken);
+      await _local
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+    } catch (_) {}
+    try {
+      await Workmanager().registerPeriodicTask(
+        _checkTask,
+        _checkTask,
+        frequency: const Duration(minutes: 15),
+        constraints: Constraints(networkType: NetworkType.connected),
+      );
     } catch (e) {
-      debugPrint('Push registration failed: $e');
+      debugPrint('Background check not started: $e');
     }
+    await _tellServer();
+    await checkNow();
   }
 
-  static Future<void> _sendToken(String token) async {
+  // Shows this phone in the admin's device list, with when it last checked.
+  static Future<void> _tellServer() async {
     try {
       await http.post(
         Uri.parse('${AppConfig.apiBaseUrl}/notifications/token'),
         headers: await _headers(),
-        body: jsonEncode({'token': token, 'platform': 'android', 'device_info': 'Ida AgriCo Android app'}),
+        body: jsonEncode({'token': 'check:${await _deviceId()}', 'platform': 'android', 'device_info': 'Ida AgriCo Android app'}),
       );
+    } catch (_) {}
+  }
+
+  /// Fetches the latest notifications; new unread ones are shown as phone
+  /// notifications (background) or a banner (app open). Also refreshes the
+  /// bell count. The first check after login only remembers where the list
+  /// is, so old notifications don't all pop up at once.
+  static Future<void> checkNow({bool background = false}) async {
+    if (_checking) return;
+    _checking = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // The background check runs in its own isolate and writes the same
+      // keys - re-read so neither side shows a notification twice.
+      await prefs.reload();
+      if ((prefs.getString('token') ?? '').isEmpty) return;
+      final res = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/notifications?limit=20'), headers: await _headers());
+      if (res.statusCode != 200) return;
+      final d = jsonDecode(res.body) as Map;
+      unreadCount.value = (d['unread'] as num?)?.toInt() ?? 0;
+      final items = ((d['items'] as List?) ?? []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      if (items.isEmpty) return;
+      int idOf(Map n) => int.tryParse('${n['id']}') ?? 0;
+      final newest = items.map(idOf).reduce(max);
+      final last = prefs.getInt(_prefLastId);
+      await prefs.setInt(_prefLastId, max(newest, last ?? 0));
+      if (last == null) return; // first check on this phone / after login
+      final fresh = items.where((n) => idOf(n) > last && n['read_at'] == null).toList()
+        ..sort((a, b) => idOf(a).compareTo(idOf(b)));
+      if (fresh.isEmpty) return;
+
+      // Banner only when the app is actually on screen; otherwise (e.g. the
+      // dashboard's timer firing while the app is in the background) show
+      // it as a phone notification so it isn't missed.
+      final onScreen = !background && WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+      if (onScreen && appMessengerKey.currentState != null) {
+        _banner(fresh.last, more: fresh.length - 1);
+      } else {
+        for (final n in fresh.length > 5 ? fresh.sublist(fresh.length - 5) : fresh) {
+          await _showPhoneNotification(n);
+        }
+      }
+      if (background) await _tellServer();
     } catch (e) {
-      debugPrint('Could not send push token: $e');
+      debugPrint('Notification check failed: $e');
+    } finally {
+      _checking = false;
     }
+  }
+
+  static Map<String, dynamic> _dataOf(Map<String, dynamic> n) => {
+        ...(n['data'] is Map ? Map<String, dynamic>.from(n['data'] as Map) : const <String, dynamic>{}),
+        'type': n['type'],
+        'module': n['module'],
+        'route': n['route'],
+        'notification_id': '${n['id']}',
+      };
+
+  static Future<void> _showPhoneNotification(Map<String, dynamic> n) async {
+    await _local.show(
+      int.tryParse('${n['id']}') ?? 0,
+      '${n['title'] ?? 'Ida AgriCo'}',
+      '${n['body'] ?? ''}',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(_channelId, _channelName,
+            channelDescription: 'Approvals, returned entries, reminders and price alerts',
+            importance: Importance.high,
+            priority: Priority.high),
+      ),
+      payload: jsonEncode(_dataOf(n)),
+    );
+  }
+
+  static void _banner(Map<String, dynamic> n, {int more = 0}) {
+    appMessengerKey.currentState?.showSnackBar(SnackBar(
+      duration: const Duration(seconds: 6),
+      behavior: SnackBarBehavior.floating,
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('${n['title'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w700)),
+        if ('${n['body'] ?? ''}'.isNotEmpty) Text('${n['body']}', maxLines: 3, overflow: TextOverflow.ellipsis),
+        if (more > 0) Text('+ $more more in Notifications', style: const TextStyle(fontSize: 12)),
+      ]),
+      action: SnackBarAction(label: 'Open', onPressed: () => openFromData(_dataOf(n))),
+    ));
   }
 
   /// Call on sign-out, BEFORE clearing the saved login.
   static Future<void> unregisterDevice() async {
     try {
+      await http.delete(
+        Uri.parse('${AppConfig.apiBaseUrl}/notifications/token'),
+        headers: await _headers(),
+        body: jsonEncode({'token': 'check:${await _deviceId()}'}),
+      );
+    } catch (_) {}
+    try {
+      await Workmanager().cancelByUniqueName(_checkTask);
+      await _local.cancelAll();
       final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('push_token');
-      if (token != null) {
-        await http.delete(
-          Uri.parse('${AppConfig.apiBaseUrl}/notifications/token'),
-          headers: await _headers(),
-          body: jsonEncode({'token': token}),
-        );
-      }
-      if (_ready) await FirebaseMessaging.instance.deleteToken();
+      await prefs.remove(_prefLastId);
     } catch (e) {
-      debugPrint('Push unregister failed: $e');
+      debugPrint('Notification sign-out tidy-up failed: $e');
     }
     unreadCount.value = 0;
   }
 
-  /// Unread count for the bell on the dashboard.
-  static Future<void> refreshUnread() async {
-    try {
-      final res = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/notifications/unread-count'), headers: await _headers());
-      if (res.statusCode == 200) {
-        unreadCount.value = (jsonDecode(res.body)['unread'] as num?)?.toInt() ?? 0;
-      }
-    } catch (_) {}
-  }
+  /// Unread count for the bell on the dashboard; also picks up new
+  /// notifications while the app is open.
+  static Future<void> refreshUnread() => checkNow();
 
-  /// If the app was opened by tapping a notification, go to its screen.
-  /// Called once by the dashboard after login.
+  /// If the app was opened by tapping a phone notification, go to its
+  /// screen. Called once by the dashboard after login.
+  static bool _launchHandled = false;
   static Future<void> handleLaunchNotification() async {
-    if (!_ready) return;
+    if (!_ready || _launchHandled) return;
+    _launchHandled = true;
     try {
-      final initial = await FirebaseMessaging.instance.getInitialMessage();
-      if (initial != null) openFromData(initial.data);
+      final details = await _local.getNotificationAppLaunchDetails();
+      if (details?.didNotificationLaunchApp == true) _openPayload(details!.notificationResponse?.payload);
     } catch (_) {}
   }
 

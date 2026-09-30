@@ -32,7 +32,7 @@ class AppConfig {
   // True when this phone uses an address other than the built-in one.
   static bool get isCustomHost => _host != defaultApiHost;
 
-  // Just the domain, for display (e.g. "idaagrico.duckdns.org").
+  // Just the domain, for display (e.g. "ida.idaagrico.com").
   static String get displayHost => Uri.tryParse(_host)?.host ?? _host;
 
   // Call once in main() before runApp.
