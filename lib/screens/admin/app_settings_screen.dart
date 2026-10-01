@@ -7,9 +7,12 @@
 //    (step 2, must be later).
 //  - Face login: how close a face must be to the saved photo (0.6
 //    stricter … 1.6 more forgiving; it started at 1.1).
+//  - TV link (Oct 2026): link the owner's TV with the code it shows, see
+//    linked TVs, switch one off.
 //  - Server address: this phone only (needed before signing in).
 // Web counterpart: src/pages/AppSettings.jsx.
-// API: GET/PUT /reading-reminder-settings, GET/PATCH /settings/face_login_threshold
+// API: GET/PUT /reading-reminder-settings, GET/PATCH /settings/face_login_threshold,
+//      POST /tv/link, GET /tv/devices, POST /tv/devices/:id/off
 
 import 'package:flutter/material.dart';
 import '../../config/app_config.dart';
@@ -39,6 +42,18 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
   double? _face;
   double? _faceSaved;
   bool _savingFace = false;
+
+  final TextEditingController _tvCode = TextEditingController();
+  final TextEditingController _tvName = TextEditingController(text: "Owner's room TV");
+  List<Map<String, dynamic>> _tvs = [];
+  bool _linking = false;
+
+  @override
+  void dispose() {
+    _tvCode.dispose();
+    _tvName.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -81,6 +96,7 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
         errors.add('Face login: ${errText(e)}');
       }
     }
+    await _loadTvs();
     if (!mounted) return;
     setState(() {
       _error = errors.isEmpty ? null : errors.join('\n');
@@ -152,6 +168,8 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
                 _remindersCard(),
                 const SizedBox(height: 14),
                 _faceCard(),
+                const SizedBox(height: 14),
+                _tvCard(),
                 const SizedBox(height: 14),
                 _serverCard(),
               ]),
@@ -280,6 +298,95 @@ class _AppSettingsScreenState extends State<AppSettingsScreen> {
             child: FilledButton(style: aPrimary(), onPressed: _savingFace || !changed ? null : () => _saveFace(v), child: Text(_savingFace ? 'Saving…' : 'Save')),
           ),
         ]),
+      ]),
+    );
+  }
+
+  // ── TV link ───────────────────────────────────────────────────────
+  Future<void> _loadTvs() async {
+    try {
+      final d = await AdminApi.get('/tv/devices');
+      _tvs = (d is List ? d : const []).whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
+    } catch (_) {
+      _tvs = [];
+    }
+  }
+
+  Future<void> _linkTv() async {
+    final code = _tvCode.text.replaceAll(RegExp(r'\D'), '');
+    if (code.length != 6) {
+      showErr(context, 'Type the 6-digit code shown on the TV.');
+      return;
+    }
+    setState(() => _linking = true);
+    try {
+      await AdminApi.post('/tv/link', {'code': code, 'name': _tvName.text.trim().isEmpty ? 'TV' : _tvName.text.trim()});
+      _tvCode.clear();
+      await _loadTvs();
+      if (mounted) showOk(context, 'Linked. The TV shows the dashboard in a few seconds.');
+    } catch (e) {
+      if (mounted) showErr(context, errText(e));
+    } finally {
+      if (mounted) setState(() => _linking = false);
+    }
+  }
+
+  Future<void> _tvOff(Map<String, dynamic> d) async {
+    if (!await aConfirm(context, 'Switch off ${d['name']}?', 'It will show a new code and needs linking again.', yes: 'Switch off', danger: true)) return;
+    try {
+      await AdminApi.post('/tv/devices/${d['id']}/off', {});
+      await _loadTvs();
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) showErr(context, errText(e));
+    }
+  }
+
+  String _seen(dynamic s) {
+    final sec = int.tryParse('${s ?? ''}');
+    if (sec == null) return 'not seen yet';
+    if (sec < 120) return 'last seen just now';
+    if (sec < 3600) return 'last seen ${(sec / 60).round()} min ago';
+    if (sec < 86400) return 'last seen ${(sec / 3600).round()} h ago';
+    return 'last seen ${(sec / 86400).round()} days ago';
+  }
+
+  Widget _tvCard() {
+    final on = _tvs.where((d) => d['on'] == true).toList();
+    return ACard(
+      padding: const EdgeInsets.all(16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        _title(Icons.tv, 'TV link'),
+        const SizedBox(height: 6),
+        const Text('Show the owner’s dashboard on a TV without signing in there. On the TV, open the website’s /tv page: it shows a 6-digit code. Type it here.',
+            style: TextStyle(fontSize: 13.5, color: aMuted)),
+        const SizedBox(height: 12),
+        TextField(controller: _tvCode, keyboardType: TextInputType.number, maxLength: 7, decoration: aInput('Code shown on the TV', hint: '000000').copyWith(counterText: '')),
+        const SizedBox(height: 10),
+        TextField(controller: _tvName, decoration: aInput('Name')),
+        const SizedBox(height: 12),
+        FilledButton(style: aPrimary(), onPressed: _linking ? null : _linkTv, child: Text(_linking ? 'Linking…' : 'Link this TV')),
+        const SizedBox(height: 12),
+        const Text('Linked TVs', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 6),
+        if (on.isEmpty) const Text('No TV linked yet.', style: TextStyle(fontSize: 13, color: aMuted)),
+        for (final d in on)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(children: [
+              Container(width: 9, height: 9, decoration: BoxDecoration(shape: BoxShape.circle, color: (int.tryParse('${d['seen_seconds_ago'] ?? ''}') ?? 99999) < 900 ? aGreen : Colors.grey)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('${d['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                  Text('linked by ${d['created_by_name'] ?? 'admin'} · ${_seen(d['seen_seconds_ago'])}', style: const TextStyle(fontSize: 12, color: aMuted)),
+                ]),
+              ),
+              OutlinedButton(style: aSecondary(height: 36, fg: aRed), onPressed: () => _tvOff(d), child: const Text('Switch off')),
+            ]),
+          ),
+        const SizedBox(height: 6),
+        const Text('A linked TV can only show the dashboard. It shows no ₹ amounts.', style: TextStyle(fontSize: 12, color: aMuted)),
       ]),
     );
   }

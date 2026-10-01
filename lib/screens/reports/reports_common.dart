@@ -106,7 +106,7 @@ Future<void> showFileReady(BuildContext context, String filePath, String filenam
 
 // ── Periods ───────────────────────────────────────────────────────────
 const List<(String, String)> periodPresets = [
-  ('week', 'This week'), ('month', 'This month'), ('last_month', 'Last month'),
+  ('week', 'This week'), ('last_week', 'Last week'), ('month', 'This month'), ('last_month', 'Last month'),
   ('year', 'This year'), ('last_year', 'Last year'), ('custom', 'Custom'),
 ];
 
@@ -123,6 +123,9 @@ String niceDate(String s) {
   switch (preset) {
     case 'week':
       return (ymd(n.subtract(Duration(days: n.weekday - 1))), ymd(n));
+    case 'last_week':
+      final mon = DateTime(n.year, n.month, n.day - (n.weekday - 1));
+      return (ymd(DateTime(mon.year, mon.month, mon.day - 7)), ymd(DateTime(mon.year, mon.month, mon.day - 1)));
     case 'last_month':
       return (ymd(DateTime(n.year, n.month - 1, 1)), ymd(DateTime(n.year, n.month, 0)));
     case 'year':

@@ -34,6 +34,7 @@ class _ReportBuilderScreenState extends State<ReportBuilderScreen> {
   Map<String, dynamic>? data;
   bool loading = false;
   String? busy;
+  String? wsBusy;
   String? error;
   Timer? _debounce;
 
@@ -128,6 +129,62 @@ class _ReportBuilderScreenState extends State<ReportBuilderScreen> {
     } finally {
       if (mounted) setState(() => busy = null);
     }
+  }
+
+  // Men / women wage sheet (workers × days, each day's wage, totals) for
+  // the period picked above — attendance only. Brought back Oct 2026.
+  Future<void> _wageSheet(String kind) async {
+    setState(() {
+      wsBusy = kind;
+      error = null;
+    });
+    try {
+      await ReportApi.download(context, '/attendance/report-gender-split?from=$from&to=$to${kind == 'pdf' ? '&format=pdf' : ''}',
+          'wage-sheet-men-women_${from}_to_$to.$kind');
+    } catch (e) {
+      if (mounted) setState(() => error = '$e'.replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => wsBusy = null);
+    }
+  }
+
+  Widget _wageSheetCard() {
+    final bad = from.compareTo(to) > 0;
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F8EE),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFCFE3C0)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const Text('Wage sheet (men / women)', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 2),
+        Text('Workers × days with each day\'s wage and totals, for ${niceDate(from)} – ${niceDate(to)}.',
+            style: const TextStyle(fontSize: 12.5, color: rMuted)),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: wsBusy != null || bad ? null : () => _wageSheet('xlsx'),
+              icon: const Icon(Icons.grid_on, size: 18),
+              label: Text(wsBusy == 'xlsx' ? 'Making…' : 'Excel'),
+              style: OutlinedButton.styleFrom(foregroundColor: rDark, backgroundColor: Colors.white, minimumSize: const Size.fromHeight(44)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: wsBusy != null || bad ? null : () => _wageSheet('pdf'),
+              icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+              label: Text(wsBusy == 'pdf' ? 'Making…' : 'PDF'),
+              style: OutlinedButton.styleFrom(foregroundColor: rDark, backgroundColor: Colors.white, minimumSize: const Size.fromHeight(44)),
+            ),
+          ),
+        ]),
+      ]),
+    );
   }
 
   Future<void> _pickPreset(String p) async {
@@ -324,6 +381,7 @@ class _ReportBuilderScreenState extends State<ReportBuilderScreen> {
                         ),
                     ]),
                   ]),
+                  if (rep!['key'] == 'attendance') _wageSheetCard(),
                   if (error != null)
                     Container(
                       margin: const EdgeInsets.only(top: 10),

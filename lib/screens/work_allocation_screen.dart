@@ -1554,6 +1554,116 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
     );
   }
 
+  // Men / women split for the review (Oct 2026): gender from the present
+  // list, else from the allocation row.
+  String _genderOf(dynamic workerId, [dynamic fallback]) {
+    final p = presentWorkers.firstWhere((p) => p['worker_id'] == workerId,
+        orElse: () => <String, dynamic>{});
+    final g = (p['gender'] ?? fallback)?.toString();
+    return g == 'M' || g == 'F' ? g! : 'X';
+  }
+
+  String _rs(double v) =>
+      '₹${v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2)}';
+
+  String _genderLabel(AppLocalizations loc, String g) =>
+      g == 'M' ? loc.faMaleFull : g == 'F' ? loc.faFemaleFull : '—';
+
+  Widget _genderHead(String text, String? amount, {bool small = false}) =>
+      Container(
+        margin: EdgeInsets.only(top: small ? 4 : 6, bottom: small ? 0 : 6),
+        padding: EdgeInsets.symmetric(horizontal: small ? 14 : 10, vertical: small ? 5 : 7),
+        decoration: BoxDecoration(
+            color: const Color(0xFFEEF4E8),
+            borderRadius: BorderRadius.circular(small ? 0 : 8)),
+        child: Row(children: [
+          Expanded(
+            child: Text(text,
+                style: TextStyle(
+                    fontSize: small ? 11.5 : 12,
+                    fontWeight: FontWeight.w800,
+                    color: idaDark,
+                    letterSpacing: 0.3)),
+          ),
+          if (amount != null)
+            Text(amount,
+                style: TextStyle(
+                    fontSize: small ? 12 : 13,
+                    fontWeight: FontWeight.w800,
+                    color: idaDark)),
+        ]),
+      );
+
+  // Men / women / all × people, morning pay, allocated pay.
+  Widget _genderSplitCard(AppLocalizations loc) {
+    double morningOf(Map p) =>
+        double.tryParse((p['morning_amount'] ?? p['daily_wage'])?.toString() ?? '') ?? 0;
+    double allocOf(Map a) => double.tryParse(a['total_wage']?.toString() ?? '') ?? 0;
+    final rows = <(String, int, double, double)>[];
+    for (final g in ['M', 'F']) {
+      final ps = presentWorkers.where((p) => _genderOf(p['worker_id']) == g);
+      rows.add((
+        _genderLabel(loc, g),
+        ps.length,
+        ps.fold(0.0, (t, p) => t + morningOf(p)),
+        savedAllocations
+            .where((a) => _genderOf(a['worker_id'], a['worker_gender']) == g)
+            .fold(0.0, (t, a) => t + allocOf(a)),
+      ));
+    }
+    rows.add((
+      'All',
+      presentWorkers.length,
+      presentWorkers.fold(0.0, (t, p) => t + morningOf(p)),
+      savedAllocations.fold(0.0, (t, a) => t + allocOf(a)),
+    ));
+    const head = TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF6B7280));
+    Widget cell(String t, {bool bold = false, Color? color, TextAlign align = TextAlign.right}) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Text(t,
+              textAlign: align,
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
+                  color: color ?? idaDark)),
+        );
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+      decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE0E7D8))),
+      child: Table(
+        columnWidths: const {
+          0: FlexColumnWidth(1.3),
+          1: FlexColumnWidth(0.8),
+          2: FlexColumnWidth(1.2),
+          3: FlexColumnWidth(1.2),
+        },
+        children: [
+          const TableRow(children: [
+            SizedBox(),
+            Text('People', textAlign: TextAlign.right, style: head),
+            Text('Morning', textAlign: TextAlign.right, style: head),
+            Text('Allocated', textAlign: TextAlign.right, style: head),
+          ]),
+          for (var i = 0; i < rows.length; i++)
+            TableRow(children: [
+              cell(rows[i].$1, bold: i == rows.length - 1, align: TextAlign.left),
+              cell('${rows[i].$2}', bold: i == rows.length - 1),
+              cell(_rs(rows[i].$3), bold: i == rows.length - 1),
+              cell(_rs(rows[i].$4),
+                  bold: true,
+                  color: (rows[i].$4 - rows[i].$3).abs() > 0.005
+                      ? const Color(0xFF92600A)
+                      : idaGreen),
+            ]),
+        ],
+      ),
+    );
+  }
+
   Widget _readOnlyAllocations(AppLocalizations loc) {
     final groupsByTask = <String, List<Map<String, dynamic>>>{};
     for (final a in savedAllocations) {
@@ -1573,7 +1683,9 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
           .compareTo((b['name'] ?? '').toString().toLowerCase()));
     final total = savedAllocations.fold(
         0.0, (s, a) => s + (double.tryParse(a['total_wage'].toString()) ?? 0));
+    double allocOf(Map a) => double.tryParse(a['total_wage']?.toString() ?? '') ?? 0;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _genderSplitCard(loc),
       if (perWorker.isNotEmpty) ...[
         Text(loc.faWaRemarksHeader,
             style: const TextStyle(
@@ -1581,9 +1693,19 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
                 fontWeight: FontWeight.w700,
                 color: Color(0xFF6B7280),
                 letterSpacing: 0.6)),
-        const SizedBox(height: 10),
-        _tileGrid(
-            context, sortedPerWorker.map((pw) => _remarkRow(pw, loc)).toList()),
+        const SizedBox(height: 4),
+        for (final g in ['M', 'F', 'X'])
+          if (sortedPerWorker.any((pw) => _genderOf(pw['worker_id']) == g)) ...[
+            _genderHead(
+                '${_genderLabel(loc, g).toUpperCase()} (${sortedPerWorker.where((pw) => _genderOf(pw['worker_id']) == g).length})',
+                null),
+            _tileGrid(
+                context,
+                sortedPerWorker
+                    .where((pw) => _genderOf(pw['worker_id']) == g)
+                    .map((pw) => _remarkRow(pw, loc))
+                    .toList()),
+          ],
         const SizedBox(height: 18),
       ],
       Row(children: [
@@ -1604,8 +1726,43 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
         final farmName = tl(context, parts[0]);
         final workTypeName =
             parts.length > 1 && parts[1] != '—' ? tl(context, parts[1]) : null;
+        Widget personTile(Map<String, dynamic> a) {
+          final canMarkDidNotWork = allocationStatus == 'pending' ||
+              (allocationStatus == 'approved' && isAdmin);
+          return ListTile(
+            dense: true,
+            title: Text(tl(context, a['worker_name'] ?? ''),
+                style: const TextStyle(
+                    fontSize: 13.5, fontWeight: FontWeight.w600)),
+            subtitle: a['notes'] != null && a['notes'].toString().isNotEmpty
+                ? Text(a['notes'],
+                    style: const TextStyle(fontSize: 11, color: Colors.orange))
+                : null,
+            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+              Text('₹${a['total_wage']}',
+                  style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: idaGreen)),
+              if (canMarkDidNotWork)
+                IconButton(
+                  icon: const Icon(Icons.person_off_outlined,
+                      size: 18, color: Color(0xFFC0392B)),
+                  tooltip: loc.faWaDidNotWork,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  onPressed: () => _showDidNotWorkDialog(
+                      a['worker_id'], a['worker_name'] ?? ''),
+                )
+              else
+                const SizedBox(width: 4),
+            ]),
+          );
+        }
+
         return Container(
           margin: const EdgeInsets.only(bottom: 10),
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(12),
@@ -1614,48 +1771,35 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
-              child: Text(
-                  '$farmName${workTypeName != null ? ' · $workTypeName' : ''}',
-                  style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: idaGreen)),
-            ),
-            const Divider(height: 1),
-            ...entry.value.map((a) {
-              final canMarkDidNotWork = allocationStatus == 'pending' ||
-                  (allocationStatus == 'approved' && isAdmin);
-              return ListTile(
-                dense: true,
-                title: Text(tl(context, a['worker_name'] ?? ''),
-                    style: const TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w600)),
-                subtitle: a['notes'] != null && a['notes'].toString().isNotEmpty
-                    ? Text(a['notes'],
-                        style:
-                            const TextStyle(fontSize: 11, color: Colors.orange))
-                    : null,
-                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Text('₹${a['total_wage']}',
+              child: Row(children: [
+                Expanded(
+                  child: Text(
+                      '$farmName${workTypeName != null ? ' · $workTypeName' : ''}',
                       style: const TextStyle(
-                          fontSize: 13,
+                          fontSize: 12.5,
                           fontWeight: FontWeight.w700,
                           color: idaGreen)),
-                  if (canMarkDidNotWork)
-                    IconButton(
-                      icon: const Icon(Icons.person_off_outlined,
-                          size: 18, color: Color(0xFFC0392B)),
-                      tooltip: loc.faWaDidNotWork,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      onPressed: () => _showDidNotWorkDialog(
-                          a['worker_id'], a['worker_name'] ?? ''),
-                    )
-                  else
-                    const SizedBox(width: 4),
-                ]),
-              );
-            }),
+                ),
+                Text(_rs(entry.value.fold(0.0, (t, a) => t + allocOf(a))),
+                    style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: idaGreen)),
+              ]),
+            ),
+            const Divider(height: 1),
+            for (final g in ['M', 'F', 'X'])
+              if (entry.value.any((a) => _genderOf(a['worker_id'], a['worker_gender']) == g)) ...[
+                _genderHead(
+                    '${_genderLabel(loc, g)} (${entry.value.where((a) => _genderOf(a['worker_id'], a['worker_gender']) == g).length})',
+                    _rs(entry.value
+                        .where((a) => _genderOf(a['worker_id'], a['worker_gender']) == g)
+                        .fold(0.0, (t, a) => t + allocOf(a))),
+                    small: true),
+                ...entry.value
+                    .where((a) => _genderOf(a['worker_id'], a['worker_gender']) == g)
+                    .map(personTile),
+              ],
           ]),
         );
       }),

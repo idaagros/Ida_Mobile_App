@@ -250,6 +250,26 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   double get _computedTotal => presentWageCtrls.values
       .fold(0.0, (s, c) => s + (double.tryParse(c.text.trim()) ?? 0));
 
+  // Pay of the ticked men ('M') or women ('F') — Oct 2026.
+  double _selectedWage(String g) => selectedWorkerIds
+      .where((id) =>
+          workers.firstWhere((w) => w['id'] == id, orElse: () => {})['gender'] ==
+          g)
+      .fold(0.0,
+          (s, id) => s + (double.tryParse(presentWageCtrls[id]?.text.trim() ?? '') ?? 0));
+
+  // Pay of the submitted men / women (morning amount, else usual wage).
+  double _presentWage(String g) => presentWorkers
+      .where((p) => p['gender'] == g)
+      .fold(
+          0.0,
+          (s, p) =>
+              s +
+              (double.tryParse(
+                      (p['morning_amount'] ?? p['daily_wage'])?.toString() ??
+                          '') ??
+                  0));
+
   int get _selectedPermanent => selectedWorkerIds.where((id) {
         final w = workers.firstWhere((w) => w['id'] == id, orElse: () => {});
         return w['is_permanent'] == 1 || w['is_permanent'] == true;
@@ -267,7 +287,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           male: n(s['male']),
           female: n(s['female']),
           permanent: n(s['permanent']),
-          wage: double.tryParse(s['total_wage']?.toString() ?? '') ?? 0);
+          wage: double.tryParse(s['total_wage']?.toString() ?? '') ?? 0,
+          maleWage: presentWorkers.isEmpty ? null : _presentWage('M'),
+          femaleWage: presentWorkers.isEmpty ? null : _presentWage('F'));
     }
     if (presentWorkers.isEmpty) return const SizedBox.shrink();
     return _dayTotals(loc,
@@ -285,7 +307,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 (double.tryParse(
                         (p['morning_amount'] ?? p['daily_wage'])?.toString() ??
                             '') ??
-                    0)));
+                    0)),
+        maleWage: _presentWage('M'),
+        femaleWage: _presentWage('F'));
   }
 
   // Total workers, male/female split, permanent (included in the
@@ -296,8 +320,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       required int male,
       required int female,
       required int permanent,
-      required double wage}) {
+      required double wage,
+      double? maleWage,
+      double? femaleWage}) {
     const grey = TextStyle(fontSize: 12, color: Color(0xFF4B5563));
+    String rs(double v) =>
+        '₹${v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2)}';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -311,8 +339,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 fontSize: 13.5, fontWeight: FontWeight.w700, color: idaDark)),
         const SizedBox(height: 4),
         Wrap(spacing: 14, runSpacing: 2, children: [
-          Text('♂ $male ${loc.faMaleFull.toLowerCase()}', style: grey),
-          Text('♀ $female ${loc.faFemaleFull.toLowerCase()}', style: grey),
+          Text(
+              '♂ $male ${loc.faMaleFull.toLowerCase()}${maleWage != null ? ' · ${rs(maleWage)}' : ''}',
+              style: grey),
+          Text(
+              '♀ $female ${loc.faFemaleFull.toLowerCase()}${femaleWage != null ? ' · ${rs(femaleWage)}' : ''}',
+              style: grey),
           Text('📌 $permanent ${loc.faPermanentIncluded}', style: grey),
         ]),
         const SizedBox(height: 6),
@@ -422,7 +454,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                         male: maleList.length,
                         female: femaleList.length,
                         permanent: _selectedPermanent,
-                        wage: _computedTotal),
+                        wage: _computedTotal,
+                        maleWage: _selectedWage('M'),
+                        femaleWage: _selectedWage('F')),
                   ]),
             ),
           ),
@@ -937,6 +971,67 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     });
   }
 
+  // The submitted list, men first then women (Oct 2026), each with its
+  // count and pay — what the approver checks.
+  Widget _presentBySection(AppLocalizations loc) {
+    String rs(double v) =>
+        '₹${v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2)}';
+    double pay(Map p) =>
+        double.tryParse((p['morning_amount'] ?? p['daily_wage'])?.toString() ?? '') ?? 0;
+    final sorted = List<Map<String, dynamic>>.from(presentWorkers)
+      ..sort((a, b) => (a['name'] ?? '')
+          .toString()
+          .toLowerCase()
+          .compareTo((b['name'] ?? '').toString().toLowerCase()));
+    final sections = <(String, List<Map<String, dynamic>>)>[
+      (loc.faMaleFull, sorted.where((p) => p['gender'] == 'M').toList()),
+      (loc.faFemaleFull, sorted.where((p) => p['gender'] == 'F').toList()),
+      ('—', sorted.where((p) => p['gender'] != 'M' && p['gender'] != 'F').toList()),
+    ].where((s) => s.$2.isNotEmpty).toList();
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      for (final sec in sections) ...[
+        Container(
+          margin: const EdgeInsets.only(top: 8, bottom: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+              color: const Color(0xFFEEF4E8),
+              borderRadius: BorderRadius.circular(8)),
+          child: Row(children: [
+            Text('${sec.$1.toUpperCase()} (${sec.$2.length})',
+                style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: idaDark,
+                    letterSpacing: 0.4)),
+            const Spacer(),
+            Text(rs(sec.$2.fold(0.0, (t, p) => t + pay(p))),
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w800, color: idaDark)),
+          ]),
+        ),
+        ...sec.$2.map((p) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+              child: Row(children: [
+                Icon(p['gender'] == 'M' ? Icons.male : Icons.female,
+                    color: idaGreen, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(tl(context, p['name'] ?? ''),
+                      style: const TextStyle(
+                          fontSize: 13.5, fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1),
+                ),
+                const SizedBox(width: 8),
+                Text(rs(pay(p)),
+                    style:
+                        TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
+              ]),
+            )),
+      ],
+    ]);
+  }
+
   Widget _presentWorkersCard(AppLocalizations loc) {
     final selectedMale = selectedWorkerIds
         .where((id) =>
@@ -1121,42 +1216,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 male: selectedMale,
                 female: selectedFemale,
                 permanent: _selectedPermanent,
-                wage: _computedTotal),
+                wage: _computedTotal,
+                maleWage: _selectedWage('M'),
+                femaleWage: _selectedWage('F')),
           ],
         ] else
-          Column(
-            children: presentWorkers
-                .map((p) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.max,
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Icon(p['gender'] == 'M' ? Icons.male : Icons.female,
-                              color: idaGreen, size: 20),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(tl(context, p['name'] ?? ''),
-                                style: const TextStyle(
-                                    fontSize: 13.5,
-                                    fontWeight: FontWeight.w600),
-                                overflow: TextOverflow.ellipsis,
-                                maxLines: 1),
-                          ),
-                          const SizedBox(width: 8),
-                          Flexible(
-                            child: Text('₹${p['morning_amount'] ?? p['daily_wage']}',
-                                style: TextStyle(
-                                    fontSize: 12.5,
-                                    color: Colors.grey.shade600),
-                                overflow: TextOverflow.ellipsis,
-                                maxLines: 1),
-                          ),
-                        ],
-                      ),
-                    ))
-                .toList(),
-          ),
+          _presentBySection(loc),
         if (_canEditAttendance) ...[
           const SizedBox(height: 14),
           SizedBox(

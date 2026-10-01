@@ -110,6 +110,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
     String? surveyNumber,
     double? gpsLat,
     double? gpsLong,
+    bool? sprinklerPossible,
   }) async {
     try {
       final h = await _headers;
@@ -121,6 +122,8 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
         'survey_number': surveyNumber,
         'gps_lat': gpsLat,
         'gps_long': gpsLong,
+        // Oct 2026: shown on the owner's TV dashboard (water stress card)
+        if (sprinklerPossible != null) 'sprinkler_possible': sprinklerPossible,
       });
       final res = id == null
           ? await http.post(Uri.parse('$baseUrl/farms'),
@@ -241,7 +244,12 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
         TextEditingController(text: farm?['gps_lat']?.toString() ?? '');
     final gpsLongCtrl =
         TextEditingController(text: farm?['gps_long']?.toString() ?? '');
-    String? irrigationType = farm?['irrigation_type'];
+    String? irrigationType = '${farm?['irrigation_type'] ?? ''}'.isEmpty ? null : '${farm!['irrigation_type']}';
+    bool sprinkler = farm?['sprinkler_possible'] == 1 || farm?['sprinkler_possible'] == true;
+    // The website lets people type any irrigation text; keep such a value
+    // as its own choice so the drop-down doesn't break.
+    const knownIrrigation = ['rainfed', 'drip', 'flood', 'sprinkler'];
+    final extraIrrigation = irrigationType != null && irrigationType.isNotEmpty && !knownIrrigation.contains(irrigationType) ? irrigationType : null;
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -290,17 +298,26 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                     labelText: 'Irrigation type (optional)',
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10))),
-                items: const [
-                  DropdownMenuItem(value: null, child: Text('—')),
-                  DropdownMenuItem(value: 'rainfed', child: Text('Rainfed')),
-                  DropdownMenuItem(value: 'drip', child: Text('Drip')),
-                  DropdownMenuItem(value: 'flood', child: Text('Flood')),
-                  DropdownMenuItem(
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('—')),
+                  const DropdownMenuItem(value: 'rainfed', child: Text('Rainfed')),
+                  const DropdownMenuItem(value: 'drip', child: Text('Drip')),
+                  const DropdownMenuItem(value: 'flood', child: Text('Flood')),
+                  const DropdownMenuItem(
                       value: 'sprinkler', child: Text('Sprinkler')),
+                  if (extraIrrigation != null)
+                    DropdownMenuItem(value: extraIrrigation, child: Text(extraIrrigation)),
                 ],
                 onChanged: (v) => setDialogState(() => irrigationType = v),
               ),
-              const SizedBox(height: 12),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Sprinkler can be used here', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                subtitle: const Text('Shown on the owner\'s dashboard next to water stress', style: TextStyle(fontSize: 12)),
+                value: sprinkler,
+                onChanged: (v) => setDialogState(() => sprinkler = v),
+              ),
+              const SizedBox(height: 4),
               TextField(
                 controller: surveyCtrl,
                 decoration: InputDecoration(
@@ -366,6 +383,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                       : surveyCtrl.text.trim(),
                   gpsLat: double.tryParse(gpsLatCtrl.text.trim()),
                   gpsLong: double.tryParse(gpsLongCtrl.text.trim()),
+                  sprinklerPossible: sprinkler,
                 );
               },
               child:

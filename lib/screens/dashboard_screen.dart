@@ -1181,8 +1181,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                   // as having every module).
                   _tile(
                     icon: Icons.tv_outlined,
-                    label: 'TV Dashboard',
-                    sub: 'Full-screen live overview for office/factory display',
+                    label: "Owner's dashboard",
+                    sub: 'Today, factory and farms — same as the TV',
                     iconBg: const Color(0xFFE3F2FD),
                     iconColor: const Color(0xFF1565C0),
                     onTap: () => Navigator.push(
