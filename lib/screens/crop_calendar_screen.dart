@@ -18,6 +18,12 @@
 // .../skip). Skip is available even on Not Yet Scheduled items —
 // deciding not to do something doesn't require knowing when it
 // would've been due.
+//
+// Sep 2026 (group C): summary tiles (stage, jobs, inputs, labour,
+// harvest in quintals, spent), Jobs / Labour / Harvest tabs, Record
+// labour and Record harvest (kg) sheets from agri/cycle_common.dart,
+// and the ⋮ menu: Mark finished, Cancel (admin, reason needed), Make
+// running again (admin). A finished or cancelled crop shows a banner.
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -29,8 +35,9 @@ import '../localization/transliterate.dart';
 import '../services/responsive.dart';
 
 import '../config/app_config.dart';
-import 'agronomy/agronomy_common.dart' show fmtQty, trimNum, toD, KindChip, SmallChip, mainKind;
+import 'agronomy/agronomy_common.dart' show fmtQty, trimNum, toD, KindChip, SmallChip, mainKind, AgriApi;
 import 'agronomy/record_spray_screen.dart';
+import 'agri/cycle_common.dart';
 class CropCalendarScreen extends StatefulWidget {
   final String cycleType; // 'seasonal' | 'orchard'
   final int cycleId;
@@ -53,6 +60,12 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
   List items = [];
   List workers = [];
   bool loading = true;
+  // Sep 2026 (group C): summary, labour and harvest tabs.
+  Map? sum;
+  Map? labour;
+  List harvest = [];
+  String tab = 'jobs';
+  bool isAdmin = false;
 
   @override
   void initState() {
@@ -68,17 +81,20 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
   }
 
   Future<void> _load() async {
-    setState(() => loading = true);
+    if (items.isEmpty) setState(() => loading = true);
+    final prefs = await SharedPreferences.getInstance();
+    isAdmin = prefs.getBool('is_admin') ?? (prefs.getString('role') == 'admin');
+    final base = '/agri/cycles/${widget.cycleType}/${widget.cycleId}';
     try {
       final h = await _headers;
       final results = await Future.wait([
-        http.get(
-            Uri.parse(
-                '$baseUrl/agri/cycles/${widget.cycleType}/${widget.cycleId}/schedule'),
-            headers: h),
+        http.get(Uri.parse('$baseUrl$base/schedule'), headers: h),
         http.get(Uri.parse('$baseUrl/farm-workers'), headers: h),
       ]);
-      if (results[0].statusCode == 200) items = jsonDecode(results[0].body);
+      if (results[0].statusCode == 200) {
+        final d = jsonDecode(results[0].body);
+        items = d is List ? d : (d?['data'] ?? []);
+      }
       if (results[1].statusCode == 200) {
         workers = jsonDecode(results[1].body);
         workers.sort((a, b) => (a['name'] ?? '')
@@ -88,9 +104,16 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
       }
     } catch (e) {
       debugPrint('Load error: $e');
-    } finally {
-      if (mounted) setState(() => loading = false);
     }
+    // Summary, labour and harvest (Sep 2026).
+    await Future.wait([
+      AgriApi.get(base).then((v) => sum = v is Map ? v : null).catchError((_) => null),
+      AgriApi.get('$base/labour').then((v) => labour = v is Map ? v : null).catchError((_) => null),
+      AgriApi.get('/agri/harvest-records?cycle_type=${widget.cycleType}&cycle_id=${widget.cycleId}&limit=200')
+          .then((v) => harvest = (v is Map ? v['data'] : v) as List? ?? [])
+          .catchError((_) => <dynamic>[]),
+    ]);
+    if (mounted) setState(() => loading = false);
   }
 
   void _showSnack(String msg, {bool isError = false}) {
@@ -403,206 +426,6 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
     );
   }
 
-  void _showLogLaborDialog() {
-    final loc = AppLocalizations.of(context)!;
-    int? workerId = workers.isNotEmpty ? workers.first['id'] : null;
-    DateTime entryDate = DateTime.now();
-    String paymentMode = 'daily';
-    final activityCtrl = TextEditingController();
-    final daysCtrl = TextEditingController();
-    final wageCtrl = TextEditingController();
-    final qtyCtrl = TextEditingController();
-    final rateCtrl = TextEditingController();
-    bool submitting = false;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) {
-          double computed = 0;
-          if (paymentMode == 'daily') {
-            computed = (double.tryParse(daysCtrl.text) ?? 0) *
-                (double.tryParse(wageCtrl.text) ?? 0);
-          } else {
-            computed = (double.tryParse(qtyCtrl.text) ?? 0) *
-                (double.tryParse(rateCtrl.text) ?? 0);
-          }
-          return AlertDialog(
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: Text(loc.agriLogLabor,
-                style: const TextStyle(fontWeight: FontWeight.w700)),
-            content: SingleChildScrollView(
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                DropdownButtonFormField<int>(
-                  value: workerId,
-                  decoration: InputDecoration(
-                      labelText: loc.agriWorkerLabel,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10))),
-                  items: workers
-                      .map<DropdownMenuItem<int>>((w) => DropdownMenuItem(
-                          value: w['id'], child: Text(tl(context, w['name']))))
-                      .toList(),
-                  onChanged: (v) => setDialogState(() => workerId = v),
-                ),
-                const SizedBox(height: 12),
-                InkWell(
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                        context: ctx,
-                        initialDate: entryDate,
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime.now());
-                    if (picked != null)
-                      setDialogState(() => entryDate = picked);
-                  },
-                  child: InputDecorator(
-                    decoration: InputDecoration(
-                        labelText: loc.agriOperationDateLabel,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10))),
-                    child: Text(DateFormat('dd MMM yyyy').format(entryDate)),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: activityCtrl,
-                  decoration: InputDecoration(
-                      labelText: 'Activity (e.g. weeding, harvesting)',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10))),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  value: paymentMode,
-                  decoration: InputDecoration(
-                      labelText: loc.agriPaymentModeLabel,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10))),
-                  items: [
-                    DropdownMenuItem(
-                        value: 'daily', child: Text(loc.agriDaily)),
-                    DropdownMenuItem(
-                        value: 'piece_rate', child: Text(loc.agriPieceRate)),
-                  ],
-                  onChanged: (v) => setDialogState(() => paymentMode = v!),
-                ),
-                const SizedBox(height: 12),
-                if (paymentMode == 'daily') ...[
-                  Row(children: [
-                    Expanded(
-                        child: TextField(
-                            controller: daysCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true),
-                            decoration: InputDecoration(
-                                labelText: loc.agriDaysWorkedLabel,
-                                border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10))),
-                            onChanged: (_) => setDialogState(() {}))),
-                    const SizedBox(width: 10),
-                    Expanded(
-                        child: TextField(
-                            controller: wageCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true),
-                            decoration: InputDecoration(
-                                labelText: loc.agriDailyWageLabel,
-                                border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10))),
-                            onChanged: (_) => setDialogState(() {}))),
-                  ]),
-                ] else ...[
-                  Row(children: [
-                    Expanded(
-                        child: TextField(
-                            controller: qtyCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true),
-                            decoration: InputDecoration(
-                                labelText: loc.agriQtyHarvestedLabel,
-                                border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10))),
-                            onChanged: (_) => setDialogState(() {}))),
-                    const SizedBox(width: 10),
-                    Expanded(
-                        child: TextField(
-                            controller: rateCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true),
-                            decoration: InputDecoration(
-                                labelText: loc.agriRatePerKgLabel,
-                                border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10))),
-                            onChanged: (_) => setDialogState(() {}))),
-                  ]),
-                ],
-                const SizedBox(height: 10),
-                Text(
-                    '${loc.agriComputedCostPreview}: ₹${computed.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w700, color: idaGreen)),
-              ]),
-            ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-                onPressed: submitting
-                    ? null
-                    : () async {
-                        if (workerId == null ||
-                            activityCtrl.text.trim().isEmpty) return;
-                        setDialogState(() => submitting = true);
-                        final h = await _headers;
-                        final res = await http.post(
-                          Uri.parse('$baseUrl/agri/labor-entries'),
-                          headers: {...h, 'Content-Type': 'application/json'},
-                          body: jsonEncode({
-                            'cycle_type': widget.cycleType,
-                            'cycle_id': widget.cycleId,
-                            'worker_id': workerId,
-                            'entry_date':
-                                DateFormat('yyyy-MM-dd').format(entryDate),
-                            'payment_mode': paymentMode,
-                            'days_worked':
-                                double.tryParse(daysCtrl.text.trim()),
-                            'daily_wage_amount':
-                                double.tryParse(wageCtrl.text.trim()),
-                            'quantity_harvested_kg':
-                                double.tryParse(qtyCtrl.text.trim()),
-                            'rate_applied_per_kg':
-                                double.tryParse(rateCtrl.text.trim()),
-                            'activity_type': activityCtrl.text.trim(),
-                          }),
-                        );
-                        if (ctx.mounted) Navigator.pop(ctx);
-                        if (res.statusCode == 201) {
-                          _showSnack(loc.agriSaved);
-                        } else {
-                          final data = jsonDecode(res.body);
-                          _showSnack(data['error'] ?? loc.agriFailedSave,
-                              isError: true);
-                        }
-                      },
-                child: submitting
-                    ? const SizedBox(
-                        height: 16,
-                        width: 16,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
-                    : Text(loc.save,
-                        style: const TextStyle(color: Colors.white)),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
   Widget _unitDropdown(
       AppLocalizations loc, String value, void Function(String) onChanged) {
     return DropdownButton<String>(
@@ -831,137 +654,62 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
     );
   }
 
-  void _showLogHarvestDialog() {
-    final loc = AppLocalizations.of(context)!;
-    DateTime harvestDate = DateTime.now();
-    final qtyCtrl = TextEditingController();
-    final unitCtrl = TextEditingController(text: 'kg');
-    final gradeCtrl = TextEditingController();
-    final remarksCtrl = TextEditingController();
-    bool submitting = false;
+  Future<void> _changeState(String action, String done) async {
+    try {
+      await AgriApi.post('/agri/cycles/${widget.cycleType}/${widget.cycleId}/$action', {});
+      _showSnack(done);
+      _load();
+    } catch (e) {
+      _showSnack('$e', isError: true);
+    }
+  }
 
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(loc.agriLogHarvest,
-              style: const TextStyle(fontWeight: FontWeight.w700)),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              InkWell(
-                onTap: () async {
-                  final picked = await showDatePicker(
-                      context: ctx,
-                      initialDate: harvestDate,
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime.now());
-                  if (picked != null)
-                    setDialogState(() => harvestDate = picked);
-                },
-                child: InputDecorator(
-                  decoration: InputDecoration(
-                      labelText: loc.agriHarvestDateLabel,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10))),
-                  child: Text(DateFormat('dd MMM yyyy').format(harvestDate)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(children: [
-                Expanded(
-                  child: TextField(
-                    controller: qtyCtrl,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    decoration: InputDecoration(
-                        labelText: loc.agriTotalYieldLabel,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10))),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextField(
-                    controller: unitCtrl,
-                    decoration: InputDecoration(
-                        labelText: loc.agriUnitLabel,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10))),
-                  ),
-                ),
-              ]),
-              const SizedBox(height: 12),
-              TextField(
-                controller: gradeCtrl,
-                decoration: InputDecoration(
-                    labelText: loc.agriQualityGradeLabel,
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10))),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: remarksCtrl,
-                maxLines: 2,
-                decoration: InputDecoration(
-                    labelText: loc.agriNotesLabel,
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10))),
-              ),
-            ]),
-          ),
+  Future<void> _menu(String v) async {
+    final s = sum;
+    if (s == null) return;
+    final name = '${s['crop_name'] ?? 'This crop'} on ${s['farm_name'] ?? ''}';
+    if (v == 'intercrop') {
+      _showAddIntercropDialog();
+    } else if (v == 'finish') {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: Text('Mark $name as finished?'),
+          content: const Text('Its records stay. It moves to the Finished list and its cost per quintal is worked out.'),
           actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-              onPressed: submitting
-                  ? null
-                  : () async {
-                      if (qtyCtrl.text.trim().isEmpty) return;
-                      setDialogState(() => submitting = true);
-                      final h = await _headers;
-                      final res = await http.post(
-                        Uri.parse('$baseUrl/agri/harvest-records'),
-                        headers: {...h, 'Content-Type': 'application/json'},
-                        body: jsonEncode({
-                          'cycle_type': widget.cycleType,
-                          'cycle_id': widget.cycleId,
-                          'harvest_date':
-                              DateFormat('yyyy-MM-dd').format(harvestDate),
-                          'total_yield_qty':
-                              double.tryParse(qtyCtrl.text.trim()),
-                          'unit': unitCtrl.text.trim(),
-                          'quality_grade': gradeCtrl.text.trim().isEmpty
-                              ? null
-                              : gradeCtrl.text.trim(),
-                          'remarks': remarksCtrl.text.trim().isEmpty
-                              ? null
-                              : remarksCtrl.text.trim(),
-                        }),
-                      );
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      if (res.statusCode == 201) {
-                        _showSnack(loc.agriSaved);
-                      } else {
-                        final data = jsonDecode(res.body);
-                        _showSnack(data['error'] ?? loc.agriFailedSave,
-                            isError: true);
-                      }
-                    },
-              child: submitting
-                  ? const SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : Text(loc.save, style: const TextStyle(color: Colors.white)),
-            ),
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Not now')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), style: FilledButton.styleFrom(backgroundColor: cGreen), child: const Text('Mark finished')),
           ],
         ),
-      ),
-    );
+      );
+      if (ok == true) _changeState('finish', '$name marked finished.');
+    } else if (v == 'cancel') {
+      final ok = await showCancelCycleSheet(context, s);
+      if (ok == true) {
+        _showSnack('$name cancelled. Its records are kept.');
+        _load();
+      }
+    } else if (v == 'restore') {
+      _changeState('restore', '$name is running again.');
+    }
+  }
+
+  Future<void> _labour([Map? row]) async {
+    if (sum == null) return;
+    final ok = await showLabourSheet(context, cycle: sum!, entry: row, canDelete: isAdmin);
+    if (ok == true) {
+      setState(() => tab = 'labour');
+      _load();
+    }
+  }
+
+  Future<void> _harvest([Map? row]) async {
+    if (sum == null) return;
+    final ok = await showHarvestSheet(context, cycle: sum!, record: row, canDelete: isAdmin);
+    if (ok == true) {
+      setState(() => tab = 'harvest');
+      _load();
+    }
   }
 
   @override
@@ -976,9 +724,13 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
         .toList();
     final done = items.where((i) => i['status'] == 'done').toList();
     final skipped = items.where((i) => i['status'] == 'skipped').toList();
+    final s = sum;
+    final st = '${s?['state'] ?? 'running'}';
+    final labourRows = (labour?['rows'] as List?) ?? [];
+    final jobCount = items.where((i) => i['source_type'] != 'stage').length;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F7F2),
+      backgroundColor: cBg,
       appBar: AppBar(
         backgroundColor: idaDark,
         foregroundColor: Colors.white,
@@ -987,42 +739,20 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
             overflow: TextOverflow.ellipsis,
             maxLines: 1),
-      ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: idaGreen,
-        onPressed: () => showModalBottomSheet(
-          context: context,
-          shape: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-          builder: (_) => SafeArea(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              ListTile(
-                  leading: const Icon(Icons.people_outline, color: idaGreen),
-                  title: Text(loc.agriLogLabor),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _showLogLaborDialog();
-                  }),
-              ListTile(
-                  leading:
-                      const Icon(Icons.agriculture_outlined, color: idaGreen),
-                  title: Text(loc.agriLogHarvest),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _showLogHarvestDialog();
-                  }),
-              if (widget.cycleType == 'seasonal')
-                ListTile(
-                    leading: const Icon(Icons.grass_outlined, color: idaGreen),
-                    title: Text(loc.agriAddIntercropButton),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _showAddIntercropDialog();
-                    }),
-            ]),
-          ),
-        ),
-        child: const Icon(Icons.add, color: Colors.white),
+        actions: [
+          if (s != null)
+            PopupMenuButton<String>(
+              onSelected: _menu,
+              itemBuilder: (_) => [
+                if (widget.cycleType == 'seasonal' && st == 'running')
+                  PopupMenuItem(value: 'intercrop', child: Text(loc.agriAddIntercropButton)),
+                if (st == 'running') const PopupMenuItem(value: 'finish', child: Text('Mark finished')),
+                if (st == 'running' && isAdmin)
+                  const PopupMenuItem(value: 'cancel', child: Text('Cancel this cycle', style: TextStyle(color: cRed))),
+                if (st != 'running' && isAdmin) const PopupMenuItem(value: 'restore', child: Text('Make running again')),
+              ],
+            ),
+        ],
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator(color: idaGreen))
@@ -1032,61 +762,276 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
               child: Responsive.constrainedContent(
                   context,
                   ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
                     children: [
-                      if (overdue.isNotEmpty)
-                        _section(
-                            loc.agriOverdueSection,
-                            Colors.red,
-                            overdue
-                                .map((i) => _itemCard(i,
-                                    actionable: true, color: Colors.red))
-                                .toList()),
-                      if (upcoming.isNotEmpty)
-                        _section(
-                            loc.agriPendingSection,
-                            idaGreen,
-                            upcoming
-                                .map((i) => _itemCard(i,
-                                    actionable: true, color: idaGreen))
-                                .toList()),
-                      if (notScheduled.isNotEmpty)
-                        _section(
-                            loc.agriNotScheduledSection,
-                            Colors.grey,
-                            notScheduled
-                                .map((i) => _itemCard(i,
-                                    actionable: true,
-                                    color: Colors.grey,
-                                    notScheduled: true))
-                                .toList()),
-                      if (done.isNotEmpty)
-                        _section(
-                            loc.agriDoneSection,
-                            idaGreen,
-                            done
-                                .map((i) => _itemCard(i,
-                                    actionable: false, color: idaGreen))
-                                .toList()),
-                      if (skipped.isNotEmpty)
-                        _section(
-                            loc.agriSkippedSection,
-                            Colors.grey,
-                            skipped
-                                .map((i) => _itemCard(i,
-                                    actionable: false, color: Colors.grey))
-                                .toList()),
-                      if (items.isEmpty)
-                        Padding(
-                            padding: const EdgeInsets.all(40),
-                            child: Center(
-                                child: Text('No schedule items',
-                                    style: TextStyle(
-                                        color: Colors.grey.shade500)))),
+                      if (s != null && st != 'running')
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: st == 'cancelled' ? const Color(0xFFFDF1EF) : const Color(0xFFF6F8F3),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: st == 'cancelled' ? const Color(0xFFF0C4BE) : cBorder),
+                          ),
+                          child: Text.rich(TextSpan(children: [
+                            TextSpan(text: '${stateLabel[st]}. ', style: const TextStyle(fontWeight: FontWeight.w800)),
+                            if (st == 'cancelled') TextSpan(text: 'Reason: ${s['cancel_reason'] ?? '—'}. '),
+                            TextSpan(text: 'Its records are kept.${isAdmin ? ' It can be made running again from the ⋮ menu.' : ''}'),
+                          ]), style: const TextStyle(fontSize: 13.5)),
+                        ),
+                      if (s != null) ...[
+                        _tiles(s),
+                        const SizedBox(height: 12),
+                      ],
+                      SegmentedButton<String>(
+                        segments: [
+                          ButtonSegment(value: 'jobs', label: Text('Jobs $jobCount', style: const TextStyle(fontSize: 13))),
+                          ButtonSegment(value: 'labour', label: Text('Labour ${labourRows.length}', style: const TextStyle(fontSize: 13))),
+                          ButtonSegment(value: 'harvest', label: Text('Harvest ${harvest.length}', style: const TextStyle(fontSize: 13))),
+                        ],
+                        selected: {tab},
+                        showSelectedIcon: false,
+                        onSelectionChanged: (v) => setState(() => tab = v.first),
+                      ),
+                      if (s != null && st != 'cancelled') ...[
+                        const SizedBox(height: 10),
+                        Row(children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _harvest(),
+                              icon: const Icon(Icons.shopping_basket_outlined, size: 18),
+                              label: const Text('Record harvest'),
+                              style: OutlinedButton.styleFrom(foregroundColor: cDark, minimumSize: const Size.fromHeight(44)),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _labour(),
+                              icon: const Icon(Icons.people_outline, size: 18),
+                              label: const Text('Record labour'),
+                              style: OutlinedButton.styleFrom(foregroundColor: cDark, minimumSize: const Size.fromHeight(44)),
+                            ),
+                          ),
+                        ]),
+                      ],
+                      const SizedBox(height: 14),
+                      if (tab == 'labour') _labourTab(labourRows),
+                      if (tab == 'harvest') _harvestTab(),
+                      if (tab == 'jobs') ...[
+                        if (overdue.isNotEmpty)
+                          _section(
+                              loc.agriOverdueSection,
+                              Colors.red,
+                              overdue
+                                  .map((i) => _itemCard(i,
+                                      actionable: st == 'running', color: Colors.red))
+                                  .toList()),
+                        if (upcoming.isNotEmpty)
+                          _section(
+                              loc.agriPendingSection,
+                              idaGreen,
+                              upcoming
+                                  .map((i) => _itemCard(i,
+                                      actionable: st == 'running', color: idaGreen))
+                                  .toList()),
+                        if (notScheduled.isNotEmpty)
+                          _section(
+                              loc.agriNotScheduledSection,
+                              Colors.grey,
+                              notScheduled
+                                  .map((i) => _itemCard(i,
+                                      actionable: st == 'running',
+                                      color: Colors.grey,
+                                      notScheduled: true))
+                                  .toList()),
+                        if (done.isNotEmpty)
+                          _section(
+                              loc.agriDoneSection,
+                              idaGreen,
+                              done
+                                  .map((i) => _itemCard(i,
+                                      actionable: false, color: idaGreen))
+                                  .toList()),
+                        if (skipped.isNotEmpty)
+                          _section(
+                              loc.agriSkippedSection,
+                              Colors.grey,
+                              skipped
+                                  .map((i) => _itemCard(i,
+                                      actionable: false, color: Colors.grey))
+                                  .toList()),
+                        if (items.isEmpty)
+                          Padding(
+                              padding: const EdgeInsets.all(40),
+                              child: Center(
+                                  child: Text('No schedule items',
+                                      style: TextStyle(
+                                          color: Colors.grey.shade500)))),
+                      ],
                     ],
                   )),
             ),
     );
+  }
+
+  Widget _tiles(Map s) {
+    final jobs = Map<String, dynamic>.from(s['jobs'] ?? {});
+    final money = Map<String, dynamic>.from(s['money'] ?? {});
+    final hkg = double.tryParse('${s['harvest_kg'] ?? 0}') ?? 0;
+    final day = s['day'];
+    Widget tile(String label, String value, String sub, {bool bad = false}) => Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: bad ? const Color(0xFFF1C4BE) : cBorder),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label, style: const TextStyle(fontSize: 12, color: cMuted, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 3),
+            Text(value, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: bad ? cRed : cDark), maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(sub, style: const TextStyle(fontSize: 11.5, color: cMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ]),
+        );
+    final nextStage = s['next_stage'] is Map ? s['next_stage'] : null;
+    final tiles = [
+      tile('Stage', '${(s['stage'] is Map ? s['stage']['name'] : null) ?? '—'}',
+          day != null ? 'Day $day${toInt(s['days_to_harvest']) > 0 ? ' of ${s['days_to_harvest']}' : ''}' : ''),
+      tile('Jobs', '${toInt(jobs['done'])} done',
+          toInt(jobs['overdue']) > 0 ? '${jobs['overdue']} overdue · ${toInt(jobs['coming'])} coming' : '${toInt(jobs['coming'])} coming',
+          bad: toInt(jobs['overdue']) > 0),
+      tile('Inputs', inr(money['inputs']), 'sprays, fertiliser'),
+      tile('Labour', inr(money['labour']), labour != null ? '${toInt(labour!['worker_days'])} worker-days from attendance' : ''),
+      tile('Harvest', hkg > 0 ? qtlText(hkg) : 'None yet',
+          s['cost_per_qtl'] != null
+              ? '${inr(s['cost_per_qtl'])} a quintal'
+              : nextStage != null ? '${nextStage['name']} ~${dayMonth(nextStage['date'])}' : ''),
+      tile('Spent', inr(money['total']),
+          money['per_acre'] != null ? '${inr(money['per_acre'])} an acre' : money['per_tree'] != null ? '${inr(money['per_tree'])} a tree' : ''),
+    ];
+    return LayoutBuilder(builder: (context, box) {
+      final cols = box.maxWidth >= 700 ? 3 : 2;
+      final w = (box.maxWidth - (cols - 1) * 10) / cols;
+      return Wrap(spacing: 10, runSpacing: 10, children: [for (final x in tiles) SizedBox(width: w, child: x)]);
+    });
+  }
+
+  Widget _card(List<Widget> children) => Container(
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: cBorder)),
+        clipBehavior: Clip.antiAlias,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
+      );
+
+  Widget _empty(String text) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: cBorder)),
+        child: Text(text, textAlign: TextAlign.center, style: const TextStyle(color: cMuted, fontSize: 13.5)),
+      );
+
+  static const _paid = {'piece_rate': 'By kg', 'contract': 'Fixed amount', 'daily': 'By the day'};
+
+  Widget _labourTab(List rows) {
+    if (labour == null) return _empty('Could not load labour. Pull down to try again.');
+    if (rows.isEmpty) {
+      return _empty('No labour yet. Daily workers show here once Farm attendance gives them work on this crop; record picking or contract work with Record labour.');
+    }
+    return _card([
+      for (final r in rows)
+        InkWell(
+          onTap: r['source'] == 'entry' && isAdmin ? () => _labour(Map.from(r)) : null,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFEEF1EA)))),
+            child: Row(children: [
+              SizedBox(width: 52, child: Text(dayMonth(r['date']), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(
+                    '${r['work']} · ${r['source'] == 'attendance' ? '${r['workers']} worker${toInt(r['workers']) == 1 ? '' : 's'}' : '${r['who'] ?? ''}${r['workers_count'] != null ? ' (${r['workers_count']} people)' : ''}'}',
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    r['source'] == 'attendance'
+                        ? 'Farm attendance${r['allocation_status'] != null && r['allocation_status'] != 'approved' ? ' · waiting for approval' : ''}'
+                        : r['payment_mode'] == 'piece_rate'
+                            ? '${_paid['piece_rate']} · ${kgText(r['quantity_harvested_kg'])} × ${inr(r['rate_applied_per_kg'])}'
+                            : r['payment_mode'] == 'daily'
+                                ? '${_paid['daily']} · ${r['days_worked']} × ${inr(r['daily_wage_amount'])}'
+                                : '${_paid['contract']}',
+                    style: const TextStyle(fontSize: 12, color: cMuted),
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                  ),
+                ]),
+              ),
+              const SizedBox(width: 8),
+              Text(inr(r['cost']), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
+            ]),
+          ),
+        ),
+      Container(
+        color: const Color(0xFFFAFBF8),
+        padding: const EdgeInsets.all(14),
+        child: Row(children: [
+          Expanded(
+            child: Text.rich(TextSpan(children: [
+              const TextSpan(text: 'Total', style: TextStyle(fontWeight: FontWeight.w800)),
+              if (toInt(labour!['from_attendance']) > 0)
+                TextSpan(text: ' · ${inr(labour!['from_attendance'])} from Farm attendance', style: const TextStyle(color: cMuted, fontSize: 12.5)),
+            ])),
+          ),
+          Text(inr(labour!['total']), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+        ]),
+      ),
+      if (isAdmin)
+        const Padding(
+          padding: EdgeInsets.fromLTRB(14, 8, 14, 10),
+          child: Text('Tap a piece-rate or contract entry to correct or delete it. Attendance work is changed in Farm attendance.', style: TextStyle(fontSize: 12, color: cMuted)),
+        ),
+    ]);
+  }
+
+  Widget _harvestTab() {
+    if (harvest.isEmpty) return _empty('No harvest recorded yet.');
+    final total = harvest.fold<double>(0, (a, r) => a + (double.tryParse('${r['quantity_kg'] ?? 0}') ?? 0));
+    return _card([
+      for (final r in harvest)
+        InkWell(
+          onTap: isAdmin ? () => _harvest(Map.from(r)) : null,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFEEF1EA)))),
+            child: Row(children: [
+              SizedBox(width: 52, child: Text(dayMonth(r['harvest_date']), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13))),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(kgText(r['quantity_kg']), style: const TextStyle(fontSize: 13.5)),
+                  Text(
+                    [if ('${r['quality_grade'] ?? ''}'.isNotEmpty) 'Grade ${r['quality_grade']}', if ('${r['remarks'] ?? ''}'.isNotEmpty) '${r['remarks']}'].join(' · '),
+                    style: const TextStyle(fontSize: 12, color: cMuted), maxLines: 1, overflow: TextOverflow.ellipsis,
+                  ),
+                ]),
+              ),
+              Text(qtlText(r['quantity_kg']), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+            ]),
+          ),
+        ),
+      Container(
+        color: const Color(0xFFFAFBF8),
+        padding: const EdgeInsets.all(14),
+        child: Row(children: [
+          const Expanded(child: Text('Total', style: TextStyle(fontWeight: FontWeight.w800))),
+          Text('${kgText(total)}  ·  ', style: const TextStyle(color: cMuted)),
+          Text(qtlText(total), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+        ]),
+      ),
+      if (isAdmin)
+        const Padding(
+          padding: EdgeInsets.fromLTRB(14, 8, 14, 10),
+          child: Text('Tap a record to correct or delete it.', style: TextStyle(fontSize: 12, color: cMuted)),
+        ),
+    ]);
   }
 
   Widget _section(String title, Color color, List<Widget> children) {

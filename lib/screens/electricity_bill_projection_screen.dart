@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
 
 import '../config/app_config.dart';
+import 'reports/reports_common.dart' show ReportApi;
 class ElectricityBillProjectionScreen extends StatefulWidget {
   const ElectricityBillProjectionScreen({super.key});
   @override
@@ -81,6 +82,25 @@ class _ElectricityBillProjectionScreenState
         title: const Text('Electricity Bill Projection',
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
         actions: [
+          // Sep 2026 (group E): download the projection as Excel or PDF.
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.download_outlined),
+            tooltip: 'Download',
+            onSelected: (kind) async {
+              final month = DateTime.now().toIso8601String().substring(0, 7);
+              try {
+                await ReportApi.download(context, '/electricity-bill/projection?format=$kind', 'electricity-bill-projection_$month.$kind');
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e'.replaceFirst('Exception: ', ''))));
+                }
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'xlsx', child: Text('Excel')),
+              PopupMenuItem(value: 'pdf', child: Text('PDF')),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: 'Tariff Settings',

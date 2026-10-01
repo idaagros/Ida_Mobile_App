@@ -141,7 +141,8 @@ class _DailyReportsScreenState extends State<DailyReportsScreen> {
     return (_previewCounts!['total'] as num?)?.toInt() ?? 0;
   }
 
-  Future<void> _generateReport() async {
+  // Sep 2026 (group E): kind 'xlsx' downloads the same readings as Excel.
+  Future<void> _generateReport([String kind = 'pdf']) async {
     if (_selectedModules.isEmpty) {
       setState(
           () => _error = 'Select at least one module to include in the report');
@@ -155,12 +156,12 @@ class _DailyReportsScreenState extends State<DailyReportsScreen> {
       final h = await _headers;
       final res = await http.get(
         Uri.parse(
-            '$baseUrl/daily-reports/generate?modules=$_modulesParam&from=$_fromStr&to=$_toStr'),
+            '$baseUrl/daily-reports/generate?modules=$_modulesParam&from=$_fromStr&to=$_toStr${kind == 'xlsx' ? '&format=xlsx' : ''}'),
         headers: h,
       );
 
       if (res.statusCode == 200) {
-        final filename = 'daily-reading-report_${_fromStr}_to_$_toStr.pdf';
+        final filename = 'daily-reading-report_${_fromStr}_to_$_toStr.$kind';
         final result = await savePdfBytes(res.bodyBytes, filename);
 
         if (!mounted) return;
@@ -452,7 +453,24 @@ class _DailyReportsScreenState extends State<DailyReportsScreen> {
                   ),
                   onPressed: (_selectedModules.isEmpty || _generating)
                       ? null
-                      : _generateReport,
+                      : () => _generateReport('pdf'),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.grid_on, color: idaGreen),
+                  label: const Text('Excel (no photos)',
+                      style: TextStyle(color: idaGreen, fontWeight: FontWeight.w700)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: idaGreen),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  onPressed: (_selectedModules.isEmpty || _generating)
+                      ? null
+                      : () => _generateReport('xlsx'),
                 ),
               ),
             ]),

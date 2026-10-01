@@ -19,6 +19,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'crop_calendar_screen.dart';
+import 'agri/cycle_common.dart' show inr, toInt, qtlText;
 import '../services/pdf_download_helper.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
@@ -595,8 +596,9 @@ class _CropReportsScreenState extends State<CropReportsScreen>
                     DataColumn(label: Text(loc.agriInputCostCol)),
                     DataColumn(label: Text(loc.agriLaborCostCol)),
                     DataColumn(label: Text(loc.agriTotalCostCol)),
-                    DataColumn(label: Text(loc.agriYieldCol)),
-                    DataColumn(label: Text(loc.agriCostPerKgCol)),
+                    const DataColumn(label: Text('Harvest (qtl)'), numeric: true),
+                    const DataColumn(label: Text('Cost / qtl'), numeric: true),
+                    const DataColumn(label: Text('Cost / acre'), numeric: true),
                   ],
                   rows: [
                     ...rows.map((r) => DataRow(cells: [
@@ -604,14 +606,19 @@ class _CropReportsScreenState extends State<CropReportsScreen>
                               dimLabels.length,
                               (i) => DataCell(Text(
                                   tl(context, '${r['level${i + 1}'] ?? ''}')))),
-                          DataCell(Text('₹${r['input_cost']}')),
-                          DataCell(Text('₹${r['labor_cost']}')),
-                          DataCell(Text('₹${r['total_cost']}',
+                          DataCell(Text(inr(r['input_cost']))),
+                          DataCell(Text(inr(r['labor_cost']))),
+                          DataCell(Text(inr(r['total_cost']),
                               style: const TextStyle(
                                   fontWeight: FontWeight.w700))),
-                          DataCell(Text('${r['total_yield']}')),
-                          DataCell(Text(r['cost_per_kg'] != null
-                              ? '₹${r['cost_per_kg']}'
+                          DataCell(Text(toInt(r['total_yield_kg'] ?? r['total_yield']) > 0
+                              ? qtlText(r['total_yield_kg'] ?? r['total_yield'])
+                              : '—')),
+                          DataCell(Text(r['cost_per_qtl'] != null
+                              ? inr(r['cost_per_qtl'])
+                              : '—')),
+                          DataCell(Text(r['per_acre'] != null
+                              ? inr(r['per_acre'])
                               : '—')),
                         ])),
                     DataRow(
@@ -623,23 +630,31 @@ class _CropReportsScreenState extends State<CropReportsScreen>
                         ...List.generate(
                             dimLabels.length > 1 ? dimLabels.length - 1 : 0,
                             (_) => const DataCell(Text(''))),
-                        DataCell(Text('₹${costReport!['grand_input_cost']}',
+                        DataCell(Text(inr(costReport!['grand_input_cost']),
                             style:
                                 const TextStyle(fontWeight: FontWeight.w700))),
-                        DataCell(Text('₹${costReport!['grand_labor_cost']}',
+                        DataCell(Text(inr(costReport!['grand_labor_cost']),
                             style:
                                 const TextStyle(fontWeight: FontWeight.w700))),
-                        DataCell(Text('₹${costReport!['grand_total_cost']}',
+                        DataCell(Text(inr(costReport!['grand_total_cost']),
                             style:
                                 const TextStyle(fontWeight: FontWeight.w700))),
-                        DataCell(Text('${costReport!['grand_total_yield']}',
+                        DataCell(Text(
+                            qtlText(costReport!['grand_total_yield']),
                             style:
                                 const TextStyle(fontWeight: FontWeight.w700))),
+                        const DataCell(Text('')),
                         const DataCell(Text('')),
                       ],
                     ),
                   ],
                 ),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                    'Harvest is weighed in kg and shown in quintals (100 kg). Cost per quintal shows for finished crops only. Labour includes Farm attendance work linked to the crop.',
+                    style: TextStyle(fontSize: 11.5, color: Color(0xFF5F6A58))),
               ),
             ],
           ],

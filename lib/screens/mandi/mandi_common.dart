@@ -126,9 +126,8 @@ String dayMonth(dynamic s) {
   return d == null ? '' : DateFormat('d MMM').format(d);
 }
 
-String marketName(Map m) => (m['display_name'] ?? '').toString().isNotEmpty
-    ? m['display_name'].toString()
-    : (m['market'] ?? '').toString();
+String marketName(Map m) =>
+    (m['display_name'] ?? '').toString().isNotEmpty ? m['display_name'].toString() : (m['market'] ?? '').toString();
 
 // ── Widgets ──────────────────────────────────────────────────────────
 class ChangeChip extends StatelessWidget {
@@ -141,14 +140,11 @@ class ChangeChip extends StatelessWidget {
     final v = toD(value);
     if (v == null) return const SizedBox.shrink();
     final up = v > 0, flat = v == 0;
-    final bg =
-        flat ? Colors.grey.shade100 : (up ? mandiTint : Colors.red.shade50);
-    final fg =
-        flat ? Colors.grey.shade600 : (up ? mandiGreen : Colors.red.shade700);
+    final bg = flat ? Colors.grey.shade100 : (up ? mandiTint : Colors.red.shade50);
+    final fg = flat ? Colors.grey.shade600 : (up ? mandiGreen : Colors.red.shade700);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration:
-          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
       child: Text(
         '${flat ? '•' : (up ? '▲' : '▼')} ${v.abs().toStringAsFixed(1)}%$label',
         style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: fg),
@@ -162,12 +158,7 @@ class MandiCard extends StatelessWidget {
   final EdgeInsets padding;
   final Color? color;
   final Color? borderColor;
-  const MandiCard(
-      {super.key,
-      required this.child,
-      this.padding = const EdgeInsets.all(14),
-      this.color,
-      this.borderColor});
+  const MandiCard({super.key, required this.child, this.padding = const EdgeInsets.all(14), this.color, this.borderColor});
 
   @override
   Widget build(BuildContext context) {
@@ -192,11 +183,7 @@ class SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
         child: Text(text.toUpperCase(),
-            style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: Colors.grey.shade500,
-                letterSpacing: 0.8)),
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.grey.shade500, letterSpacing: 0.8)),
       );
 }
 
@@ -212,7 +199,50 @@ class ErrorBox extends StatelessWidget {
             color: Colors.red.shade50,
             border: Border.all(color: Colors.red.shade200),
             borderRadius: BorderRadius.circular(8)),
-        child: Text(message,
-            style: TextStyle(fontSize: 13, color: Colors.red.shade800)),
+        child: Text(message, style: TextStyle(fontSize: 13, color: Colors.red.shade800)),
       );
+}
+
+// ── Sep 2026 redesign (group D) ──────────────────────────────────────
+String qtlText(dynamic q) {
+  final d = toD(q) ?? 0;
+  final r = (d * 100).round() / 100;
+  return '${r == r.roundToDouble() ? r.round().toString() : r.toString()} qtl';
+}
+
+// "₹738 below" / "₹120 above" — price vs the MSP in force, or null.
+({String text, bool below})? mspGap(dynamic price, Map? msp) {
+  final p = toD(price);
+  final m = msp == null ? null : toD(msp['msp_price']);
+  if (p == null || m == null) return null;
+  final g = (p - m).round();
+  return (text: '${rupees(g.abs())} ${g < 0 ? 'below' : 'above'}', below: g < 0);
+}
+
+class SmallTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final Widget? sub;
+  final bool dark;
+  final bool bad;
+  const SmallTile({super.key, required this.label, required this.value, this.sub, this.dark = false, this.bad = false});
+  @override
+  Widget build(BuildContext context) {
+    final fg = dark ? Colors.white : mandiDark;
+    final muted = dark ? const Color(0xFFC9D7BD) : Colors.grey.shade600;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: dark ? const Color(0xFF1E3313) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: dark ? const Color(0xFF1E3313) : (bad ? const Color(0xFFF1C4BE) : Colors.grey.shade200)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: TextStyle(fontSize: 12, color: muted), maxLines: 1, overflow: TextOverflow.ellipsis),
+        const SizedBox(height: 2),
+        Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: fg), maxLines: 1, overflow: TextOverflow.ellipsis),
+        if (sub != null) DefaultTextStyle(style: TextStyle(fontSize: 11.5, color: muted), maxLines: 2, overflow: TextOverflow.ellipsis, child: sub!),
+      ]),
+    );
+  }
 }

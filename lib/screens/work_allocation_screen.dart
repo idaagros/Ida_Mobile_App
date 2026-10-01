@@ -11,6 +11,10 @@
 // before saving. Each worker's rate is individually editable, with a
 // "Break Attendance" action for anyone who left early (illness, etc.)
 // — enter a reduced amount + a reason, no separate mechanism needed.
+//
+// Sep 2026 (group C): on saving, a farm with more than one crop that
+// day asks "For which crop?" once per farm + work (or General farm
+// work); a single-crop farm is linked to its crop by the server.
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -34,6 +38,7 @@ class WorkAllocationScreen extends StatefulWidget {
 class _TaskGroup {
   int? farmId;
   int? workTypeId;
+  String? crop; // 'seasonal:12', 'orchard:3', 'none:x' (general work) or null
   final Map<int, TextEditingController> rateCtrls = {};
   final Map<int, TextEditingController> noteCtrls = {};
   final Set<int> workerIds = {};
@@ -187,6 +192,7 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
               'farmId': g.farmId,
               'workTypeId': g.workTypeId,
               'isTask1': g.isTask1,
+              'crop': g.crop,
               'workers': g.workerIds
                   .map((id) => {
                         'workerId': id,
@@ -210,7 +216,8 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
         final g = _TaskGroup()
           ..farmId = item['farmId']
           ..workTypeId = item['workTypeId']
-          ..isTask1 = item['isTask1'] ?? false;
+          ..isTask1 = item['isTask1'] ?? false
+          ..crop = item['crop'];
         for (final w in (item['workers'] as List)) {
           final id = w['workerId'] as int;
           g.workerIds.add(id);
@@ -343,6 +350,129 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
     );
   }
 
+  // ── Which crop was the work for? (Sep 2026, group C) ──────────────
+  // A farm with one crop on the ground that day needs no question: the
+  // server links the work to it. A farm with two or more asks once per
+  // farm + work, before saving, so labour cost lands on the right crop.
+  // "General farm work" = no crop (fencing, cleaning, …).
+  final Map<int, List> _farmCrops = {};
+
+  Future<List> _cropsOn(int farmId) async {
+    if (_farmCrops.containsKey(farmId)) return _farmCrops[farmId]!;
+    try {
+      final h = await _headers;
+      final res = await http.get(
+          Uri.parse('$baseUrl/agri/cycles/on-farm?farm_id=$farmId&date=$_dateStr'),
+          headers: h);
+      if (res.statusCode == 200) {
+        _farmCrops[farmId] = (jsonDecode(res.body)['cycles'] as List?) ?? [];
+      } else {
+        _farmCrops[farmId] = [];
+      }
+    } catch (_) {
+      return [];
+    }
+    return _farmCrops[farmId]!;
+  }
+
+  String _cropText(String? v, List crops) {
+    if (v == null) return '';
+    if (v == 'none:x') return 'General farm work';
+    for (final c in crops) {
+      if ('${c['cycle_type']}:${c['cycle_id']}' == v) return '${c['label'] ?? c['crop_name'] ?? ''}';
+    }
+    return '';
+  }
+
+  // Returns false when the person closes the question without answering.
+  Future<bool> _askCrops() async {
+    final pairs = <String, List<_TaskGroup>>{};
+    for (final g in groups) {
+      if (g.farmId == null) continue;
+      pairs.putIfAbsent('${g.farmId}|${g.workTypeId}', () => []).add(g);
+    }
+    final ask = <String, List>{};
+    for (final e in pairs.entries) {
+      final crops = await _cropsOn(e.value.first.farmId!);
+      if (crops.length > 1) {
+        ask[e.key] = crops;
+      } else {
+        for (final g in e.value) {
+          g.crop = null; // one crop (or none): the server fills it in
+        }
+      }
+    }
+    if (ask.isEmpty || !mounted) return true;
+    final pick = <String, String?>{
+      for (final k in ask.keys)
+        k: pairs[k]!.map((g) => g.crop).firstWhere((c) => c != null && (c == 'none:x' || ask[k]!.any((x) => '${x['cycle_type']}:${x['cycle_id']}' == c)), orElse: () => null),
+    };
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final missing = pick.values.any((v) => v == null);
+          return Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(ctx).viewInsets.bottom),
+            child: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                const Text('For which crop?', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: idaDark)),
+                const SizedBox(height: 4),
+                const Text('These farms have more than one crop. Say which crop the work was for, so its cost counts on that crop.',
+                    style: TextStyle(fontSize: 13, color: Color(0xFF5F6A58))),
+                const SizedBox(height: 12),
+                for (final k in ask.keys) ...[
+                  Builder(builder: (_) {
+                    final g = pairs[k]!.first;
+                    final farmName = farms.firstWhere((f) => f['id'] == g.farmId, orElse: () => {})['name'] ?? '—';
+                    final work = workTypes.firstWhere((w) => w['id'] == g.workTypeId, orElse: () => {})['name'];
+                    final people = pairs[k]!.expand((x) => x.workerIds).toSet().length;
+                    return Text(
+                        '${tl(context, farmName)}${work != null ? ' · ${tl(context, work)}' : ''} · $people worker${people == 1 ? '' : 's'}',
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14));
+                  }),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    value: pick[k],
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Crop', border: OutlineInputBorder(), isDense: true),
+                    items: [
+                      for (final c in ask[k]!)
+                        DropdownMenuItem(
+                            value: '${c['cycle_type']}:${c['cycle_id']}',
+                            child: Text('${c['label'] ?? c['crop_name'] ?? ''}', overflow: TextOverflow.ellipsis)),
+                      const DropdownMenuItem(value: 'none:x', child: Text('General farm work (no crop)')),
+                    ],
+                    onChanged: (v) => setSheet(() => pick[k] = v),
+                  ),
+                  const SizedBox(height: 14),
+                ],
+                ElevatedButton(
+                  onPressed: missing ? null : () => Navigator.pop(ctx, true),
+                  style: ElevatedButton.styleFrom(backgroundColor: idaGreen, padding: const EdgeInsets.symmetric(vertical: 14)),
+                  child: Text(missing ? 'Pick a crop for each' : 'Continue and save',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                ),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+    if (ok != true) return false;
+    setState(() {
+      for (final k in ask.keys) {
+        for (final g in pairs[k]!) {
+          g.crop = pick[k];
+        }
+      }
+    });
+    _saveDraft();
+    return true;
+  }
+
   Future<void> _saveAllocations() async {
     final loc = AppLocalizations.of(context)!;
     if (_unallocated.isNotEmpty) {
@@ -358,12 +488,19 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
       saving = true;
       error = null;
     });
+    if (!await _askCrops()) {
+      if (mounted) setState(() => saving = false);
+      return;
+    }
     try {
       final h = await _headers;
       final payload = groups
           .map((g) => {
                 'farm_id': g.farmId,
                 'work_type_id': g.workTypeId,
+                if (g.crop != null) 'cycle_type': g.crop!.split(':')[0],
+                if (g.crop != null && g.crop != 'none:x')
+                  'cycle_id': int.tryParse(g.crop!.split(':')[1]),
                 'workers': g.workerIds
                     .map((id) => {
                           'worker_id': id,
@@ -1333,7 +1470,8 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
         Row(children: [
           Expanded(
             child: Text(
-                '$farmName${workTypeName != null ? ' · $workTypeName' : ''}',
+                '$farmName${workTypeName != null ? ' · $workTypeName' : ''}'
+                '${g.crop != null && g.farmId != null && _cropText(g.crop, _farmCrops[g.farmId] ?? []).isNotEmpty ? ' · ${_cropText(g.crop, _farmCrops[g.farmId] ?? [])}' : ''}',
                 style: const TextStyle(
                     fontSize: 13.5,
                     fontWeight: FontWeight.w700,

@@ -17,6 +17,7 @@ import '../services/responsive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import 'attendance_report_screen.dart';
+import 'reports/report_builder_screen.dart';
 import 'work_allocation_screen.dart';
 import 'attendance_calendar_screen.dart';
 import 'face_attendance_capture_screen.dart';
@@ -686,7 +687,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             onPressed: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (_) => const AttendanceReportScreen())),
+                    builder: (_) => const ReportBuilderScreen(reportKey: 'attendance'))),
           ),
         ],
       ),

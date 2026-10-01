@@ -4,6 +4,12 @@
 // line), and "Best time to sell" — the seasonal pattern from the last
 // few years, worked out on the backend (utils/mandiAnalysis.js).
 // Web counterpart: src/pages/MandiCommodity.jsx.
+//
+// Sep 2026 (group D): the Today tab opens with average / best today /
+// MSP (above or below) / what your harvest is worth; markets with no
+// price in the last 7 days are grey and not counted for best. The MSP
+// line is the one in force today (MSPs start 1 October). Best time adds
+// what keeping your harvest till the usual high has meant.
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -25,6 +31,8 @@ class _MandiCommodityScreenState extends State<MandiCommodityScreen> {
   List<Map<String, dynamic>> varieties = [];
   String market = 'all';
   String variety = 'all';
+  // /markets summary: where (best, average), msp_now, harvest, usual_peak.
+  Map<String, dynamic>? info;
 
   @override
   void initState() {
@@ -45,7 +53,17 @@ class _MandiCommodityScreenState extends State<MandiCommodityScreen> {
     );
   }
 
+  Future<void> _loadInfo() async {
+    try {
+      final d = await MandiApi.get('/mandi/commodities/${widget.commodityId}/markets?variety=${_q(variety)}');
+      if (mounted) setState(() => info = Map<String, dynamic>.from(d));
+    } catch (_) {
+      // The tabs load their own data; this only adds the summary.
+    }
+  }
+
   Future<void> _loadFilters() async {
+    _loadInfo();
     try {
       final m = await MandiApi.get('/mandi/markets');
       final v = await MandiApi.get('/mandi/commodities/${widget.commodityId}/varieties');
@@ -82,7 +100,7 @@ class _MandiCommodityScreenState extends State<MandiCommodityScreen> {
             unselectedLabelColor: Colors.white60,
             indicatorColor: Color(0xFF88BA63),
             tabs: [
-              Tab(text: 'Markets'),
+              Tab(text: 'Today'),
               Tab(text: 'Trend'),
               Tab(text: 'Best time'),
             ],
@@ -92,9 +110,10 @@ class _MandiCommodityScreenState extends State<MandiCommodityScreen> {
           _filters(),
           Expanded(
             child: TabBarView(children: [
-              _MarketsTab(key: ValueKey('m$variety'), id: widget.commodityId, variety: variety),
+              _MarketsTab(key: ValueKey('m$variety'), id: widget.commodityId, variety: variety, onInfo: (d) => setState(() => info = d)),
               _TrendTab(key: ValueKey('t$filterKey'), id: widget.commodityId, market: market, variety: variety),
-              _SeasonalTab(key: ValueKey('s$filterKey'), id: widget.commodityId, market: market, variety: variety),
+              _SeasonalTab(key: ValueKey('s$filterKey'), id: widget.commodityId, market: market, variety: variety,
+                  harvest: info?['harvest'] is Map ? Map<String, dynamic>.from(info!['harvest']) : null),
             ]),
           ),
         ]),
@@ -151,7 +170,8 @@ String _q(String s) => Uri.encodeQueryComponent(s);
 class _MarketsTab extends StatefulWidget {
   final int id;
   final String variety;
-  const _MarketsTab({super.key, required this.id, required this.variety});
+  final void Function(Map<String, dynamic> info)? onInfo;
+  const _MarketsTab({super.key, required this.id, required this.variety, this.onInfo});
   @override
   State<_MarketsTab> createState() => _MarketsTabState();
 }
@@ -160,6 +180,7 @@ class _MarketsTabState extends State<_MarketsTab> with AutomaticKeepAliveClientM
   bool loading = true;
   String? error;
   List<Map<String, dynamic>> rows = [];
+  Map<String, dynamic> info = {};
 
   @override
   bool get wantKeepAlive => true;
@@ -177,7 +198,13 @@ class _MarketsTabState extends State<_MarketsTab> with AutomaticKeepAliveClientM
     });
     try {
       final d = await MandiApi.get('/mandi/commodities/${widget.id}/markets?variety=${_q(widget.variety)}');
-      setState(() => rows = List<Map<String, dynamic>>.from(d['markets'] ?? []));
+      final where = d['where'] is Map ? Map<String, dynamic>.from(d['where']) : <String, dynamic>{};
+      setState(() {
+        info = Map<String, dynamic>.from(d);
+        // New servers: markets of the last few months with fresh / best flags.
+        rows = List<Map<String, dynamic>>.from(where['markets'] ?? d['markets'] ?? []);
+      });
+      widget.onInfo?.call(Map<String, dynamic>.from(d));
     } catch (e) {
       setState(() => error = e.toString());
     } finally {
@@ -190,20 +217,64 @@ class _MarketsTabState extends State<_MarketsTab> with AutomaticKeepAliveClientM
     super.build(context);
     if (loading) return const Center(child: CircularProgressIndicator());
     final latest = rows.fold<String>('', (m, r) => (r['date'] ?? '').toString().compareTo(m) > 0 ? r['date'].toString() : m);
+    final where = info['where'] is Map ? Map<String, dynamic>.from(info['where']) : null;
+    final best = where?['best'] is Map ? Map<String, dynamic>.from(where!['best']) : null;
+    final msp = info['msp_now'] is Map ? info['msp_now'] as Map : null;
+    final gap = mspGap(where?['average'], msp);
+    final h = info['harvest'] is Map ? Map<String, dynamic>.from(info['harvest']) : null;
+    final hkg = toD(h?['kg']) ?? 0;
+    final avg = info['average'] is Map ? info['average'] as Map : null;
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(padding: const EdgeInsets.all(12), children: [
         if (error != null) ErrorBox(error!),
+        if (where != null) ...[
+          Row(children: [
+            Expanded(
+              child: SmallTile(
+                label: 'Average today',
+                value: rupees(where['average']),
+                sub: avg != null ? Wrap(spacing: 4, children: [ChangeChip(value: avg['change_1d_pct'], label: ' day')]) : null,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(child: SmallTile(label: 'Best today', value: rupees(best?['modal']), sub: Text(best != null ? '${marketName(best)} · ${dayMonth(best['date'])}' : 'No market this week'))),
+          ]),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(
+              child: SmallTile(
+                label: msp != null ? 'MSP ${msp['season_label']}' : 'MSP',
+                value: msp != null ? rupees(msp['msp_price']) : '—',
+                bad: gap != null && gap.below,
+                sub: Text(gap != null
+                    ? 'Today ${gap.text} MSP'
+                    : ((toD(info['msp_to_check']) ?? 0) > 0 ? 'Filled in — confirm in Setup' : 'No MSP for this crop'),
+                    style: TextStyle(fontWeight: gap != null ? FontWeight.w700 : FontWeight.w400, color: gap != null && gap.below ? const Color(0xFF9E2419) : null)),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: hkg > 0
+                  ? SmallTile(dark: true, label: 'Your ${qtlText(h!['qtl'])}', value: rupees(h?['value_best']), sub: Text(best != null ? 'at ${marketName(best)} today' : ''))
+                  : SmallTile(label: 'Your harvest', value: h != null ? 'None yet' : '—', sub: Text(h != null ? 'crop still running' : 'none running lately')),
+            ),
+          ]),
+          const SizedBox(height: 12),
+          const SectionLabel('Markets, highest first'),
+        ],
         if (rows.isEmpty && error == null)
           const MandiCard(child: Text('No prices in the last 4 months for any active market.')),
         ...rows.map((r) {
-          final old = (r['date'] ?? '').toString() != latest;
+          final old = r.containsKey('fresh') ? r['fresh'] != true : (r['date'] ?? '').toString() != latest;
           final muted = old ? Colors.grey.shade500 : mandiDark;
           return MandiCard(
+            color: r['best'] == true ? const Color(0xFFEEF5E8) : null,
+            borderColor: r['best'] == true ? const Color(0xFF9CC27D) : null,
             child: Row(children: [
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(marketName(r), style: TextStyle(fontWeight: FontWeight.w600, color: muted)),
+                  Text('${marketName(r)}${r['best'] == true ? '  · best today' : ''}', style: TextStyle(fontWeight: FontWeight.w600, color: muted)),
                   const SizedBox(height: 2),
                   Text(
                     '${shortDate(r['date'])}${r['min'] != null ? ' · ${rupees(r['min'])} – ${rupees(r['max'])}' : ''}',
@@ -220,7 +291,7 @@ class _MarketsTabState extends State<_MarketsTab> with AutomaticKeepAliveClientM
             ]),
           );
         }),
-        Text('Greyed markets haven\'t reported on the latest date. Prices in ₹ per quintal.',
+        Text('Grey = no price in the last 7 days; not counted for best today. Prices in ₹ per quintal.',
             style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
       ]),
     );
@@ -276,7 +347,10 @@ class _TrendTabState extends State<_TrendTab> with AutomaticKeepAliveClientMixin
     final summary = data?['summary'] as Map<String, dynamic>?;
     final range = data?['range'] as Map<String, dynamic>?;
     final mspList = List<Map<String, dynamic>>.from(data?['msp'] ?? []);
-    final msp = mspList.isEmpty ? null : mspList.last;
+    final now = DateTime.now();
+    final today = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    final inForce = mspList.where((m) => (m['effective_from'] ?? '').toString().compareTo(today) <= 0).toList();
+    final msp = inForce.isEmpty ? null : inForce.last;
 
     return ListView(padding: const EdgeInsets.all(12), children: [
       Wrap(spacing: 6, children: [
@@ -421,7 +495,8 @@ class _SeasonalTab extends StatefulWidget {
   final int id;
   final String market;
   final String variety;
-  const _SeasonalTab({super.key, required this.id, required this.market, required this.variety});
+  final Map<String, dynamic>? harvest;
+  const _SeasonalTab({super.key, required this.id, required this.market, required this.variety, this.harvest});
   @override
   State<_SeasonalTab> createState() => _SeasonalTabState();
 }
@@ -498,9 +573,27 @@ class _SeasonalTabState extends State<_SeasonalTab> with AutomaticKeepAliveClien
     final yearsUsed = List.from(d['years_used'] ?? []);
     final insights = List<String>.from((d['insights'] ?? []).map((e) => e.toString()));
     final msp = d['latest_msp'] as Map<String, dynamic>?;
+    final h = widget.harvest;
+    final move = toD(current['typical_move_to_peak_pct']);
+    final price = toD(current['latest_price']);
+    final qtl = toD(h?['qtl']) ?? 0;
+    final hold = (qtl > 0 && move != null && price != null) ? (qtl * price * move / 100).round() : null;
+    final moveText = move == null ? '' : '${move > 0 ? '+' : ''}${move.toStringAsFixed(move == move.roundToDouble() ? 0 : 1)}%';
 
     return [
       _windowCard('Usually highest', peak, true, 'Above average in ${peak['above_average_years']} of ${yearsUsed.length} years'),
+      if (hold != null)
+        MandiCard(
+          color: const Color(0xFF1E3313),
+          borderColor: const Color(0xFF1E3313),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('If you keep your ${qtlText(qtl)} till ${peak['label'].toString().split('–').first.trim()}',
+                style: const TextStyle(fontSize: 12.5, color: Color(0xFFC9D7BD))),
+            Text('about ${hold >= 0 ? '+' : '−'}${rupees(hold.abs())}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
+            Text('if this year follows the usual pattern ($moveText) — not a promise',
+                style: const TextStyle(fontSize: 12, color: Color(0xFFC9D7BD))),
+          ]),
+        ),
       _windowCard('Usually lowest', low, false, 'Below average in ${low['below_average_years']} of ${yearsUsed.length} years'),
       MandiCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

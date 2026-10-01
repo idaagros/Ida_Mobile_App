@@ -1,12 +1,17 @@
 // lib/screens/crop_cycles_screen.dart
 //
-// Entry point into the transaction side of Crop Planning: lists every
-// sowing plan (seasonal) and orchard cycle (perennial) across all
-// farms, newest first. Tap one to open its Crop Calendar. "+" creates
-// either type — POST for both auto-generates the schedule server-side
-// (see agriScheduleService.js), which is why creation here always
-// navigates straight into the calendar afterward rather than just
-// closing a dialog.
+// Crop cycles (Sep 2026, group C) — same as the website's Crop cycles:
+//  - tiles: crops running, jobs overdue, jobs in the next 7 days, spent
+//  - Running / Finished / Cancelled filter with counts, search
+//  - each crop shows where it is (farm, size, season), progress (stage,
+//    day N of days to harvest), the next job, money spent and harvest
+//  - admins see "Work not linked to a crop" — Farm attendance days on
+//    farms with more than one crop, to say which crop the work was for
+// Tap a crop to open its crop calendar. "+" adds a sowing plan or an
+// orchard cycle (POST makes the schedule server-side, then the calendar
+// opens).
+// API: GET /agri/cycles?state=all, GET /agri/cycles/unassigned-work,
+//      POST /agri/cycles/assign-work
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -14,6 +19,8 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'crop_calendar_screen.dart';
+import 'agri/cycle_common.dart';
+import 'agronomy/agronomy_common.dart' show AgriApi;
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
@@ -30,8 +37,15 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
   static const idaDark = Color(0xFF1E4012);
   static String get baseUrl => AppConfig.apiBaseUrl;
 
-  List sowingPlans = [];
-  List orchardCycles = [];
+  List cycles = [];
+  Map counts = {};
+  Map totals = {};
+  List unassigned = [];
+  String state = 'running';
+  String search = '';
+  bool isAdmin = false;
+  String? loadError;
+
   List farms = [];
   List seasonalVarieties = [];
   List orchardBlocks = [];
@@ -51,28 +65,43 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
   }
 
   Future<void> _loadAll() async {
-    setState(() => loading = true);
+    if (cycles.isEmpty) setState(() => loading = true);
+    final prefs = await SharedPreferences.getInstance();
+    isAdmin = prefs.getBool('is_admin') ?? (prefs.getString('role') == 'admin');
+    try {
+      final d = await AgriApi.get('/agri/cycles?state=all');
+      cycles = (d?['cycles'] as List?) ?? [];
+      counts = Map.from(d?['counts'] ?? {});
+      totals = Map.from(d?['totals'] ?? {});
+      loadError = null;
+    } catch (e) {
+      loadError = '$e';
+    }
+    if (isAdmin) {
+      try {
+        final u = await AgriApi.get('/agri/cycles/unassigned-work');
+        unassigned = (u?['items'] as List?) ?? [];
+      } catch (_) {
+        unassigned = [];
+      }
+    }
+    // For the "+" dialogs.
     try {
       final h = await _headers;
       final results = await Future.wait([
-        http.get(Uri.parse('$baseUrl/agri/sowing-plans'), headers: h),
-        http.get(Uri.parse('$baseUrl/agri/orchard-cycles'), headers: h),
         http.get(Uri.parse('$baseUrl/farms'), headers: h),
         http.get(Uri.parse('$baseUrl/agri/crop-varieties'), headers: h),
         http.get(Uri.parse('$baseUrl/agri/orchard-blocks'), headers: h),
       ]);
-      if (results[0].statusCode == 200)
-        sowingPlans = jsonDecode(results[0].body)['data'] ?? [];
-      if (results[1].statusCode == 200)
-        orchardCycles = jsonDecode(results[1].body)['data'] ?? [];
-      if (results[2].statusCode == 200) farms = jsonDecode(results[2].body);
-      if (results[3].statusCode == 200) {
-        final all = jsonDecode(results[3].body);
+      if (results[0].statusCode == 200) farms = jsonDecode(results[0].body);
+      if (results[1].statusCode == 200) {
+        final all = jsonDecode(results[1].body);
         seasonalVarieties =
             all.where((v) => v['crop_type'] == 'seasonal').toList();
       }
-      if (results[4].statusCode == 200)
-        orchardBlocks = jsonDecode(results[4].body)['data'] ?? [];
+      if (results[2].statusCode == 200) {
+        orchardBlocks = jsonDecode(results[2].body)['data'] ?? [];
+      }
     } catch (e) {
       debugPrint('Load error: $e');
     } finally {
@@ -558,21 +587,37 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
     );
   }
 
+
+  void _openCalendar(String type, dynamic id, String title) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) => CropCalendarScreen(cycleType: type, cycleId: toInt(id), title: title)),
+    ).then((_) => _loadAll());
+  }
+
+  Future<void> _showUnassigned() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (_) => _UnassignedSheet(items: List.from(unassigned)),
+    );
+    _loadAll();
+  }
+
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context)!;
-    final combined = [
-      ...sowingPlans
-          .map((p) => {...p, '_type': 'seasonal', '_date': p['sowing_date']}),
-      ...orchardCycles.map((c) => {
-            ...c,
-            '_type': 'orchard',
-            '_date': c['flowering_start_date'] ?? '${c['cycle_year']}-01-01'
-          }),
-    ]..sort((a, b) => (b['_date'] ?? '').compareTo(a['_date'] ?? ''));
+    final q = search.trim().toLowerCase();
+    final shown = cycles.where((c) {
+      if (c['state'] != state) return false;
+      if (q.isEmpty) return true;
+      return '${c['crop_name']} ${c['variety_name']} ${c['farm_name']} ${c['season'] ?? ''} ${c['bahar_name'] ?? ''}'.toLowerCase().contains(q);
+    }).toList();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F7F2),
+      backgroundColor: cBg,
       appBar: AppBar(
         backgroundColor: idaDark,
         foregroundColor: Colors.white,
@@ -580,10 +625,11 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
         title: Text(loc.agriCyclesTitle,
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton.extended(
         backgroundColor: idaGreen,
         onPressed: _showAddMenu,
-        child: const Icon(Icons.add, color: Colors.white),
+        icon: const Icon(Icons.add, color: Colors.white),
+        label: const Text('New crop', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator(color: idaGreen))
@@ -591,78 +637,295 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
               color: idaGreen,
               onRefresh: _loadAll,
               child: Responsive.constrainedContent(
-                  context,
-                  combined.isEmpty
-                      ? ListView(children: [
+                context,
+                ListView(
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 90),
+                  children: [
+                    if (loadError != null)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: const Color(0xFFFBE2DF), borderRadius: BorderRadius.circular(10)),
+                        child: Text(loadError!, style: const TextStyle(color: cRed)),
+                      ),
+                    _tiles(),
+                    const SizedBox(height: 12),
+                    if (isAdmin && unassigned.isNotEmpty) ...[
+                      Material(
+                        color: const Color(0xFFFFF7EA),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Color(0xFFF3D7A6))),
+                        child: ListTile(
+                          leading: const Icon(Icons.warning_amber_rounded, color: cAmber),
+                          title: Text('Work not linked to a crop · ${unassigned.length}',
+                              style: const TextStyle(fontWeight: FontWeight.w700, color: cAmber, fontSize: 14)),
+                          subtitle: const Text('Say which crop each day\'s work was for', style: TextStyle(fontSize: 12.5)),
+                          trailing: const Icon(Icons.chevron_right, color: cAmber),
+                          onTap: _showUnassigned,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(children: [
+                        for (final s in const ['running', 'finished', 'cancelled'])
                           Padding(
-                              padding: const EdgeInsets.all(40),
-                              child: Center(
-                                  child: Text(loc.agriNoCyclesYet,
-                                      style: TextStyle(
-                                          color: Colors.grey.shade500))))
-                        ])
-                      : ListView.separated(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: combined.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 8),
-                          itemBuilder: (_, i) {
-                            final c = combined[i];
-                            final isSeasonal = c['_type'] == 'seasonal';
-                            return InkWell(
-                              borderRadius: BorderRadius.circular(12),
-                              onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => CropCalendarScreen(
-                                          cycleType: c['_type'],
-                                          cycleId: c['id'],
-                                          title:
-                                              '${tl(context, c['crop_variety_name'])} — ${tl(context, c['farm_name'])}',
-                                        )),
-                              ).then((_) => _loadAll()),
-                              child: Container(
-                                padding: const EdgeInsets.all(14),
-                                decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                        color: const Color(0xFFE0E7D8))),
-                                child: Row(children: [
-                                  Icon(isSeasonal ? Icons.grass : Icons.park,
-                                      color: idaGreen, size: 20),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                              '${tl(context, c['crop_variety_name'])} — ${tl(context, c['farm_name'])}',
-                                              style: const TextStyle(
-                                                  fontSize: 13.5,
-                                                  fontWeight: FontWeight.w600),
-                                              overflow: TextOverflow.ellipsis,
-                                              maxLines: 1),
-                                          const SizedBox(height: 3),
-                                          Text(
-                                            isSeasonal
-                                                ? '${c['season']} · sown ${c['sowing_date']}'
-                                                : 'Cycle ${c['cycle_year']}${c['bahar_name'] != null ? ' · ${c['bahar_name']}' : ''}',
-                                            style: TextStyle(
-                                                fontSize: 11.5,
-                                                color: Colors.grey.shade600),
-                                          ),
-                                        ]),
-                                  ),
-                                  const Icon(Icons.chevron_right,
-                                      color: Colors.grey, size: 20),
-                                ]),
-                              ),
-                            );
-                          },
-                        )),
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text('${stateLabel[s]} · ${toInt(counts[s])}'),
+                              selected: state == s,
+                              selectedColor: const Color(0xFFE3F0DA),
+                              labelStyle: TextStyle(fontWeight: FontWeight.w700, color: state == s ? const Color(0xFF2C5E17) : cMuted),
+                              onSelected: (_) => setState(() => state = s),
+                            ),
+                          ),
+                      ]),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      decoration: InputDecoration(
+                        hintText: 'Search crop, variety or farm',
+                        prefixIcon: const Icon(Icons.search),
+                        isDense: true,
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: cBorder)),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: cBorder)),
+                      ),
+                      onChanged: (v) => setState(() => search = v),
+                    ),
+                    const SizedBox(height: 12),
+                    if (shown.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.all(40),
+                        child: Center(
+                          child: Text(
+                            cycles.isEmpty ? loc.agriNoCyclesYet : q.isNotEmpty ? 'Nothing matches "$search".' : 'No ${stateLabel[state]!.toLowerCase()} crops.',
+                            style: TextStyle(color: Colors.grey.shade600),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                    for (final c in shown) ...[
+                      _card(c),
+                      const SizedBox(height: 10),
+                    ],
+                  ],
+                ),
+              ),
             ),
+    );
+  }
+
+  Widget _tiles() {
+    final t = totals;
+    Widget tile(String label, String value, String sub, {bool bad = false}) => Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: bad ? const Color(0xFFF1C4BE) : cBorder),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label, style: const TextStyle(fontSize: 12, color: cMuted, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 4),
+            Text(value, style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: bad ? cRed : cDark), maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(sub, style: const TextStyle(fontSize: 11.5, color: cMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ]),
+        );
+    final size = [
+      if (toInt(t['acres']) > 0 || (double.tryParse('${t['acres']}') ?? 0) > 0) '${t['acres']} acres',
+      if (toInt(t['trees']) > 0) '${t['trees']} trees',
+    ].join(' · ');
+    final hq = double.tryParse('${t['harvest_qtl'] ?? 0}') ?? 0;
+    final tiles = [
+      tile('Crops running', '${toInt(t['running'])}', size.isEmpty ? '—' : size),
+      tile('Jobs overdue', '${toInt(t['overdue'])}',
+          toInt(t['overdue']) > 0 ? 'on ${toInt(t['overdue_crops'])} crop${toInt(t['overdue_crops']) == 1 ? '' : 's'}' : 'nothing late',
+          bad: toInt(t['overdue']) > 0),
+      tile('Jobs next 7 days', '${toInt(t['this_week'])}', 'sprays, fertiliser, pruning'),
+      tile('Spent (running)', inr(t['spent']), hq > 0 ? 'Harvested ${qtlText(hq * 100)}' : 'No harvest yet'),
+    ];
+    return LayoutBuilder(builder: (context, box) {
+      final cols = box.maxWidth >= 700 ? 4 : 2;
+      final w = (box.maxWidth - (cols - 1) * 10) / cols;
+      return Wrap(spacing: 10, runSpacing: 10, children: [for (final x in tiles) SizedBox(width: w, child: x)]);
+    });
+  }
+
+  Widget _card(Map c) {
+    final chip = jobsChip(c);
+    final nj = nextJobText(c['next_job'] is Map ? c['next_job'] : null);
+    final money = Map<String, dynamic>.from(c['money'] ?? {});
+    final orchard = c['cycle_type'] == 'orchard';
+    final hkg = double.tryParse('${c['harvest_kg'] ?? 0}') ?? 0;
+    final per = orchard
+        ? (money['per_tree'] != null ? '${inr(money['per_tree'])}/tree' : null)
+        : (money['per_acre'] != null ? '${inr(money['per_acre'])}/acre' : null);
+    final title = '${tl(context, c['crop_name'] ?? '')} · ${tl(context, c['variety_name'] ?? '')}';
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () => _openCalendar('${c['cycle_type']}', c['cycle_id'], '$title — ${tl(context, c['farm_name'] ?? '')}'),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: cBorder),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(color: const Color(0xFFE3F0DA), borderRadius: BorderRadius.circular(10)),
+              child: Icon(orchard ? Icons.park : Icons.grass, color: idaGreen, size: 20),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: cDark), maxLines: 1, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
+                Text(whereText(c), style: const TextStyle(fontSize: 12.5, color: cMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
+              ]),
+            ),
+            const SizedBox(width: 6),
+            Pill(chip.$1, chip.$2, chip.$3),
+          ]),
+          if (c['state'] == 'cancelled' && c['cancel_reason'] != null) ...[
+            const SizedBox(height: 10),
+            Text('Cancelled${c['cancelled_at'] != null ? ' ${dayMonth(c['cancelled_at'])}' : ''}: ${c['cancel_reason']}',
+                style: const TextStyle(fontSize: 12.5, color: cRed, fontWeight: FontWeight.w600)),
+          ],
+          if (c['state'] == 'running') ...[
+            const SizedBox(height: 12),
+            CycleProgress(c),
+            const SizedBox(height: 10),
+            Row(children: [
+              const Icon(Icons.event_note, size: 16, color: cMuted),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text.rich(
+                  TextSpan(children: [
+                    TextSpan(text: nj.text, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    if (nj.when.isNotEmpty) TextSpan(text: '  ${nj.when}', style: TextStyle(color: nj.color, fontWeight: FontWeight.w700)),
+                  ]),
+                  style: const TextStyle(fontSize: 13),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ]),
+          ],
+          const SizedBox(height: 10),
+          const Divider(height: 1, color: Color(0xFFEEF1EA)),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Spent', style: TextStyle(fontSize: 11.5, color: cMuted)),
+                Text(inr(money['total']), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                if (per != null) Text(per, style: const TextStyle(fontSize: 11.5, color: cMuted)),
+              ]),
+            ),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Harvest', style: TextStyle(fontSize: 11.5, color: cMuted)),
+                Text(hkg > 0 ? qtlText(hkg) : '—', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                if (c['cost_per_qtl'] != null) Text('${inr(c['cost_per_qtl'])}/qtl', style: const TextStyle(fontSize: 11.5, color: cMuted)),
+              ]),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.grey),
+          ]),
+        ]),
+      ),
+    );
+  }
+}
+
+// Farm attendance days on farms with more than one crop: say which crop.
+class _UnassignedSheet extends StatefulWidget {
+  final List items;
+  const _UnassignedSheet({required this.items});
+  @override
+  State<_UnassignedSheet> createState() => _UnassignedSheetState();
+}
+
+class _UnassignedSheetState extends State<_UnassignedSheet> {
+  late List items = widget.items;
+  final Map<String, String> pick = {};
+  String? error;
+
+  String keyOf(Map i) => '${i['date']}|${i['farm_id']}|${i['work_type_id']}';
+
+  Future<void> _assign(Map i) async {
+    final v = pick[keyOf(i)];
+    if (v == null) return;
+    final parts = v.split(':');
+    setState(() => error = null);
+    try {
+      await AgriApi.post('/agri/cycles/assign-work', {
+        'date': i['date'], 'farm_id': i['farm_id'], 'work_type_id': i['work_type_id'],
+        'cycle_type': parts[0], 'cycle_id': parts[1] == 'x' ? null : int.tryParse(parts[1]),
+      });
+      setState(() => items = items.where((x) => keyOf(x) != keyOf(i)).toList());
+    } catch (e) {
+      setState(() => error = '$e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.85,
+      maxChildSize: 0.95,
+      builder: (context, scroll) => ListView(
+        controller: scroll,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        children: [
+          const Text('Work not linked to a crop', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: cDark)),
+          const SizedBox(height: 4),
+          const Text('Farm attendance on farms with more than one crop. Say which crop each day\'s work was for, so its cost counts on that crop. From now on Farm attendance asks this when the work is given.',
+              style: TextStyle(fontSize: 13, color: cMuted)),
+          if (error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(error!, style: const TextStyle(color: cRed))),
+          const SizedBox(height: 10),
+          if (items.isEmpty)
+            const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Text('All work is linked. Nothing left.', style: TextStyle(fontWeight: FontWeight.w700))),
+          for (final i in items)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: const BoxDecoration(border: Border(top: BorderSide(color: Color(0xFFEEF1EA)))),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Text('${dayMonth(i['date'])} · ${i['farm_name']} · ${i['work_name']}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                Text('${i['workers']} workers · ${inr(i['cost'])}', style: const TextStyle(fontSize: 12.5, color: cMuted)),
+                const SizedBox(height: 8),
+                Row(children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: pick[keyOf(i)],
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Which crop?', border: OutlineInputBorder(), isDense: true),
+                      items: [
+                        for (final o in (i['options'] as List? ?? []))
+                          DropdownMenuItem(value: '${o['cycle_type']}:${o['cycle_id']}', child: Text('${o['label']}', overflow: TextOverflow.ellipsis)),
+                        const DropdownMenuItem(value: 'none:x', child: Text('General farm work (no crop)')),
+                      ],
+                      onChanged: (v) => setState(() => pick[keyOf(i)] = v ?? ''),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: (pick[keyOf(i)] ?? '').isEmpty ? null : () => _assign(i),
+                    style: FilledButton.styleFrom(backgroundColor: cGreen, minimumSize: const Size(72, 46)),
+                    child: const Text('Save'),
+                  ),
+                ]),
+              ]),
+            ),
+          const SizedBox(height: 8),
+          OutlinedButton(onPressed: () => Navigator.pop(context), style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)), child: const Text('Done')),
+        ],
+      ),
     );
   }
 }

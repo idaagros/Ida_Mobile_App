@@ -15,6 +15,8 @@ import 'machine_reading_screen.dart';
 import 'machine_maintenance_screen.dart';
 import 'review/review_queue_screen.dart';
 import 'daily_reports_screen.dart';
+import 'reports/reports_hub_screen.dart';
+import 'reports/report_builder_screen.dart';
 import 'pf_alerts_screen.dart';
 import 'outward_register_report_screen.dart';
 import 'outward_register_list_screen.dart';
@@ -32,6 +34,7 @@ import 'admin/crop_masters_screen.dart';
 import 'admin/agronomy_setup_screen.dart';
 import 'crop_cycles_screen.dart';
 import 'orchard_blocks_screen.dart';
+import 'agronomy/sowing_plans_screen.dart';
 import 'crop_reports_screen.dart';
 import 'sector_picker_screen.dart';
 import 'needs_attention_screen.dart';
@@ -778,6 +781,18 @@ class _DashboardScreenState extends State<DashboardScreen>
                       AppLocalizations.of(context)!.sectionReportsAnalytics),
                   const SizedBox(height: 12),
                   _tileGrid(context, [
+                    // Sep 2026 (group E): every report, grouped / filtered, Excel + PDF.
+                    _tile(
+                      icon: Icons.insert_chart_outlined,
+                      label: 'All reports',
+                      sub: 'Group, filter and download any report as Excel or PDF',
+                      iconBg: const Color(0xFFE8F5E2),
+                      iconColor: const Color(0xFF3B7A28),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const ReportsHubScreen())),
+                    ),
                     _tile(
                       icon: Icons.picture_as_pdf_outlined,
                       label: AppLocalizations.of(context)!
@@ -822,14 +837,14 @@ class _DashboardScreenState extends State<DashboardScreen>
                         icon: Icons.summarize_outlined,
                         label: 'Outward Sales Report',
                         sub:
-                            'Date-range report: Excel or PDF, with section status badges',
+                            'Trucks, weight and money by party or month: Excel or PDF',
                         iconBg: const Color(0xFFE8F0FE),
                         iconColor: const Color(0xFF1A73E8),
                         onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
                                 builder: (_) =>
-                                    const OutwardRegisterReportScreen())),
+                                    const ReportBuilderScreen(reportKey: 'dispatch'))),
                       ),
                   ]),
                 ],
@@ -1034,6 +1049,17 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 builder: (_) => const OrchardBlocksScreen())),
                       ),
                       _tile(
+                        icon: Icons.grass_outlined,
+                        label: 'Sowing plans',
+                        sub: 'What is sown where, spacing, plants per acre',
+                        iconBg: const Color(0xFFE8F5E2),
+                        iconColor: idaGreen,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const SowingPlansScreen())),
+                      ),
+                      _tile(
                         icon: Icons.calendar_month_outlined,
                         label: AppLocalizations.of(context)!.agriCyclesTitle,
                         sub:
@@ -1055,7 +1081,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                         onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
-                                builder: (_) => const CropReportsScreen())),
+                                builder: (_) => const ReportBuilderScreen(reportKey: 'crop_cost'))),
                       ),
                     ],
                   ]),
@@ -1167,7 +1193,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   _tile(
                     icon: Icons.settings_outlined,
                     label: 'App Settings',
-                    sub: 'Face login sensitivity, server address',
+                    sub: 'Reading reminders, face login, server address',
                     iconBg: const Color(0xFFF1F3F4),
                     iconColor: const Color(0xFF455A64),
                     onTap: () => Navigator.push(

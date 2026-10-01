@@ -1,5 +1,9 @@
 // lib/screens/mandi/mandi_settings_screen.dart
 //
+// Sep 2026 (group D): tabs reordered to match the website (Crops
+// followed, Markets, MSP, Prices & files); MSPs filled in by the app show
+// "please check" with Confirm all; MSPs have a kind and can be changed.
+//
 // Set-up for the mandi price tracker: data status (fetch now, load past
 // years, area covered), tracked commodities with their exact Agmarknet
 // names, markets included in averages, and MSP entries.
@@ -12,7 +16,9 @@ import '../../services/api_service.dart';
 import 'mandi_common.dart';
 
 class MandiSettingsScreen extends StatefulWidget {
-  const MandiSettingsScreen({super.key});
+  // 0 Crops followed, 1 Markets, 2 MSP, 3 Prices & files
+  final int initialTab;
+  const MandiSettingsScreen({super.key, this.initialTab = 0});
   @override
   State<MandiSettingsScreen> createState() => _MandiSettingsScreenState();
 }
@@ -43,10 +49,11 @@ class _MandiSettingsScreenState extends State<MandiSettingsScreen> {
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: 4,
+      initialIndex: widget.initialTab.clamp(0, 3),
       child: Scaffold(
         backgroundColor: const Color(0xFFF7F8F6),
         appBar: AppBar(
-          title: const Text('Mandi Price Settings'),
+          title: const Text('Mandi prices setup'),
           backgroundColor: mandiDark,
           foregroundColor: Colors.white,
           bottom: const TabBar(
@@ -54,14 +61,14 @@ class _MandiSettingsScreenState extends State<MandiSettingsScreen> {
             labelColor: Colors.white,
             unselectedLabelColor: Colors.white60,
             indicatorColor: Color(0xFF88BA63),
-            tabs: [Tab(text: 'Data'), Tab(text: 'Commodities'), Tab(text: 'Markets'), Tab(text: 'MSP')],
+            tabs: [Tab(text: 'Crops followed'), Tab(text: 'Markets'), Tab(text: 'MSP'), Tab(text: 'Prices & files')],
           ),
         ),
         body: TabBarView(children: [
-          _DataTab(isAdmin: isAdmin, mayUpdate: mayUpdate),
           _CommoditiesTab(mayAdd: mayAdd, mayUpdate: mayUpdate),
           _MarketsTab(mayUpdate: mayUpdate),
           _MspTab(mayAdd: mayAdd, mayUpdate: mayUpdate),
+          _DataTab(isAdmin: isAdmin, mayUpdate: mayUpdate),
         ]),
       ),
     );
@@ -638,17 +645,29 @@ class _MspTabState extends State<_MspTab> {
     }
   }
 
-  Future<void> _add() async {
-    int? commodityId;
-    final seasonCtl = TextEditingController();
-    final priceCtl = TextEditingController();
-    DateTime? from;
+  Future<void> _confirmAll() async {
+    try {
+      final r = await MandiApi.post('/mandi/msp/confirm', {});
+      if (mounted) _snack(context, '${r['confirmed']} MSPs confirmed. They now show on the charts.');
+      await _load();
+    } catch (e) {
+      if (mounted) _snack(context, e.toString(), error: true);
+    }
+  }
+
+  // New MSP, or change one (same crop + season saves over it).
+  Future<void> _add([Map<String, dynamic>? row]) async {
+    int? commodityId = row == null ? null : int.tryParse('${row['commodity_id']}');
+    final seasonCtl = TextEditingController(text: row?['season_label']?.toString() ?? '');
+    final priceCtl = TextEditingController(text: row == null ? '' : (toD(row['msp_price'])?.round().toString() ?? ''));
+    final kindCtl = TextEditingController(text: row?['kind']?.toString() ?? '');
+    DateTime? from = row == null ? null : parseDay(row['effective_from']);
 
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => AlertDialog(
-          title: const Text('Add MSP'),
+          title: Text(row == null ? 'Add MSP' : 'Change MSP'),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               DropdownButtonFormField<int>(
@@ -658,7 +677,8 @@ class _MspTabState extends State<_MspTab> {
                 items: commodities.map((c) => DropdownMenuItem(value: c['id'] as int, child: Text(c['display_name'].toString()))).toList(),
                 onChanged: (v) => setD(() => commodityId = v),
               ),
-              TextField(controller: seasonCtl, decoration: const InputDecoration(labelText: 'Season', hintText: '2025-26')),
+              TextField(controller: seasonCtl, decoration: const InputDecoration(labelText: 'Season', hintText: '2026-27')),
+              TextField(controller: kindCtl, decoration: const InputDecoration(labelText: 'Kind (optional)', hintText: 'e.g. medium staple')),
               TextField(
                 controller: priceCtl,
                 keyboardType: TextInputType.number,
@@ -666,12 +686,12 @@ class _MspTabState extends State<_MspTab> {
               ),
               const SizedBox(height: 10),
               Row(children: [
-                Expanded(child: Text(from == null ? 'Effective from: not set' : 'Effective from: ${shortDate(from!.toIso8601String())}')),
+                Expanded(child: Text(from == null ? 'Counts from: not set' : 'Counts from: ${shortDate(from!.toIso8601String())}')),
                 TextButton(
                   onPressed: () async {
                     final d = await showDatePicker(
                       context: ctx,
-                      initialDate: DateTime.now(),
+                      initialDate: from ?? DateTime.now(),
                       firstDate: DateTime(2015),
                       lastDate: DateTime(2035),
                     );
@@ -705,6 +725,7 @@ class _MspTabState extends State<_MspTab> {
         'season_label': seasonCtl.text.trim(),
         'msp_price': double.parse(priceCtl.text),
         'effective_from': '${f.year}-${f.month.toString().padLeft(2, '0')}-${f.day.toString().padLeft(2, '0')}',
+        'kind': kindCtl.text.trim(),
       });
       await _load();
     } catch (e) {
@@ -740,12 +761,36 @@ class _MspTabState extends State<_MspTab> {
   @override
   Widget build(BuildContext context) {
     if (loading) return const Center(child: CircularProgressIndicator());
+    final toCheck = rows.where((r) => '${r['needs_check']}' == '1').toList();
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(padding: const EdgeInsets.all(12), children: [
         if (error != null) ErrorBox(error!),
-        Text('Minimum Support Price, entered once per season. Shown as a reference line on charts. Saving the same season again updates it.',
+        Text('Minimum support prices show as a line on the charts and as "above / below MSP". Each counts from its start date.',
             style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+        if (toCheck.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          MandiCard(
+            color: const Color(0xFFFFF7EA),
+            borderColor: const Color(0xFFF3D7A6),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('${toCheck.length} MSPs were filled in from the ${toCheck.first['source'] ?? 'government announcement'}. Check them, then confirm.',
+                  style: const TextStyle(fontSize: 13.5, color: Color(0xFF6A4300))),
+              const SizedBox(height: 4),
+              const Text('Cotton uses the medium staple MSP; long staple is ₹8,110 (2025-26) and ₹8,667 (2026-27).',
+                  style: TextStyle(fontSize: 12.5, color: Color(0xFF6A4300))),
+              if (widget.mayUpdate) ...[
+                const SizedBox(height: 8),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: mandiGreen),
+                  onPressed: _confirmAll,
+                  icon: const Icon(Icons.check, size: 18),
+                  label: const Text('Confirm all'),
+                ),
+              ],
+            ]),
+          ),
+        ],
         const SizedBox(height: 10),
         if (widget.mayAdd)
           Align(
@@ -765,10 +810,19 @@ class _MspTabState extends State<_MspTab> {
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text('${r['display_name']} · ${r['season_label']}', style: const TextStyle(fontWeight: FontWeight.w600)),
-                    Text('From ${shortDate(r['effective_from'])}', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                    Text(
+                        '${(r['kind'] ?? '').toString().isNotEmpty ? '${r['kind']} · ' : ''}from ${shortDate(r['effective_from'])}',
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                    if ('${r['needs_check']}' == '1')
+                      const Padding(
+                        padding: EdgeInsets.only(top: 3),
+                        child: Text('Filled in — please check', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF7A4D00))),
+                      ),
                   ]),
                 ),
                 Text(rupees(r['msp_price']), style: const TextStyle(fontWeight: FontWeight.w800, color: mandiDark)),
+                if (widget.mayAdd)
+                  IconButton(icon: const Icon(Icons.edit_outlined, size: 20), tooltip: 'Change', onPressed: () => _add(r)),
                 if (widget.mayUpdate)
                   IconButton(icon: Icon(Icons.delete_outline, color: Colors.red.shade400, size: 20), onPressed: () => _delete(r)),
               ]),

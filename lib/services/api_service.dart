@@ -170,54 +170,6 @@ class ApiService {
     };
   }
 
-  // ── Reports ────────────────────────────────────────────────────────────────
-
-  static Future<List<dynamic>> getReports() async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/api/reports'),
-      headers: await _authHeaders(),
-    );
-    return jsonDecode(res.body);
-  }
-
-  static Future<bool> submitReport(
-      String title, String description, String date) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/api/reports'),
-      headers: await _authHeaders(),
-      body: jsonEncode({
-        'title': title,
-        'description': description,
-        'report_date': date,
-      }),
-    );
-    return res.statusCode == 200 || res.statusCode == 201;
-  }
-
-  // ── Attendance ─────────────────────────────────────────────────────────────
-
-  static Future<List<dynamic>> getRegisters() async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/api/registers'),
-      headers: await _authHeaders(),
-    );
-    return jsonDecode(res.body);
-  }
-
-  static Future<bool> checkIn(double lat, double lng) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/api/registers/checkin'),
-      headers: await _authHeaders(),
-      body: jsonEncode({'latitude': lat, 'longitude': lng}),
-    );
-    return res.statusCode == 200 || res.statusCode == 201;
-  }
-
-  static Future<bool> checkOut() async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/api/registers/checkout'),
-      headers: await _authHeaders(),
-    );
-    return res.statusCode == 200;
-  }
+  // Field reports (/api/reports) and check-in/out registers (/api/registers)
+  // were removed in Oct 2026 (group F): no screen used them.
 }
