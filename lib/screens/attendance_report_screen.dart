@@ -35,6 +35,7 @@ const _dimOptions = [
   {'key': 'farm', 'label': 'Farm'},
   {'key': 'worker', 'label': 'Worker'},
   {'key': 'work_type', 'label': 'Work Type'},
+  {'key': 'work_detail', 'label': 'Work detail'},
   {'key': 'gender', 'label': 'Gender'},
 ];
 
@@ -628,6 +629,8 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
         return loc.faWorker;
       case 'work_type':
         return loc.faWorkType;
+      case 'work_detail':
+        return loc.faWorkDetail;
       case 'gender':
         return loc.faGender;
       default:
@@ -677,7 +680,7 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
                 ...List.generate(dims.length, (i) {
                   final raw = r['level${i + 1}']?.toString() ?? '';
                   final isNameDim =
-                      i < groupBy.length && groupBy[i] != 'gender';
+                      i < groupBy.length && groupBy[i] != 'gender' && groupBy[i] != 'work_detail';
                   return DataCell(Text(isNameDim ? tl(context, raw) : raw,
                       style: const TextStyle(fontSize: 12.5)));
                 }),

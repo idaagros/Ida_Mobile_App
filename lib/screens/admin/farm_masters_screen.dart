@@ -140,13 +140,19 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
 
   // ── Work types ─────────────────────────────────────────────
   Future<void> _saveWorkType(
-      {int? id, required String name, String appliesTo = 'both'}) async {
+      {int? id,
+      required String name,
+      String appliesTo = 'both',
+      List<String> detailOptions = const []}) async {
     try {
+      final body = {
+        'name': name,
+        'applies_to': appliesTo,
+        'detail_options': detailOptions,
+      };
       final res = id == null
-          ? await Api.post('/work-types',
-              body: {'name': name, 'applies_to': appliesTo})
-          : await Api.patch('/work-types/$id',
-              body: {'name': name, 'applies_to': appliesTo});
+          ? await Api.post('/work-types', body: body)
+          : await Api.patch('/work-types/$id', body: body);
       if (res.statusCode == 200) {
         _loadAll();
       } else {
@@ -371,6 +377,8 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
     final loc = AppLocalizations.of(context)!;
     final nameCtrl = TextEditingController(text: workType?['name'] ?? '');
     String appliesTo = workType?['applies_to'] ?? 'both';
+    // Edited in place by _QuickDetailsEditor; sent on save.
+    final detailOptions = _parseDetailOptions(workType?['detail_options']);
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -380,7 +388,8 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
           title: Text(
               workType == null ? loc.faAddWorkType : loc.faRenameWorkType,
               style: const TextStyle(fontWeight: FontWeight.w700)),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
+          content: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
             TextField(
               controller: nameCtrl,
               autofocus: true,
@@ -408,7 +417,9 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
               ],
               onChanged: (v) => setDialogState(() => appliesTo = v!),
             ),
-          ]),
+            const SizedBox(height: 16),
+            _QuickDetailsEditor(items: detailOptions),
+          ])),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx),
@@ -422,7 +433,8 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                 _saveWorkType(
                     id: workType?['id'],
                     name: nameCtrl.text.trim(),
-                    appliesTo: appliesTo);
+                    appliesTo: appliesTo,
+                    detailOptions: List<String>.from(detailOptions));
               },
               child:
                   Text(loc.save, style: const TextStyle(color: Colors.white)),
@@ -755,6 +767,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                   final w = workTypes[i];
                   return _row(
                     title: tl(context, w['name'] ?? ''),
+                    subtitle: _parseDetailOptions(w['detail_options']).join(' · '),
                     active: true,
                     showSwitch: false,
                     onTap: () => _showWorkTypeDialog(workType: w),
@@ -832,4 +845,128 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
               : const Icon(Icons.edit_outlined, size: 18, color: Colors.grey),
         ),
       );
+}
+
+// Quick-detail chips of a work type, read defensively (null, non-list and
+// non-string items are ignored; blanks and case-insensitive repeats dropped;
+// at most 12 kept).
+List<String> _parseDetailOptions(dynamic raw) {
+  final out = <String>[];
+  if (raw is! List) return out;
+  for (final o in raw) {
+    if (o is! String) continue;
+    final t = o.trim();
+    if (t.isEmpty || t.length > 40) continue;
+    if (out.any((x) => x.toLowerCase() == t.toLowerCase())) continue;
+    if (out.length >= 12) break;
+    out.add(t);
+  }
+  return out;
+}
+
+// "Quick details" editor for a work type: a text field + Add button that
+// makes removable chips. Max 12, each 1-40 chars, no case-insensitive
+// duplicates. Edits the given list in place.
+class _QuickDetailsEditor extends StatefulWidget {
+  final List<String> items;
+  const _QuickDetailsEditor({required this.items});
+
+  @override
+  State<_QuickDetailsEditor> createState() => _QuickDetailsEditorState();
+}
+
+class _QuickDetailsEditorState extends State<_QuickDetailsEditor> {
+  static const _maxItems = 12;
+  static const _maxLen = 40;
+  final TextEditingController _ctrl = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _add() {
+    final loc = AppLocalizations.of(context)!;
+    final t = _ctrl.text.trim();
+    if (t.isEmpty) return;
+    if (t.length > _maxLen) {
+      setState(() => _error = loc.faDetailTooLong);
+      return;
+    }
+    if (widget.items.any((x) => x.toLowerCase() == t.toLowerCase())) {
+      setState(() => _error = loc.faDetailDuplicate);
+      return;
+    }
+    if (widget.items.length >= _maxItems) {
+      setState(() => _error = loc.faDetailMaxChips);
+      return;
+    }
+    setState(() {
+      widget.items.add(t);
+      _ctrl.clear();
+      _error = null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context)!;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('${loc.faQuickDetails} (${widget.items.length}/$_maxItems)',
+          style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF6B7280))),
+      const SizedBox(height: 6),
+      Row(children: [
+        Expanded(
+          child: TextField(
+            controller: _ctrl,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _add(),
+            onChanged: (_) {
+              if (_error != null) setState(() => _error = null);
+            },
+            decoration: InputDecoration(
+              hintText: loc.faQuickDetailsHint,
+              isDense: true,
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ),
+        const SizedBox(width: 6),
+        TextButton(
+            onPressed: _add,
+            child: Text(loc.faQuickDetailAdd,
+                style: const TextStyle(
+                    color: Color(0xFF3B7A28), fontWeight: FontWeight.w700))),
+      ]),
+      if (_error != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(_error!,
+              style: const TextStyle(color: Colors.red, fontSize: 12)),
+        ),
+      if (widget.items.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Wrap(spacing: 6, runSpacing: 0, children: [
+          for (final item in widget.items)
+            Chip(
+              label: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 180),
+                child: Text(item,
+                    style: const TextStyle(fontSize: 12),
+                    overflow: TextOverflow.ellipsis),
+              ),
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              onDeleted: () => setState(() => widget.items.remove(item)),
+            ),
+        ]),
+      ],
+    ]);
+  }
 }

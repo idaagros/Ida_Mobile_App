@@ -40,6 +40,8 @@ class _TaskGroup {
   String? crop; // 'seasonal:12', 'orchard:3', 'none:x' (general work) or null
   final Map<int, TextEditingController> rateCtrls = {};
   final Map<int, TextEditingController> noteCtrls = {};
+  // Optional free-text "Work detail" for this farm + work type (max 255).
+  final TextEditingController detailCtrl = TextEditingController();
   final Set<int> workerIds = {};
   bool isTask1 =
       false; // true = Round 1 (rate defaults from morning amount, admin-gated); false = multi-task (blank, open to all)
@@ -47,6 +49,135 @@ class _TaskGroup {
   void dispose() {
     for (final c in rateCtrls.values) c.dispose();
     for (final c in noteCtrls.values) c.dispose();
+    detailCtrl.dispose();
+  }
+}
+
+// Quick-pick chips ("detail_options") of one work type, read defensively:
+// missing / non-list / non-string items give an empty or cleaned list.
+List<String> _detailOptionsOf(List workTypes, int? workTypeId) {
+  if (workTypeId == null) return const [];
+  for (final w in workTypes) {
+    if (w is Map && w['id'] == workTypeId) {
+      final raw = w['detail_options'];
+      if (raw is! List) return const [];
+      final out = <String>[];
+      for (final o in raw) {
+        if (o is! String) continue;
+        final t = o.trim();
+        if (t.isEmpty) continue;
+        if (out.any((x) => x.toLowerCase() == t.toLowerCase())) continue;
+        out.add(t);
+      }
+      return out;
+    }
+  }
+  return const [];
+}
+
+List<String> _detailParts(String text) => text
+    .split(',')
+    .map((e) => e.trim())
+    .where((e) => e.isNotEmpty)
+    .toList();
+
+// "Work type — detail" (or just the work type / just the detail).
+String _withDetail(String? workType, dynamic detail) {
+  final d = (detail ?? '').toString().trim();
+  final w = (workType ?? '').trim();
+  if (d.isEmpty) return w;
+  if (w.isEmpty) return d;
+  return '$w — $d';
+}
+
+// Text field + quick-pick chips for the optional work detail.
+class _WorkDetailField extends StatefulWidget {
+  final TextEditingController controller;
+  final List<String> options;
+  final VoidCallback? onChanged;
+  const _WorkDetailField(
+      {required this.controller, required this.options, this.onChanged});
+
+  @override
+  State<_WorkDetailField> createState() => _WorkDetailFieldState();
+}
+
+class _WorkDetailFieldState extends State<_WorkDetailField> {
+  static const _maxLen = 255;
+
+  bool _isSelected(String opt) => _detailParts(widget.controller.text)
+      .any((p) => p.toLowerCase() == opt.toLowerCase());
+
+  void _toggle(String opt) {
+    final parts = _detailParts(widget.controller.text);
+    final i = parts.indexWhere((p) => p.toLowerCase() == opt.toLowerCase());
+    if (i >= 0) {
+      parts.removeAt(i);
+    } else {
+      parts.add(opt);
+    }
+    final text = parts.join(', ');
+    if (text.length > _maxLen) return;
+    widget.controller.value = TextEditingValue(
+        text: text, selection: TextSelection.collapsed(offset: text.length));
+    setState(() {});
+    widget.onChanged?.call();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context)!;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      TextField(
+        controller: widget.controller,
+        maxLength: _maxLen,
+        minLines: 1,
+        maxLines: 3,
+        textCapitalization: TextCapitalization.sentences,
+        style: const TextStyle(fontSize: 13),
+        onChanged: (_) {
+          setState(() {});
+          widget.onChanged?.call();
+        },
+        decoration: InputDecoration(
+            labelText: loc.faWorkDetailOptional,
+            hintText: loc.faWorkDetailHint,
+            hintStyle: const TextStyle(fontSize: 12),
+            isDense: true,
+            filled: true,
+            fillColor: Colors.white,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+      ),
+      if (widget.options.isNotEmpty)
+        LayoutBuilder(builder: (context, c) {
+          final maxLabel = c.maxWidth.isFinite ? (c.maxWidth - 48) : 300.0;
+          return Wrap(spacing: 6, runSpacing: 0, children: [
+            for (final opt in widget.options)
+              Builder(builder: (_) {
+                final sel = _isSelected(opt);
+                final fits = widget.controller.text.length + opt.length + 2 <=
+                    _maxLen;
+                return FilterChip(
+                  label: ConstrainedBox(
+                    constraints: BoxConstraints(
+                        maxWidth: maxLabel < 60 ? 60 : maxLabel),
+                    child: Text(opt,
+                        style: const TextStyle(fontSize: 12),
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                  selected: sel,
+                  selectedColor: const Color(0xFFE8F5E2),
+                  checkmarkColor: const Color(0xFF3B7A28),
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  onSelected: (sel || fits) ? (_) => _toggle(opt) : null,
+                );
+              }),
+          ]);
+        }),
+    ]);
   }
 }
 
@@ -196,6 +327,7 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
               'workTypeId': g.workTypeId,
               'isTask1': g.isTask1,
               'crop': g.crop,
+              'workDetail': g.detailCtrl.text,
               'workers': g.workerIds
                   .map((id) => {
                         'workerId': id,
@@ -229,6 +361,12 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
               : (ct == 'none' ? 'none:x' : (cid == null ? null : '$ct:$cid'));
         return ng;
       });
+      final savedDetail = a['work_detail'];
+      if (g.detailCtrl.text.isEmpty &&
+          savedDetail is String &&
+          savedDetail.trim().isNotEmpty) {
+        g.detailCtrl.text = savedDetail.trim();
+      }
       final wid = int.tryParse(a['worker_id'].toString());
       if (wid == null) continue;
       final rate = double.tryParse(a['wage_snapshot'].toString()) ?? 0;
@@ -256,6 +394,8 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
           ..workTypeId = item['workTypeId']
           ..isTask1 = item['isTask1'] ?? false
           ..crop = item['crop'];
+        final savedDetail = item['workDetail'];
+        if (savedDetail is String) g.detailCtrl.text = savedDetail;
         for (final w in (item['workers'] as List)) {
           final id = w['workerId'] as int;
           g.workerIds.add(id);
@@ -532,6 +672,8 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
           .map((g) => {
                 'farm_id': g.farmId,
                 'work_type_id': g.workTypeId,
+                if (g.detailCtrl.text.trim().isNotEmpty)
+                  'work_detail': g.detailCtrl.text.trim(),
                 if (g.crop != null) 'cycle_type': g.crop!.split(':')[0],
                 if (g.crop != null && g.crop != 'none:x')
                   'cycle_id': int.tryParse(g.crop!.split(':')[1]),
@@ -1179,8 +1321,11 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
             final workTypeNameRaw = workTypes.firstWhere(
                 (wt) => wt['id'] == g.workTypeId,
                 orElse: () => {})['name'];
-            final workTypeName =
+            final workTypeBase =
                 workTypeNameRaw != null ? tl(context, workTypeNameRaw) : null;
+            final workTypeName = g.detailCtrl.text.trim().isEmpty
+                ? workTypeBase
+                : _withDetail(workTypeBase, g.detailCtrl.text);
             final amount =
                 double.tryParse(g.rateCtrls[workerId]?.text.trim() ?? '') ?? 0;
             return Padding(
@@ -1636,6 +1781,14 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints()),
         ]),
+        if (g.detailCtrl.text.trim().isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text('${loc.faWorkDetail}: ${g.detailCtrl.text.trim()}',
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade800,
+                  fontStyle: FontStyle.italic)),
+        ],
         const SizedBox(height: 6),
         Text(
             (g.workerIds.toList()
@@ -1873,8 +2026,16 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
       ...groupsByTask.entries.map((entry) {
         final parts = entry.key.split('·');
         final farmName = tl(context, parts[0]);
-        final workTypeName =
+        final baseWorkType =
             parts.length > 1 && parts[1] != '—' ? tl(context, parts[1]) : null;
+        final details = <String>[];
+        for (final a in entry.value) {
+          final d = (a['work_detail'] ?? '').toString().trim();
+          if (d.isNotEmpty && !details.contains(d)) details.add(d);
+        }
+        final workTypeName = details.isEmpty
+            ? baseWorkType
+            : _withDetail(baseWorkType, details.join('; '));
         Widget personTile(Map<String, dynamic> a) {
           final canMarkDidNotWork = canWriteAlloc &&
               (allocationStatus == 'pending' ||
@@ -2073,13 +2234,17 @@ class _SheetLine {
   int? workTypeId;
   final TextEditingController rateCtrl;
   final TextEditingController noteCtrl;
-  _SheetLine({this.farmId, this.workTypeId, String? rate, String? note})
+  final TextEditingController detailCtrl;
+  _SheetLine(
+      {this.farmId, this.workTypeId, String? rate, String? note, String? detail})
       : rateCtrl = TextEditingController(text: rate ?? ''),
-        noteCtrl = TextEditingController(text: note ?? '');
+        noteCtrl = TextEditingController(text: note ?? ''),
+        detailCtrl = TextEditingController(text: detail ?? '');
 
   void dispose() {
     rateCtrl.dispose();
     noteCtrl.dispose();
+    detailCtrl.dispose();
   }
 }
 
@@ -2124,6 +2289,7 @@ class _MultiTaskWorkerSheetState extends State<_MultiTaskWorkerSheet> {
               workTypeId: g.workTypeId,
               rate: g.rateCtrls[widget.workerId]?.text,
               note: g.noteCtrls[widget.workerId]?.text,
+              detail: g.detailCtrl.text,
             ))
         .toList();
     if (lines.isEmpty) lines.add(_SheetLine());
@@ -2230,6 +2396,7 @@ class _MultiTaskWorkerSheetState extends State<_MultiTaskWorkerSheet> {
           TextEditingController(text: l.rateCtrl.text);
       g.noteCtrls[widget.workerId] =
           TextEditingController(text: l.noteCtrl.text);
+      g.detailCtrl.text = l.detailCtrl.text.trim();
       return g;
     }).toList();
     widget.onSave(newGroups);
@@ -2365,6 +2532,11 @@ class _MultiTaskWorkerSheetState extends State<_MultiTaskWorkerSheet> {
                               onChanged: (v) =>
                                   setState(() => line.workTypeId = v),
                             ),
+                            const SizedBox(height: 8),
+                            _WorkDetailField(
+                                controller: line.detailCtrl,
+                                options: _detailOptionsOf(
+                                    widget.workTypes, line.workTypeId)),
                             const SizedBox(height: 8),
                             Row(children: [
                               Expanded(
@@ -2697,6 +2869,10 @@ class _TaskGroupSheetState extends State<_TaskGroupSheet> {
                     widget.group.workTypeId = v;
                   }),
                 ),
+                const SizedBox(height: 12),
+                _WorkDetailField(
+                    controller: widget.group.detailCtrl,
+                    options: _detailOptionsOf(widget.workTypes, workTypeId)),
                 const SizedBox(height: 16),
                 Text(loc.faWaWorkersForThisTask,
                     style: const TextStyle(

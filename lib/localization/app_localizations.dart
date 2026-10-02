@@ -237,6 +237,15 @@ class AppLocalizations {
   String get faWaNotePrefix => _t('fa_wa_note_prefix');
   String get faWaAddAnotherWorkType => _t('fa_wa_add_another_work_type');
   String get faWaRemove => _t('fa_wa_remove');
+  String get faWorkDetail => _t('fa_work_detail');
+  String get faWorkDetailOptional => _t('fa_work_detail_optional');
+  String get faWorkDetailHint => _t('fa_work_detail_hint');
+  String get faQuickDetails => _t('fa_quick_details');
+  String get faQuickDetailsHint => _t('fa_quick_details_hint');
+  String get faQuickDetailAdd => _t('fa_quick_detail_add');
+  String get faDetailTooLong => _t('fa_detail_too_long');
+  String get faDetailDuplicate => _t('fa_detail_duplicate');
+  String get faDetailMaxChips => _t('fa_detail_max_chips');
   String get faWaWorkersForThisTask => _t('fa_wa_workers_for_this_task');
   String get faWaSetThisMorningHint => _t('fa_wa_set_this_morning_hint');
   String get faWaBreakAttendanceLong => _t('fa_wa_break_attendance_long');
@@ -729,6 +738,15 @@ class AppLocalizations {
       'fa_wa_note_prefix': 'Note',
       'fa_wa_add_another_work_type': 'Add Another Work Type',
       'fa_wa_remove': 'Remove',
+      'fa_work_detail': 'Work detail',
+      'fa_work_detail_optional': 'Work detail (optional)',
+      'fa_work_detail_hint': 'e.g. which plot or what exactly was done',
+      'fa_quick_details': 'Quick details',
+      'fa_quick_details_hint': 'Add a quick detail',
+      'fa_quick_detail_add': 'Add',
+      'fa_detail_too_long': 'Detail too long (max 40 characters)',
+      'fa_detail_duplicate': 'This detail is already added',
+      'fa_detail_max_chips': 'You can add up to 12 quick details',
       'fa_wa_workers_for_this_task': 'WORKERS FOR THIS TASK',
       'fa_wa_set_this_morning_hint': 'Set this morning — admin can change',
       'fa_wa_break_attendance_long': 'Break Attendance',
@@ -1219,6 +1237,15 @@ class AppLocalizations {
       'fa_wa_note_prefix': 'टीप',
       'fa_wa_add_another_work_type': 'आणखी कामाचा प्रकार जोडा',
       'fa_wa_remove': 'काढा',
+      'fa_work_detail': 'कामाचा तपशील',
+      'fa_work_detail_optional': 'कामाचा तपशील (ऐच्छिक)',
+      'fa_work_detail_hint': 'उदा. कोणता तुकडा किंवा नेमके काय काम झाले',
+      'fa_quick_details': 'जलद तपशील',
+      'fa_quick_details_hint': 'जलद तपशील जोडा',
+      'fa_quick_detail_add': 'जोडा',
+      'fa_detail_too_long': 'तपशील खूप मोठा आहे (कमाल ४० अक्षरे)',
+      'fa_detail_duplicate': 'हा तपशील आधीच जोडलेला आहे',
+      'fa_detail_max_chips': 'जास्तीत जास्त १२ जलद तपशील जोडता येतात',
       'fa_wa_workers_for_this_task': 'या कामासाठी मजूर',
       'fa_wa_set_this_morning_hint': 'आज सकाळी सेट केले — प्रशासक बदलू शकतो',
       'fa_wa_break_attendance_long': 'तुटलेली हजेरी',
