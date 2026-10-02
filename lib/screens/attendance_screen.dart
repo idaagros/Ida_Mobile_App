@@ -11,11 +11,10 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import '../services/responsive.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
+import '../services/api_client.dart';
 import 'attendance_report_screen.dart';
 import 'reports/report_builder_screen.dart';
 import 'work_allocation_screen.dart';
@@ -23,7 +22,6 @@ import 'attendance_calendar_screen.dart';
 import 'face_attendance_capture_screen.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
-import '../config/app_config.dart';
 
 class AttendanceScreen extends StatefulWidget {
   final DateTime? initialDate;
@@ -36,7 +34,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   late DateTime selectedDate = widget.initialDate ?? DateTime.now();
   bool isAdmin = false;
@@ -75,7 +72,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   @override
   void initState() {
     super.initState();
-    ApiService.canUpdateSection('farm_attendance', 'attendance').then((v) {
+    // Marking attendance = add or update on the 'attendance' section.
+    ApiService.canWriteSection('farm_attendance', 'attendance').then((v) {
       if (mounted) setState(() => canUpdateStageA = v);
     });
     ApiService.canApproveSection('farm_attendance', 'attendance').then((v) {
@@ -96,21 +94,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     await _loadDay();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   String get _dateStr => DateFormat('yyyy-MM-dd').format(selectedDate);
 
   Future<void> _loadMasters() async {
     setState(() => loadingMasters = true);
     try {
-      final h = await _headers;
-      final res =
-          await http.get(Uri.parse('$baseUrl/farm-workers'), headers: h);
+      final res = await Api.get('/farm-workers');
       if (res.statusCode == 200) {
         workers = jsonDecode(res.body);
         workers.sort((a, b) => (a['name'] ?? '')
@@ -131,9 +120,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       error = null;
     });
     try {
-      final h = await _headers;
-      final res = await http.get(Uri.parse('$baseUrl/attendance/day/$_dateStr'),
-          headers: h);
+      final res = await Api.get('/attendance/day/$_dateStr');
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
@@ -163,7 +150,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         });
       }
     } catch (e) {
-      setState(() => error = 'Could not reach server: $e');
+      setState(() => error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => loadingDay = false);
     }
@@ -483,11 +470,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       error = null;
     });
     try {
-      final h = await _headers;
-      final res = await http.post(
-        Uri.parse('$baseUrl/attendance/day/$_dateStr/present'),
-        headers: {...h, 'Content-Type': 'application/json'},
-        body: jsonEncode({
+      final res = await Api.post(
+        '/attendance/day/$_dateStr/present',
+        body: {
           'workers': selectedWorkerIds
               .map((id) => {
                     'worker_id': id,
@@ -495,7 +480,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                         presentWageCtrls[id]?.text.trim() ?? ''),
                   })
               .toList(),
-        }),
+        },
       );
       if (res.statusCode == 200) {
         await _loadDay();
@@ -511,11 +496,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           ));
         }
       } else {
-        final data = jsonDecode(res.body);
-        setState(() => error = data['error'] ?? 'Failed to submit attendance');
+        setState(() => error = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => error = 'Could not reach server: $e');
+      setState(() => error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => savingPresent = false);
     }
@@ -531,21 +515,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
     setState(() => decidingAttendance = true);
     try {
-      final h = await _headers;
-      final res = await http.patch(
-        Uri.parse('$baseUrl/attendance/day/$_dateStr/attendance-decision'),
-        headers: {...h, 'Content-Type': 'application/json'},
-        body:
-            jsonEncode({'decision': decision, if (note != null) 'note': note}),
+      final res = await Api.patch(
+        '/attendance/day/$_dateStr/attendance-decision',
+        body: {'decision': decision, if (note != null) 'note': note},
       );
       if (res.statusCode == 200) {
         await _loadDay();
       } else {
-        final data = jsonDecode(res.body);
-        setState(() => error = data['error'] ?? 'Failed to record decision');
+        setState(() => error = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => error = 'Could not reach server: $e');
+      setState(() => error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => decidingAttendance = false);
     }
@@ -661,16 +641,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 onPressed: () async {
                   if (nameCtrl.text.trim().isEmpty ||
                       wageCtrl.text.trim().isEmpty) return;
-                  final h = await _headers;
-                  final res = await http.post(
-                    Uri.parse('$baseUrl/farm-workers'),
-                    headers: {...h, 'Content-Type': 'application/json'},
-                    body: jsonEncode({
+                  final res = await Api.post(
+                    '/farm-workers',
+                    body: {
                       'name': nameCtrl.text.trim(),
                       'daily_wage': wageCtrl.text.trim(),
                       'gender': gender,
                       'phone': phoneCtrl.text.trim(),
-                    }),
+                    },
                   );
                   if (ctx.mounted) Navigator.pop(ctx, res.statusCode == 200);
                 },

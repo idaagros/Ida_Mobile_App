@@ -13,14 +13,12 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import '../../localization/app_localizations.dart';
 import '../../localization/transliterate.dart';
 import '../../services/responsive.dart';
+import '../../services/api_client.dart';
 
-import '../../config/app_config.dart';
 enum _Tab { tractors, rateCard, loads }
 
 class FarmTractorMasterScreen extends StatefulWidget {
@@ -33,7 +31,6 @@ class FarmTractorMasterScreen extends StatefulWidget {
 class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   _Tab _tab = _Tab.tractors;
   List tractors = [];
@@ -50,23 +47,14 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
     _loadAll();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _loadAll() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
       final results = await Future.wait([
-        http.get(Uri.parse('$baseUrl/farm-tractor/tractors?all=1'), headers: h),
-        http.get(Uri.parse('$baseUrl/work-types?applies_to=tractor'),
-            headers: h),
-        http.get(Uri.parse('$baseUrl/farm-tractor/rate-card'), headers: h),
-        http.get(Uri.parse('$baseUrl/farm-tractor/work-loads'), headers: h),
+        Api.get('/farm-tractor/tractors?all=1'),
+        Api.get('/work-types?applies_to=tractor'),
+        Api.get('/farm-tractor/rate-card'),
+        Api.get('/farm-tractor/work-loads'),
       ]);
       if (results[3].statusCode == 200) {
         loads = (jsonDecode(results[3].body)['items'] as List?) ?? [];
@@ -161,22 +149,16 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
             onPressed: () async {
               if (nameCtrl.text.trim().isEmpty) return;
-              final h = await _headers;
-              final body = jsonEncode({
+              final body = {
                 'name': nameCtrl.text.trim(),
                 'registration_number': regCtrl.text.trim(),
                 'hp': double.tryParse(hpCtrl.text.trim()),
                 'model': modelCtrl.text.trim().isEmpty ? null : modelCtrl.text.trim(),
                 'tank_capacity_l': double.tryParse(tankCtrl.text.trim()),
-              });
+              };
               final res = tractor == null
-                  ? await http.post(Uri.parse('$baseUrl/farm-tractor/tractors'),
-                      headers: {...h, 'Content-Type': 'application/json'},
-                      body: body)
-                  : await http.patch(
-                      Uri.parse(
-                          '$baseUrl/farm-tractor/tractors/${tractor['id']}'),
-                      headers: {...h, 'Content-Type': 'application/json'},
+                  ? await Api.post('/farm-tractor/tractors', body: body)
+                  : await Api.patch('/farm-tractor/tractors/${tractor['id']}',
                       body: body);
               if (ctx.mounted) Navigator.pop(ctx);
               if (res.statusCode == 200 || res.statusCode == 201) {
@@ -290,27 +272,23 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
                 if (tractorId == null ||
                     workTypeId == null ||
                     rateCtrl.text.trim().isEmpty) return;
-                final h = await _headers;
-                final res = await http.post(
-                  Uri.parse('$baseUrl/farm-tractor/rate-card'),
-                  headers: {...h, 'Content-Type': 'application/json'},
-                  body: jsonEncode({
+                final res = await Api.post(
+                  '/farm-tractor/rate-card',
+                  body: {
                     'tractor_id': tractorId,
                     'work_type_id': workTypeId,
                     'billing_unit': billingUnit,
                     'rate': double.tryParse(rateCtrl.text.trim()),
                     'effective_from':
                         DateFormat('yyyy-MM-dd').format(effectiveFrom),
-                  }),
+                  },
                 );
                 if (ctx.mounted) Navigator.pop(ctx);
                 if (res.statusCode == 201) {
                   _loadAll();
                   _showSnack(loc.ftSetRate);
                 } else {
-                  final data = jsonDecode(res.body);
-                  _showSnack(data['error'] ?? loc.ftFailedAssign,
-                      isError: true);
+                  _showSnack(Api.responseError(res), isError: true);
                 }
               },
               child:
@@ -324,10 +302,8 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
 
   Future<void> _setLoad(Map w, String? level) async {
     if (level == null) return;
-    final h = await _headers;
-    final res = await http.put(Uri.parse('$baseUrl/farm-tractor/work-loads'),
-        headers: {...h, 'Content-Type': 'application/json'},
-        body: jsonEncode({'work_type_id': w['work_type_id'], 'load_level': level}));
+    final res = await Api.put('/farm-tractor/work-loads',
+        body: {'work_type_id': w['work_type_id'], 'load_level': level});
     if (res.statusCode == 200) {
       setState(() => w['load_level'] = level);
     } else {

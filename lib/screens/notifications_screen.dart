@@ -7,10 +7,8 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../config/app_config.dart';
+import '../services/api_client.dart';
 import '../services/push_service.dart';
 
 class NotificationsScreen extends StatefulWidget {
@@ -33,30 +31,22 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     _load();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'Content-Type': 'application/json',
-    };
-  }
-
   Future<void> _load() async {
     setState(() {
       loading = true;
       error = null;
     });
     try {
-      final res = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/notifications?limit=100'), headers: await _headers);
+      final res = await Api.get('/notifications?limit=100');
       if (res.statusCode == 200) {
         final d = jsonDecode(res.body);
         setState(() => items = List<Map<String, dynamic>>.from(d['items'] ?? []));
         PushService.unreadCount.value = (d['unread'] as num?)?.toInt() ?? 0;
       } else {
-        setState(() => error = 'Could not load notifications (${res.statusCode})');
+        setState(() => error = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => error = 'Could not reach server: $e');
+      setState(() => error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -64,7 +54,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Future<void> _markAllRead() async {
     try {
-      await http.patch(Uri.parse('${AppConfig.apiBaseUrl}/notifications/read-all'), headers: await _headers);
+      await Api.patch('/notifications/read-all');
     } catch (_) {}
     await _load();
   }
@@ -73,13 +63,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     final messenger = ScaffoldMessenger.of(context);
     await PushService.registerDevice();
     try {
-      await http.post(Uri.parse('${AppConfig.apiBaseUrl}/notifications/test'), headers: await _headers);
+      await Api.post('/notifications/test');
       await PushService.checkNow();
       messenger.showSnackBar(const SnackBar(
         content: Text('Test sent. With the app closed, new notifications show within about 15 minutes.'),
       ));
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Test failed: $e')));
+      messenger.showSnackBar(SnackBar(content: Text('Test failed: ${Api.errorText(e)}')));
     }
     await _load();
   }

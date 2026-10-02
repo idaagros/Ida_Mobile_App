@@ -1,13 +1,11 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
+import '../services/api_client.dart';
 class LabourScreen extends StatefulWidget {
   const LabourScreen({super.key});
   @override
@@ -18,7 +16,6 @@ class _LabourScreenState extends State<LabourScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   List labourList = [];
   Map summary = {};
@@ -31,24 +28,16 @@ class _LabourScreenState extends State<LabourScreen> {
     _loadData();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _loadData() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
       final url = filterStatus == 'all'
-          ? '$baseUrl/labour'
-          : '$baseUrl/labour?status=$filterStatus';
+          ? '/labour'
+          : '/labour?status=$filterStatus';
 
       final results = await Future.wait([
-        http.get(Uri.parse(url), headers: h),
-        http.get(Uri.parse('$baseUrl/labour/summary'), headers: h),
+        Api.get(url),
+        Api.get('/labour/summary'),
       ]);
 
       if (results[0].statusCode == 200)
@@ -72,8 +61,6 @@ class _LabourScreenState extends State<LabourScreen> {
       backgroundColor: Colors.transparent,
       builder: (_) => _LabourFormSheet(
         labour: labour,
-        getHeaders: () => _headers,
-        baseUrl: baseUrl,
         onSaved: _loadData,
       ),
     );
@@ -417,14 +404,10 @@ class _LabourScreenState extends State<LabourScreen> {
 // ─────────────────────────────────────────────────────────────
 class _LabourFormSheet extends StatefulWidget {
   final Map? labour;
-  final Future<Map<String, String>> Function() getHeaders;
-  final String baseUrl;
   final VoidCallback onSaved;
 
   const _LabourFormSheet({
     required this.labour,
-    required this.getHeaders,
-    required this.baseUrl,
     required this.onSaved,
   });
 
@@ -505,18 +488,16 @@ class _LabourFormSheetState extends State<_LabourFormSheet> {
     });
 
     try {
-      final h = await widget.getHeaders();
       final dateStr = DateFormat('yyyy-MM-dd').format(startDate);
       final endStr =
           endDate != null ? DateFormat('yyyy-MM-dd').format(endDate!) : '';
 
       final request = http.MultipartRequest(
         isEdit ? 'PATCH' : 'POST',
-        Uri.parse(isEdit
-            ? '${widget.baseUrl}/labour/${widget.labour!['id']}'
-            : '${widget.baseUrl}/labour'),
+        Api.uri(isEdit
+            ? '/labour/${widget.labour!['id']}'
+            : '/labour'),
       )
-        ..headers.addAll(h)
         ..fields['name'] = nameCtrl.text.trim()
         ..fields['designation'] = designationCtrl.text.trim()
         ..fields['work_start_date'] = dateStr
@@ -525,7 +506,7 @@ class _LabourFormSheetState extends State<_LabourFormSheet> {
         ..fields['pay_type'] = payType
         ..fields['notes'] = notesCtrl.text.trim();
 
-      final res = await http.Response.fromStream(await request.send());
+      final res = await Api.sendMultipart(request);
       final data = jsonDecode(res.body);
 
       if (res.statusCode == 200) {
@@ -538,10 +519,10 @@ class _LabourFormSheetState extends State<_LabourFormSheet> {
           ));
         }
       } else {
-        setState(() => errorMsg = data['error'] ?? 'Failed to save');
+        setState(() => errorMsg = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => errorMsg = 'Error: $e');
+      setState(() => errorMsg = 'Error: ${Api.errorText(e)}');
     } finally {
       setState(() => submitting = false);
     }

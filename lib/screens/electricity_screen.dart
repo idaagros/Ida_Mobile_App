@@ -8,7 +8,7 @@ import '../services/image_helper.dart';
 import '../services/colored_date_picker.dart';
 import '../services/responsive.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_client.dart';
 
 import '../config/app_config.dart';
 class ElectricityReadingScreen extends StatefulWidget {
@@ -105,14 +105,7 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
   Future<void> _fetchReturnedRecord() async {
     setState(() => loading = true);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token') ?? '';
-      final res = await http.get(
-        Uri.parse('$baseUrl/electricity/${widget.returnedRecordId}'),
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
-      );
+      final res = await Api.get('/electricity/${widget.returnedRecordId}');
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
@@ -210,15 +203,8 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
   Future<void> _loadPreviousReading() async {
     setState(() => loading = true);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token') ?? '';
       final dateStr = DateFormat('yyyy-MM-dd').format(selectedDate);
-      final res = await http.get(
-        Uri.parse('$baseUrl/electricity/previous?date=$dateStr'),
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
-      );
+      final res = await Api.get('/electricity/previous?date=$dateStr');
       if (res.statusCode == 200 && res.body != 'null') {
         final data = jsonDecode(res.body);
         setState(() {
@@ -335,15 +321,8 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
   // submit regardless.
   Future<Map<String, dynamic>?> _checkDateStatus(DateTime date) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token') ?? '';
       final dateStr = DateFormat('yyyy-MM-dd').format(date);
-      final res = await http.get(
-        Uri.parse('$baseUrl/electricity/check-date?date=$dateStr'),
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
-      );
+      final res = await Api.get('/electricity/check-date?date=$dateStr');
       if (res.statusCode == 200) {
         return jsonDecode(res.body) as Map<String, dynamic>;
       }
@@ -397,8 +376,6 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
     });
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token') ?? '';
       final dateStr = DateFormat('yyyy-MM-dd').format(selectedDate);
       final timeStr =
           '${selectedTime.hour.toString().padLeft(2, '0')}:${selectedTime.minute.toString().padLeft(2, '0')}:00';
@@ -407,12 +384,11 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
 
       final isCorrection = widget.returnedRecordId != null;
       final reqUrl = isCorrection
-          ? Uri.parse('$baseUrl/electricity/${widget.returnedRecordId}')
-          : Uri.parse('$baseUrl/electricity');
+          ? Api.uri('/electricity/${widget.returnedRecordId}')
+          : Api.uri('/electricity');
 
       final request =
           http.MultipartRequest(isCorrection ? 'PUT' : 'POST', reqUrl)
-            ..headers['Authorization'] = 'Bearer $token'
             ..fields['reading_date'] = dateStr
             ..fields['reading_time'] = timeStr
             ..fields['meter_reading'] = readingCtrl.text
@@ -446,8 +422,7 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
         ));
       }
 
-      final streamed = await request.send();
-      final res = await http.Response.fromStream(streamed);
+      final res = await Api.sendMultipart(request);
       final data = jsonDecode(res.body);
 
       if (res.statusCode == 200 || res.statusCode == 201) {
@@ -470,10 +445,10 @@ class _ElectricityReadingScreenState extends State<ElectricityReadingScreen> {
           selectedTime = TimeOfDay.now();
         });
       } else {
-        setState(() => errorMessage = data['error'] ?? 'Submission failed');
+        setState(() => errorMessage = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => errorMessage = 'Error: $e');
+      setState(() => errorMessage = 'Error: ${Api.errorText(e)}');
     } finally {
       setState(() => submitting = false);
     }

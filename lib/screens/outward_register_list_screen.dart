@@ -7,13 +7,11 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'outward_register_screen.dart';
+import '../services/api_client.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
 class OutwardRegisterListScreen extends StatefulWidget {
   const OutwardRegisterListScreen({super.key});
   @override
@@ -24,7 +22,6 @@ class OutwardRegisterListScreen extends StatefulWidget {
 class _OutwardRegisterListScreenState extends State<OutwardRegisterListScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   List records = [];
   bool loading = true;
@@ -36,29 +33,20 @@ class _OutwardRegisterListScreenState extends State<OutwardRegisterListScreen> {
     _load();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _load() async {
     setState(() {
       loading = true;
       error = null;
     });
     try {
-      final h = await _headers;
-      final res =
-          await http.get(Uri.parse('$baseUrl/outward-register'), headers: h);
+      final res = await Api.get('/outward-register');
       if (res.statusCode == 200) {
         setState(() => records = jsonDecode(res.body));
       } else {
         setState(() => error = 'Could not load entries');
       }
     } catch (e) {
-      setState(() => error = 'Error: $e');
+      setState(() => error = 'Error: ${Api.errorText(e)}');
     } finally {
       setState(() => loading = false);
     }

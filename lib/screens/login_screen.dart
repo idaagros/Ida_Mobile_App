@@ -4,8 +4,8 @@
 
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../services/api_client.dart';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import '../localization/app_localizations.dart';
 import 'face_login_screen.dart';
 import '../config/app_config.dart';
@@ -43,6 +43,7 @@ class _LoginScreenState extends State<LoginScreen>
         vsync: this, duration: const Duration(milliseconds: 700));
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
     _fadeCtrl.forward();
+    Api.showNoticeIfAny(context); // "Your session has expired" after an automatic sign-out
   }
 
   @override
@@ -66,16 +67,14 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() => _loading = true);
 
     try {
-      final res = await http.post(
-        Uri.parse('${ApiService.baseUrl}/api/auth/login'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
+      final res = await Api.post(
+        '/auth/login',
+        body: {
           'email': userInput, // current backend expects 'email'
           'username': userInput, // new backend expects 'username'
           'password': password,
-        }),
+        },
+        auth: false,
       );
 
       final result = jsonDecode(res.body);

@@ -13,7 +13,8 @@ import 'agronomy_common.dart';
 class ProductEditorScreen extends StatefulWidget {
   final Map? product; // null = new
   final bool canEdit;
-  const ProductEditorScreen({super.key, this.product, required this.canEdit});
+  final bool canDelete; // Delete level on Crop planning (delete a product / remove a brand)
+  const ProductEditorScreen({super.key, this.product, required this.canEdit, this.canDelete = false});
   @override
   State<ProductEditorScreen> createState() => _ProductEditorScreenState();
 }
@@ -252,7 +253,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
                       const SmallChip('Preferred', bg: Color(0xFFE3F0DA), fg: Color(0xFF2C5E17)),
                     ],
                   ]),
-                  trailing: ed ? IconButton(icon: const Icon(Icons.close, size: 18), onPressed: saving ? null : () => _removeBrand(b)) : null,
+                  trailing: ed && widget.canDelete ? IconButton(icon: const Icon(Icons.close, size: 18), onPressed: saving ? null : () => _removeBrand(b)) : null,
                   onTap: ed && !saving ? () => _prefer(b) : null,
                 ),
             ]),
@@ -273,7 +274,7 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
             ),
           const SizedBox(height: 16),
           TextField(controller: notesCtrl, enabled: ed, decoration: agInput('Notes (optional)', hint: 'e.g. keep away from rain for 6 hours')),
-          if (!isNew && ed) ...[
+          if (!isNew && ed && (widget.canDelete || !(used == 0 && !active))) ...[
             const SizedBox(height: 24),
             const Divider(),
             ListTile(

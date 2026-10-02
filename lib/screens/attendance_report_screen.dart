@@ -15,9 +15,7 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
 import '../services/pdf_download_helper.dart';
@@ -25,7 +23,7 @@ import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
+import '../services/api_client.dart';
 class AttendanceReportScreen extends StatefulWidget {
   const AttendanceReportScreen({super.key});
   @override
@@ -43,7 +41,6 @@ const _dimOptions = [
 class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   // ── Report 1: Worker Wage Report ────────────────────────────
   DateTime _wageFrom = DateTime.now().subtract(const Duration(days: 6));
@@ -67,13 +64,6 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
   bool _exportingDynamic = false;
   String? _dynError;
   Map<String, dynamic>? _dynResult;
-
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
 
   String _fmt(DateTime d) => DateFormat('yyyy-MM-dd').format(d);
 
@@ -104,13 +94,9 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
       _wageError = null;
     });
     try {
-      final h = await _headers;
       final from = _fmt(_wageFrom);
       final to = _fmt(_wageTo);
-      final res = await http.get(
-        Uri.parse('$baseUrl/attendance/report?from=$from&to=$to'),
-        headers: h,
-      );
+      final res = await Api.get('/attendance/report?from=$from&to=$to');
       if (res.statusCode == 200) {
         final filename = 'attendance-report_${from}_to_$to.xlsx';
         final result = await savePdfBytes(res.bodyBytes, filename);
@@ -129,16 +115,10 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
           await _showResultSheet(result.filePath!, filename);
         }
       } else {
-        Map<String, dynamic> data = {};
-        try {
-          data = jsonDecode(res.body);
-        } catch (_) {}
-        final serverMsg = data['error'] as String?;
-        setState(() => _wageError = serverMsg ??
-            'Server returned ${res.statusCode}: ${res.body.length > 200 ? '${res.body.substring(0, 200)}…' : res.body}');
+        setState(() => _wageError = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => _wageError = 'Could not reach server: $e');
+      setState(() => _wageError = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => _generatingWageReport = false);
     }
@@ -173,13 +153,9 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
       _genderSplitError = null;
     });
     try {
-      final h = await _headers;
       final from = _fmt(_genderSplitFrom);
       final to = _fmt(_genderSplitTo);
-      final res = await http.get(
-        Uri.parse('$baseUrl/attendance/report-gender-split?from=$from&to=$to'),
-        headers: h,
-      );
+      final res = await Api.get('/attendance/report-gender-split?from=$from&to=$to');
       if (res.statusCode == 200) {
         final filename = 'attendance-report-gender-split_${from}_to_$to.xlsx';
         final result = await savePdfBytes(res.bodyBytes, filename);
@@ -198,16 +174,10 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
           await _showResultSheet(result.filePath!, filename);
         }
       } else {
-        Map<String, dynamic> data = {};
-        try {
-          data = jsonDecode(res.body);
-        } catch (_) {}
-        final serverMsg = data['error'] as String?;
-        setState(() => _genderSplitError = serverMsg ??
-            'Server returned ${res.statusCode}: ${res.body.length > 200 ? '${res.body.substring(0, 200)}…' : res.body}');
+        setState(() => _genderSplitError = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => _genderSplitError = 'Could not reach server: $e');
+      setState(() => _genderSplitError = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => _generatingGenderSplitReport = false);
     }
@@ -243,28 +213,18 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
       _dynError = null;
     });
     try {
-      final h = await _headers;
       final from = _fmt(_dynFrom);
       final to = _fmt(_dynTo);
       final groupBy = _groupByParam;
-      final res = await http.get(
-        Uri.parse('$baseUrl/attendance/dynamic-report?from=$from&to=$to'
-            '${groupBy.isNotEmpty ? '&group_by=$groupBy' : ''}'),
-        headers: h,
-      );
+      final res = await Api.get('/attendance/dynamic-report?from=$from&to=$to'
+          '${groupBy.isNotEmpty ? '&group_by=$groupBy' : ''}');
       if (res.statusCode == 200) {
         setState(() => _dynResult = jsonDecode(res.body));
       } else {
-        Map<String, dynamic> data = {};
-        try {
-          data = jsonDecode(res.body);
-        } catch (_) {}
-        final serverMsg = data['error'] as String?;
-        setState(() => _dynError = serverMsg ??
-            'Server returned ${res.statusCode}: ${res.body.length > 200 ? '${res.body.substring(0, 200)}…' : res.body}');
+        setState(() => _dynError = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => _dynError = 'Could not reach server: $e');
+      setState(() => _dynError = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => _loadingDynamic = false);
     }
@@ -276,15 +236,11 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
       _dynError = null;
     });
     try {
-      final h = await _headers;
       final from = _fmt(_dynFrom);
       final to = _fmt(_dynTo);
       final groupBy = _groupByParam;
-      final res = await http.get(
-        Uri.parse('$baseUrl/attendance/dynamic-report?from=$from&to=$to'
-            '${groupBy.isNotEmpty ? '&group_by=$groupBy' : ''}&format=xlsx'),
-        headers: h,
-      );
+      final res = await Api.get('/attendance/dynamic-report?from=$from&to=$to'
+          '${groupBy.isNotEmpty ? '&group_by=$groupBy' : ''}&format=xlsx');
       if (res.statusCode == 200) {
         final filename = 'attendance-dynamic-report_${from}_to_$to.xlsx';
         final result = await savePdfBytes(res.bodyBytes, filename);
@@ -303,16 +259,10 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
           await _showResultSheet(result.filePath!, filename);
         }
       } else {
-        Map<String, dynamic> data = {};
-        try {
-          data = jsonDecode(res.body);
-        } catch (_) {}
-        final serverMsg = data['error'] as String?;
-        setState(() => _dynError = serverMsg ??
-            'Server returned ${res.statusCode}: ${res.body.length > 200 ? '${res.body.substring(0, 200)}…' : res.body}');
+        setState(() => _dynError = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => _dynError = 'Could not reach server: $e');
+      setState(() => _dynError = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => _exportingDynamic = false);
     }

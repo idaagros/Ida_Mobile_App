@@ -7,16 +7,14 @@
 // custom range and any combination of modules.
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../services/pdf_download_helper.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
+import '../services/api_client.dart';
 class DailyReportsScreen extends StatefulWidget {
   const DailyReportsScreen({super.key});
   @override
@@ -27,7 +25,6 @@ class _DailyReportsScreenState extends State<DailyReportsScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   // Module multi-select — key -> (label, icon, color)
   static const _moduleOptions = [
@@ -58,13 +55,6 @@ class _DailyReportsScreenState extends State<DailyReportsScreen> {
     _toDate = DateTime(yesterday.year, yesterday.month, yesterday.day);
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   String get _modulesParam => _selectedModules.join(',');
   String get _fromStr => DateFormat('yyyy-MM-dd').format(_fromDate);
   String get _toStr => DateFormat('yyyy-MM-dd').format(_toDate);
@@ -91,20 +81,16 @@ class _DailyReportsScreenState extends State<DailyReportsScreen> {
       _error = null;
     });
     try {
-      final h = await _headers;
-      final res = await http.get(
-        Uri.parse(
-            '$baseUrl/daily-reports/preview-count?modules=$_modulesParam&from=$_fromStr&to=$_toStr'),
-        headers: h,
+      final res = await Api.get(
+        '/daily-reports/preview-count?modules=$_modulesParam&from=$_fromStr&to=$_toStr',
       );
       if (res.statusCode == 200) {
         setState(() => _previewCounts = jsonDecode(res.body));
       } else {
-        final data = jsonDecode(res.body);
-        setState(() => _error = data['error'] ?? 'Failed to load preview');
+        setState(() => _error = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => _error = 'Could not reach server: $e');
+      setState(() => _error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       setState(() => _loadingPreview = false);
     }
@@ -153,11 +139,8 @@ class _DailyReportsScreenState extends State<DailyReportsScreen> {
       _error = null;
     });
     try {
-      final h = await _headers;
-      final res = await http.get(
-        Uri.parse(
-            '$baseUrl/daily-reports/generate?modules=$_modulesParam&from=$_fromStr&to=$_toStr${kind == 'xlsx' ? '&format=xlsx' : ''}'),
-        headers: h,
+      final res = await Api.get(
+        '/daily-reports/generate?modules=$_modulesParam&from=$_fromStr&to=$_toStr${kind == 'xlsx' ? '&format=xlsx' : ''}',
       );
 
       if (res.statusCode == 200) {
@@ -179,14 +162,10 @@ class _DailyReportsScreenState extends State<DailyReportsScreen> {
           await _showResultSheet(result.filePath!, filename);
         }
       } else {
-        Map<String, dynamic> data = {};
-        try {
-          data = jsonDecode(res.body);
-        } catch (_) {}
-        setState(() => _error = data['error'] ?? 'Failed to generate report');
+        setState(() => _error = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => _error = 'Could not reach server: $e');
+      setState(() => _error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       setState(() => _generating = false);
     }

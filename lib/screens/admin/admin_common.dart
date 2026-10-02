@@ -11,7 +11,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import '../../config/app_config.dart';
+import '../../services/api_client.dart';
 import '../../services/api_service.dart';
 
 const Color aGreen = Color(0xFF3B7A28);
@@ -41,47 +41,18 @@ class AdminApiError implements Exception {
 }
 
 class AdminApi {
-  static Future<Map<String, String>> _headers(Map<String, String>? extra) async {
-    final token = await ApiService.getToken();
-    final h = <String, String>{'Content-Type': 'application/json', 'Authorization': 'Bearer ${token ?? ''}'};
-    if (extra != null) h.addAll(extra);
-    return h;
-  }
-
   static Future<dynamic> send(String method, String path, {Object? body, Map<String, String>? headers}) async {
-    final uri = Uri.parse('${AppConfig.apiBaseUrl}$path');
-    final h = await _headers(headers);
     final b = body == null ? null : jsonEncode(body);
-    const limit = Duration(seconds: 60);
     http.Response res;
-    switch (method) {
-      case 'POST':
-        res = await http.post(uri, headers: h, body: b ?? '{}').timeout(limit);
-        break;
-      case 'PUT':
-        res = await http.put(uri, headers: h, body: b ?? '{}').timeout(limit);
-        break;
-      case 'PATCH':
-        res = await http.patch(uri, headers: h, body: b ?? '{}').timeout(limit);
-        break;
-      case 'DELETE':
-        res = await http.delete(uri, headers: h).timeout(limit);
-        break;
-      default:
-        res = await http.get(uri, headers: h).timeout(limit);
+    try {
+      res = await Api.send(method, path, body: b, headers: headers, timeout: const Duration(seconds: 60));
+    } catch (e) {
+      throw AdminApiError(Api.errorText(e), 0, <String, dynamic>{});
     }
-    dynamic data;
-    if (res.body.isNotEmpty) {
-      try {
-        data = jsonDecode(res.body);
-      } catch (_) {
-        data = null;
-      }
-    }
+    final data = Api.decode(res);
     if (res.statusCode < 200 || res.statusCode >= 300) {
       final map = data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
-      final msg = map['error']?.toString() ?? 'Something went wrong (${res.statusCode})';
-      throw AdminApiError(msg, res.statusCode, map);
+      throw AdminApiError(Api.responseError(res), res.statusCode, map);
     }
     return data;
   }

@@ -7,12 +7,11 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
 
 import '../config/app_config.dart';
+import '../services/api_client.dart';
 class PfAlertsScreen extends StatefulWidget {
   const PfAlertsScreen({super.key});
   @override
@@ -34,30 +33,21 @@ class _PfAlertsScreenState extends State<PfAlertsScreen> {
     _fetchAlerts();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final p = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${p.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _fetchAlerts() async {
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final h = await _headers;
-      final res = await http.get(Uri.parse('$baseUrl/machine-pf/pf-alerts'),
-          headers: h);
+      final res = await Api.get('/machine-pf/pf-alerts');
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);
         setState(() => _alerts = body is List ? body : []);
       } else {
-        setState(() => _error = 'Failed to load alerts');
+        setState(() => _error = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => _error = 'Could not reach server: $e');
+      setState(() => _error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -65,11 +55,7 @@ class _PfAlertsScreenState extends State<PfAlertsScreen> {
 
   Future<void> _acknowledge(dynamic id) async {
     try {
-      final h = await _headers;
-      final res = await http.patch(
-        Uri.parse('$baseUrl/machine-pf/pf-alerts/$id/acknowledge'),
-        headers: h,
-      );
+      final res = await Api.patch('/machine-pf/pf-alerts/$id/acknowledge');
       if (res.statusCode == 200) {
         setState(() => _alerts.removeWhere((a) => a['id'] == id));
         if (mounted) {

@@ -1,11 +1,9 @@
 // lib/screens/admin_review_screen.dart
 import 'package:flutter/material.dart';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_client.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
 class AdminReviewScreen extends StatefulWidget {
   // Optional initial status filter — 'pending', 'approved', or 'returned'.
   // Lets the dashboard stat cards deep-link straight into a filtered view.
@@ -26,7 +24,6 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   late TabController _tabs;
 
@@ -67,18 +64,9 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
     super.dispose();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final p = await SharedPreferences.getInstance();
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ${p.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _fetchAll() async {
     setState(() => _loading = true);
     try {
-      final h = await _headers;
       // 'all' (used by the dashboard's "Submissions this month" card)
       // fetches every status, filtered to the current month client-side.
       // Otherwise a single status: pending / approved / returned.
@@ -104,9 +92,7 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
             params['status'] = status;
           if (fromStr != null) params['from'] = fromStr;
           if (toStr != null) params['to'] = toStr;
-          final uri = Uri.parse('$baseUrl/$module')
-              .replace(queryParameters: params.isEmpty ? null : params);
-          final res = await http.get(uri, headers: h);
+          final res = await Api.get('/$module', query: params);
           final merged = _parse(res.body);
 
           if (_filter == 'all' && fromStr == null && toStr == null) {
@@ -157,7 +143,6 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
   // each tab. Labour doesn't use this status model, so it's skipped.
   Future<void> _fetchCounts() async {
     try {
-      final h = await _headers;
       final modules = [
         'electricity',
         'tractor',
@@ -167,8 +152,7 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
       ];
       final results = await Future.wait(modules.map((m) async {
         try {
-          final res =
-              await http.get(Uri.parse('$baseUrl/$m/counts'), headers: h);
+          final res = await Api.get('/$m/counts');
           if (res.statusCode == 200) {
             final data = jsonDecode(res.body) as Map<String, dynamic>;
             return data.map((status, v) => MapEntry(status, {
@@ -205,10 +189,8 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
   Future<void> _updateStatus(String module, dynamic id, String status,
       {String? note}) async {
     try {
-      final h = await _headers;
-      final res = await http.patch(
-        Uri.parse('$baseUrl/$module/$id/status'),
-        headers: h,
+      final res = await Api.patch(
+        '/$module/$id/status',
         body: jsonEncode({
           'status': status,
           if (note != null && note.isNotEmpty) 'admin_note': note,
@@ -252,10 +234,9 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
         }
         _fetchCounts();
       } else {
-        final data = jsonDecode(res.body);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(data['error'] ?? 'Update failed'),
+            content: Text(Api.responseError(res)),
             backgroundColor: Colors.red.shade700,
           ));
         }
@@ -609,11 +590,9 @@ class _AdminReviewScreenState extends State<AdminReviewScreen>
     required String notes,
   }) async {
     try {
-      final h = await _headers;
       final fieldKey = module == 'machine-pf' ? 'pf_value' : 'meter_reading';
-      final res = await http.put(
-        Uri.parse('$baseUrl/$module/$id/admin-edit'),
-        headers: h,
+      final res = await Api.put(
+        '/$module/$id/admin-edit',
         body: jsonEncode({
           fieldKey: meterReading,
           'notes': notes,

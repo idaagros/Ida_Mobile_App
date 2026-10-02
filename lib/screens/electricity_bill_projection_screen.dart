@@ -8,11 +8,9 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
+import '../services/api_client.dart';
 import 'reports/reports_common.dart' show ReportApi;
 class ElectricityBillProjectionScreen extends StatefulWidget {
   const ElectricityBillProjectionScreen({super.key});
@@ -25,15 +23,6 @@ class _ElectricityBillProjectionScreenState
     extends State<ElectricityBillProjectionScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
-
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   bool loading = true;
   Map<String, dynamic>? data;
   String? error;
@@ -50,16 +39,14 @@ class _ElectricityBillProjectionScreenState
       error = null;
     });
     try {
-      final h = await _headers;
-      final res = await http
-          .get(Uri.parse('$baseUrl/electricity-bill/projection'), headers: h);
+      final res = await Api.get('/electricity-bill/projection');
       if (res.statusCode == 200) {
         setState(() => data = jsonDecode(res.body));
       } else {
-        setState(() => error = 'Failed to load projection');
+        setState(() => error = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => error = 'Could not reach server: $e');
+      setState(() => error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -92,7 +79,7 @@ class _ElectricityBillProjectionScreenState
                 await ReportApi.download(context, '/electricity-bill/projection?format=$kind', 'electricity-bill-projection_$month.$kind');
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e'.replaceFirst('Exception: ', ''))));
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(Api.errorText(e))));
                 }
               }
             },
@@ -312,16 +299,6 @@ class TariffSettingsScreen extends StatefulWidget {
 class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
-
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'Content-Type': 'application/json',
-    };
-  }
-
   bool loading = true;
   bool saving = false;
   String? error;
@@ -345,9 +322,7 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
       error = null;
     });
     try {
-      final h = await _headers;
-      final res = await http
-          .get(Uri.parse('$baseUrl/electricity-bill/settings'), headers: h);
+      final res = await Api.get('/electricity-bill/settings');
       if (res.statusCode == 200) {
         final s = jsonDecode(res.body);
         energyCtrl.text = s['energy_rate_per_unit'].toString();
@@ -358,10 +333,10 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
         dutyCtrl.text = s['electricity_duty_pct'].toString();
         readingType = s['daily_reading_type'] ?? 'kwh';
       } else {
-        setState(() => error = 'Failed to load settings');
+        setState(() => error = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => error = 'Could not reach server: $e');
+      setState(() => error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -373,10 +348,8 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
       error = null;
     });
     try {
-      final h = await _headers;
-      final res = await http.put(
-        Uri.parse('$baseUrl/electricity-bill/settings'),
-        headers: h,
+      final res = await Api.put(
+        '/electricity-bill/settings',
         body: jsonEncode({
           'energy_rate_per_unit': double.tryParse(energyCtrl.text.trim()),
           'wheeling_rate_per_unit': double.tryParse(wheelingCtrl.text.trim()),
@@ -391,11 +364,10 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
       if (res.statusCode == 200) {
         if (mounted) Navigator.pop(context);
       } else {
-        final data = jsonDecode(res.body);
-        setState(() => error = data['error'] ?? 'Failed to save');
+        setState(() => error = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => error = 'Could not reach server: $e');
+      setState(() => error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => saving = false);
     }

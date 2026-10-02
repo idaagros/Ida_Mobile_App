@@ -46,6 +46,7 @@ class _FactoryTractorDieselScreenState extends State<FactoryTractorDieselScreen>
   bool _loading = true;
   String? _error;
   bool _canAdd = false;
+  bool _canUpdate = false; // correcting a returned fill is Update on the server
   int? _me;
 
   @override
@@ -56,6 +57,7 @@ class _FactoryTractorDieselScreenState extends State<FactoryTractorDieselScreen>
 
   Future<void> _init() async {
     _canAdd = await ApiService.canAdd('tractor');
+    _canUpdate = await ApiService.canUpdate('tractor');
     _me = await myUserId();
     await _load();
   }
@@ -321,7 +323,7 @@ class _FactoryTractorDieselScreenState extends State<FactoryTractorDieselScreen>
             SizedBox(height: 34, child: FilledButton(style: aPrimary(height: 34), onPressed: () => _decide(f, 'approved'), child: const Text('Approve'))),
             SizedBox(height: 34, child: OutlinedButton(style: aSecondary(height: 34), onPressed: () => _decide(f, 'returned'), child: const Text('Return'))),
           ],
-          if (st == 'returned' && (mine || canApprove) && _canAdd)
+          if (st == 'returned' && (mine || canApprove) && _canUpdate)
             SizedBox(height: 34, child: OutlinedButton(style: aSecondary(height: 34), onPressed: () => _form(f), child: const Text('Correct'))),
         ]),
       ]),

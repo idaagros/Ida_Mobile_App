@@ -7,15 +7,12 @@
 // pattern instead: tap the map to drop a point, see the shape build up
 // live, Undo/Clear/Save. That mirrors what the web version does under
 // the hood anyway.
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import '../services/geo_utils.dart';
 
-import '../config/app_config.dart';
+import '../services/api_client.dart';
 class FarmBoundaryMapScreen extends StatefulWidget {
   final int farmId;
   final String farmName;
@@ -39,7 +36,6 @@ class FarmBoundaryMapScreen extends StatefulWidget {
 class _FarmBoundaryMapScreenState extends State<FarmBoundaryMapScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
   static const _defaultCenter = ll.LatLng(21.0, 77.75); // Amravati district, Maharashtra fallback
 
   final _mapController = MapController();
@@ -65,13 +61,6 @@ class _FarmBoundaryMapScreenState extends State<FarmBoundaryMapScreen> {
     }
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   double get _areaAcres {
     if (_points.length < 3) return 0;
     return polygonAreaAcres(_points.map((p) => [p.longitude, p.latitude]).toList());
@@ -92,20 +81,17 @@ class _FarmBoundaryMapScreenState extends State<FarmBoundaryMapScreen> {
     ring.add(ring.first); // close the ring - standard GeoJSON practice
     final geojson = {'type': 'Polygon', 'coordinates': [ring]};
     try {
-      final h = await _headers;
-      final res = await http.patch(
-        Uri.parse('$baseUrl/farms/${widget.farmId}/boundary'),
-        headers: {...h, 'Content-Type': 'application/json'},
-        body: jsonEncode({'geojson': geojson}),
+      final res = await Api.patch(
+        '/farms/${widget.farmId}/boundary',
+        body: {'geojson': geojson},
       );
-      final data = jsonDecode(res.body);
       if (res.statusCode == 200) {
         if (mounted) Navigator.pop(context, true);
       } else {
-        setState(() => _error = data['error'] ?? 'Failed to save boundary');
+        setState(() => _error = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => _error = 'Could not reach server: $e');
+      setState(() => _error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => _saving = false);
     }

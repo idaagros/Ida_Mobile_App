@@ -19,8 +19,9 @@ class StepEditorScreen extends StatefulWidget {
   final Map? step; // null = new
   final List products;
   final bool canEdit;
+  final bool canDelete; // Delete level on Crop planning (deleting a step)
   const StepEditorScreen(
-      {super.key, required this.variety, required this.steps, this.step, required this.products, required this.canEdit});
+      {super.key, required this.variety, required this.steps, this.step, required this.products, required this.canEdit, this.canDelete = false});
   @override
   State<StepEditorScreen> createState() => _StepEditorScreenState();
 }
@@ -195,7 +196,7 @@ class _StepEditorScreenState extends State<StepEditorScreen> {
           Text('${widget.variety['crop_name']} · ${widget.variety['name']}', style: const TextStyle(fontSize: 12, color: Colors.white70)),
         ]),
         actions: [
-          if (s != null && ed) IconButton(tooltip: 'Delete step', onPressed: saving ? null : _delete, icon: const Icon(Icons.delete_outline)),
+          if (s != null && ed && widget.canDelete) IconButton(tooltip: 'Delete step', onPressed: saving ? null : _delete, icon: const Icon(Icons.delete_outline)),
         ],
       ),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 24), children: [

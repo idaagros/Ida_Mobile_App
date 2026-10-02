@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../config/app_config.dart';
+import '../services/api_service.dart';
+import '../services/api_client.dart';
 class MachineMaintScreen extends StatefulWidget {
   // 0=Activities, 1=Alerts, 2=History - the review-with-approve/reject
   // list lives in History, so the Needs Attention inbox needs this to
@@ -21,7 +21,6 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
   static const red = Color(0xFFE24B4A);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   late TabController _tabs;
   List activities = [];
@@ -30,13 +29,33 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
   double odometer = 0;
   bool loading = true;
   String? userRole;
+  // Levels on this module (admin has all): Mark as done = Add, approve /
+  // reject a logged job = Approve, acknowledge an alert and edit a
+  // threshold = Update.
+  bool mayAdd = false;
+  bool mayApprove = false;
+  bool mayUpdate = false;
 
   @override
   void initState() {
     super.initState();
     _tabs = TabController(
         length: 3, vsync: this, initialIndex: widget.initialTabIndex ?? 0);
+    _loadPerms();
     _loadAll();
+  }
+
+  Future<void> _loadPerms() async {
+    final a = await ApiService.canAdd('machine_maintenance');
+    final ap = await ApiService.canApprove('machine_maintenance');
+    final u = await ApiService.canUpdate('machine_maintenance');
+    if (mounted) {
+      setState(() {
+        mayAdd = a;
+        mayApprove = ap;
+        mayUpdate = u;
+      });
+    }
   }
 
   @override
@@ -45,24 +64,19 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
     super.dispose();
   }
 
-  Future<Map<String, String>> get _headers async {
+  Future<void> _loadRole() async {
     final p = await SharedPreferences.getInstance();
     userRole ??= p.getString('role');
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ${p.getString('token') ?? ''}',
-    };
   }
 
   Future<void> _loadAll() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
+      await _loadRole();
       final results = await Future.wait([
-        http.get(Uri.parse('$baseUrl/machine-maintenance/activities'),
-            headers: h),
-        http.get(Uri.parse('$baseUrl/machine-maintenance/alerts'), headers: h),
-        http.get(Uri.parse('$baseUrl/machine-maintenance/log'), headers: h),
+        Api.get('/machine-maintenance/activities'),
+        Api.get('/machine-maintenance/alerts'),
+        Api.get('/machine-maintenance/log'),
       ]);
       if (results[0].statusCode == 200) {
         final data = jsonDecode(results[0].body);
@@ -136,10 +150,8 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
     if (confirmed != true) return;
 
     try {
-      final h = await _headers;
-      final res = await http.post(
-        Uri.parse('$baseUrl/machine-maintenance/log'),
-        headers: h,
+      final res = await Api.post(
+        '/machine-maintenance/log',
         body: jsonEncode({
           'activity_id': activity['id'],
           'notes': notesCtrl.text.trim(),
@@ -158,22 +170,20 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
       } else {
         if (mounted)
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(data['error'] ?? 'Failed'),
+            content: Text(Api.responseError(res)),
             backgroundColor: red,
           ));
       }
     } catch (e) {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e'), backgroundColor: red));
+            SnackBar(content: Text('Error: ${Api.errorText(e)}'), backgroundColor: red));
     }
   }
 
   Future<void> _acknowledgeAlert(int alertId) async {
-    final h = await _headers;
-    await http.patch(
-        Uri.parse('$baseUrl/maintenance/alerts/$alertId/acknowledge'),
-        headers: h);
+    await Api.patch(
+        '/machine-maintenance/alerts/$alertId/acknowledge');
     _loadAll();
   }
 
@@ -213,20 +223,16 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
     );
 
     if (confirmed != true) return;
-    final h = await _headers;
-    await http.patch(
-      Uri.parse('$baseUrl/machine-maintenance/activities/${activity['id']}'),
-      headers: h,
+    await Api.patch(
+      '/machine-maintenance/activities/${activity['id']}',
       body: jsonEncode({'threshold_hours': double.tryParse(ctrl.text)}),
     );
     _loadAll();
   }
 
   Future<void> _approveLog(int logId, String status) async {
-    final h = await _headers;
-    await http.patch(
-      Uri.parse('$baseUrl/maintenance/log/$logId/status'),
-      headers: h,
+    await Api.patch(
+      '/machine-maintenance/log/$logId/status',
       body: jsonEncode({'status': status}),
     );
     _loadAll();
@@ -419,7 +425,7 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
                           fontWeight: FontWeight.w700,
                           color: statusColor)),
                 ),
-                if (userRole == 'admin') ...[
+                if (mayUpdate) ...[
                   const SizedBox(height: 4),
                   GestureDetector(
                     onTap: () => _updateThreshold(a),
@@ -485,6 +491,7 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
             ])),
 
         // Action button
+        if (mayAdd)
         Padding(
             padding: const EdgeInsets.all(14),
             child: SizedBox(
@@ -553,7 +560,7 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
                             color: red,
                             fontWeight: FontWeight.w600)),
                 ])),
-            if (!acked)
+            if (!acked && mayUpdate)
               ElevatedButton(
                 onPressed: () => _acknowledgeAlert(alert['id']),
                 style: ElevatedButton.styleFrom(
@@ -566,7 +573,7 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
                 child: const Text('Acknowledge',
                     style: TextStyle(color: Colors.white, fontSize: 11)),
               )
-            else
+            else if (acked)
               const Icon(Icons.check_circle, color: idaGreen, size: 20),
           ]),
         );
@@ -648,8 +655,7 @@ class _MachineMaintScreenState extends State<MachineMaintScreen>
                         fontSize: 12, color: Color(0xFF6B7280))),
               ],
               // Approve/reject for admin/office
-              if ((userRole == 'admin' || userRole == 'office') &&
-                  entry['status'] == 'pending') ...[
+              if (mayApprove && entry['status'] == 'pending') ...[
                 const SizedBox(height: 10),
                 Row(children: [
                   Expanded(

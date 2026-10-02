@@ -26,10 +26,10 @@ import 'dart:math';
 import 'dart:ui' show DartPluginRegistrant;
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 import '../config/app_config.dart';
+import 'api_client.dart';
 import '../screens/review/review_queue_screen.dart';
 import '../screens/attendance_screen.dart';
 import '../screens/electricity_screen.dart';
@@ -105,14 +105,6 @@ class PushService {
     } catch (_) {}
   }
 
-  static Future<Map<String, String>> _headers() async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'Content-Type': 'application/json',
-    };
-  }
-
   static Future<String> _deviceId() async {
     final prefs = await SharedPreferences.getInstance();
     var id = prefs.getString(_prefDeviceId);
@@ -149,11 +141,8 @@ class PushService {
   // Shows this phone in the admin's device list, with when it last checked.
   static Future<void> _tellServer() async {
     try {
-      await http.post(
-        Uri.parse('${AppConfig.apiBaseUrl}/notifications/token'),
-        headers: await _headers(),
-        body: jsonEncode({'token': 'check:${await _deviceId()}', 'platform': 'android', 'device_info': 'Ida AgriCo Android app'}),
-      );
+      await Api.post('/notifications/token',
+          body: {'token': 'check:${await _deviceId()}', 'platform': 'android', 'device_info': 'Ida AgriCo Android app'});
     } catch (_) {}
   }
 
@@ -170,7 +159,7 @@ class PushService {
       // keys - re-read so neither side shows a notification twice.
       await prefs.reload();
       if ((prefs.getString('token') ?? '').isEmpty) return;
-      final res = await http.get(Uri.parse('${AppConfig.apiBaseUrl}/notifications?limit=20'), headers: await _headers());
+      final res = await Api.get('/notifications?limit=20');
       if (res.statusCode != 200) return;
       final d = jsonDecode(res.body) as Map;
       unreadCount.value = (d['unread'] as num?)?.toInt() ?? 0;
@@ -243,11 +232,7 @@ class PushService {
   /// Call on sign-out, BEFORE clearing the saved login.
   static Future<void> unregisterDevice() async {
     try {
-      await http.delete(
-        Uri.parse('${AppConfig.apiBaseUrl}/notifications/token'),
-        headers: await _headers(),
-        body: jsonEncode({'token': 'check:${await _deviceId()}'}),
-      );
+      await Api.delete('/notifications/token', body: {'token': 'check:${await _deviceId()}'});
     } catch (_) {}
     try {
       await Workmanager().cancelByUniqueName(_checkTask);
@@ -279,7 +264,7 @@ class PushService {
   static Future<void> markRead(dynamic id) async {
     if (id == null || id.toString().isEmpty) return;
     try {
-      await http.patch(Uri.parse('${AppConfig.apiBaseUrl}/notifications/$id/read'), headers: await _headers());
+      await Api.patch('/notifications/$id/read');
     } catch (_) {}
     refreshUnread();
   }

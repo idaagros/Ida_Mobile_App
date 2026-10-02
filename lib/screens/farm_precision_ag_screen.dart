@@ -17,12 +17,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'farm_boundary_map_screen.dart';
 
 import '../config/app_config.dart';
+import '../services/api_client.dart';
 
 class FarmPrecisionAgScreen extends StatefulWidget {
   final int farmId;
@@ -41,7 +40,6 @@ class FarmPrecisionAgScreen extends StatefulWidget {
 class _FarmPrecisionAgScreenState extends State<FarmPrecisionAgScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get apiBase => AppConfig.apiBaseUrl;
   static String get assetBase => AppConfig.apiHost; // apiBase without /api - where /uploads/... images are served from
 
   Map<String, dynamic>? _data;
@@ -56,31 +54,20 @@ class _FarmPrecisionAgScreenState extends State<FarmPrecisionAgScreen> {
     _load();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final h = await _headers;
-      final res = await http.get(
-          Uri.parse('$apiBase/farms/${widget.farmId}/satellite'),
-          headers: h);
+      final res = await Api.get('/farms/${widget.farmId}/satellite');
       if (res.statusCode == 200) {
         _data = jsonDecode(res.body);
       } else {
-        _error =
-            'Could not load precision agriculture data (${res.statusCode})';
+        _error = Api.responseError(res);
       }
     } catch (e) {
-      _error = 'Could not reach server: $e';
+      _error = 'Could not reach server: ${Api.errorText(e)}';
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -92,11 +79,7 @@ class _FarmPrecisionAgScreenState extends State<FarmPrecisionAgScreen> {
       _refreshNote = null;
     });
     try {
-      final h = await _headers;
-      final res = await http.post(
-        Uri.parse('$apiBase/farms/${widget.farmId}/satellite/refresh'),
-        headers: {...h, 'Content-Type': 'application/json'},
-      );
+      final res = await Api.post('/farms/${widget.farmId}/satellite/refresh');
       final data = jsonDecode(res.body);
       if (res.statusCode == 200) {
         final errors = (data['errors'] as Map?) ?? {};
@@ -106,11 +89,11 @@ class _FarmPrecisionAgScreenState extends State<FarmPrecisionAgScreen> {
                 .map((e) => _friendlyRefreshError(e.key.toString(), '${e.value}'))
                 .join(' ');
       } else {
-        _refreshNote = data['error'] ?? 'Refresh failed';
+        _refreshNote = Api.responseError(res);
       }
       await _load();
     } catch (e) {
-      setState(() => _refreshNote = 'Could not reach server: $e');
+      setState(() => _refreshNote = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => _refreshing = false);
     }

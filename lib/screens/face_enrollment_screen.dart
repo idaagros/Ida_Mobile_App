@@ -5,15 +5,12 @@
 // lets the admin retake until happy, then computes and saves the
 // embedding (never the photo itself) via POST /api/face/enroll.
 
-import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:camera/camera.dart';
 import '../services/face_recognition_service.dart';
+import '../services/api_client.dart';
 
-import '../config/app_config.dart';
 class FaceEnrollmentScreen extends StatefulWidget {
   final int workerId;
   final String workerName;
@@ -27,7 +24,6 @@ class FaceEnrollmentScreen extends StatefulWidget {
 class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   CameraController? _controller;
   final _faceService = FaceRecognitionService();
@@ -103,26 +99,19 @@ class _FaceEnrollmentScreenState extends State<FaceEnrollmentScreen> {
             'No face detected — please retake with your face clearly visible');
         return;
       }
-      final prefs = await SharedPreferences.getInstance();
-      final res = await http.post(
-        Uri.parse('$baseUrl/face/enroll'),
-        headers: {
-          'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-          'Content-Type': 'application/json',
-        },
-        body:
-            jsonEncode({'worker_id': widget.workerId, 'embedding': embedding}),
+      final res = await Api.post(
+        '/face/enroll',
+        body: {'worker_id': widget.workerId, 'embedding': embedding},
       );
       if (res.statusCode == 200) {
         if (mounted) Navigator.pop(context, true);
       } else {
-        final data = jsonDecode(res.body);
-        setState(() => _error = data['error'] ?? 'Failed to save enrollment');
+        setState(() => _error = Api.responseError(res));
       }
     } on MultipleFacesException catch (e) {
       setState(() => _error = e.toString());
     } catch (e) {
-      setState(() => _error = 'Could not reach server: $e');
+      setState(() => _error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => _processing = false);
     }

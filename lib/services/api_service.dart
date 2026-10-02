@@ -1,11 +1,11 @@
 // lib/services/api_service.dart
 
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../localization/app_locale.dart';
 import '../models/user_model.dart';
+import 'api_client.dart';
 
 class ApiService {
   static String get baseUrl => AppConfig.apiHost; // from lib/config/app_config.dart
@@ -105,6 +105,24 @@ class ApiService {
     return hasApproveAccess(perms, moduleKey);
   }
 
+  /// Reopen level (reopen a closed day / allocation, backfill a past day,
+  /// cancel or restore a crop cycle, link unassigned work). Admin always.
+  static Future<bool> canReopen(String moduleKey) async {
+    if (await isAdmin()) return true;
+    final perms = await getPermissions();
+    return hasReopenAccess(perms, moduleKey);
+  }
+
+  /// Add OR update on one section - what the server's
+  /// requireFixedSectionAny(module, scope, ['add','update']) accepts
+  /// (farm attendance: marking = 'attendance', allocating = 'allocation').
+  static Future<bool> canWriteSection(String moduleKey, String scope) async {
+    if (await isAdmin()) return true;
+    final perms = await getPermissions();
+    return hasScopedLevel(perms, moduleKey, scope, 'add') ||
+        hasScopedLevel(perms, moduleKey, scope, 'update');
+  }
+
   /// Section-scoped approve check, for the same sectioned modules as
   /// canUpdateSection (e.g. farm_attendance's two stages) - matches the
   /// backend's requireFixedSection(module, scope, 'approve') exactly.
@@ -132,8 +150,7 @@ class ApiService {
   }
 
   static Future<void> clearSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
+    await Api.endSession(); // keeps the saved server address
   }
 
   /// Changes the logged-in user's language preference — persisted on
@@ -141,11 +158,7 @@ class ApiService {
   /// immediately in this session.
   static Future<bool> setLanguage(String code) async {
     try {
-      final res = await http.put(
-        Uri.parse('$baseUrl/api/users/me/language'),
-        headers: await _authHeaders(),
-        body: jsonEncode({'language': code}),
-      );
+      final res = await Api.put('/users/me/language', body: {'language': code});
       if (res.statusCode == 200) {
         await AppLocale.apply(code);
         return true;
@@ -158,16 +171,6 @@ class ApiService {
       print('setLanguage error: $e');
       return false;
     }
-  }
-
-  // ── HTTP helpers ───────────────────────────────────────────────────────────
-
-  static Future<Map<String, String>> _authHeaders() async {
-    final token = await getToken();
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
-    };
   }
 
   // Field reports (/api/reports) and check-in/out registers (/api/registers)

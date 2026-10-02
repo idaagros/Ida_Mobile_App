@@ -7,12 +7,11 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_client.dart';
+import '../services/api_service.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
 class TransportScreen extends StatefulWidget {
   const TransportScreen({super.key});
   @override
@@ -20,7 +19,6 @@ class TransportScreen extends StatefulWidget {
 }
 
 class _TransportScreenState extends State<TransportScreen> {
-  static String get baseUrl => AppConfig.apiBaseUrl;
   static const primaryColor = Color(0xFF1E4012);
 
   bool _isSearching = false;
@@ -30,7 +28,11 @@ class _TransportScreenState extends State<TransportScreen> {
   List _categories = [];
   List _searchResults = [];
   bool _loading = true;
-  bool _isAdmin = false;
+  // Transport directory levels (admin has all): add category / entry = Add,
+  // edit entry = Update, delete category / entry = Delete.
+  bool _canAdd = false;
+  bool _canUpdate = false;
+  bool _canDelete = false;
 
   @override
   void initState() {
@@ -38,36 +40,17 @@ class _TransportScreenState extends State<TransportScreen> {
     _loadInitial();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'Content-Type': 'application/json',
-    };
-  }
-
   Future<void> _loadInitial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('token') ?? '';
-    if (token.isNotEmpty) {
-      try {
-        final parts = token.split('.');
-        if (parts.length == 3) {
-          final payload = jsonDecode(
-              utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))));
-          _isAdmin = payload['is_admin'] == true;
-        }
-      } catch (_) {}
-    }
+    _canAdd = await ApiService.canAdd('transport');
+    _canUpdate = await ApiService.canUpdate('transport');
+    _canDelete = await ApiService.canDelete('transport');
     await _loadCategories();
   }
 
   Future<void> _loadCategories() async {
     setState(() => _loading = true);
     try {
-      final h = await _headers;
-      final res = await http.get(Uri.parse('$baseUrl/transport/categories'),
-          headers: h);
+      final res = await Api.get('/transport/categories');
       if (res.statusCode == 200) {
         setState(() => _categories = jsonDecode(res.body));
       }
@@ -84,12 +67,8 @@ class _TransportScreenState extends State<TransportScreen> {
       return;
     }
     try {
-      final h = await _headers;
-      final res = await http.get(
-        Uri.parse(
-            '$baseUrl/transport/entries?search=${Uri.encodeComponent(query)}'),
-        headers: h,
-      );
+      final res = await Api.get(
+          '/transport/entries?search=${Uri.encodeComponent(query)}');
       if (res.statusCode == 200)
         setState(() => _searchResults = jsonDecode(res.body));
     } catch (e) {
@@ -204,10 +183,8 @@ class _TransportScreenState extends State<TransportScreen> {
               style: ElevatedButton.styleFrom(backgroundColor: primaryColor),
               onPressed: () async {
                 if (nameCtrl.text.trim().isEmpty) return;
-                final h = await _headers;
-                final res = await http.post(
-                  Uri.parse('$baseUrl/transport/categories'),
-                  headers: h,
+                final res = await Api.post(
+                  '/transport/categories',
                   body: jsonEncode({
                     'name': nameCtrl.text.trim(),
                     'icon': selectedKey ?? 'local_shipping',
@@ -219,9 +196,8 @@ class _TransportScreenState extends State<TransportScreen> {
                 if (res.statusCode == 200) {
                   _loadCategories();
                 } else {
-                  final err = jsonDecode(res.body);
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(err['error'] ?? 'Failed'),
+                      content: Text(Api.responseError(res)),
                       backgroundColor: Colors.red));
                 }
               },
@@ -240,11 +216,11 @@ class _TransportScreenState extends State<TransportScreen> {
         MaterialPageRoute(
           builder: (_) => _TransportCategoryScreen(
             category: cat,
-            baseUrl: baseUrl,
-            headers: () => _headers,
             colors: _categoryColors(cat['color']?.toString()),
             icon: _categoryIcon(cat['icon']?.toString()),
-            isAdmin: _isAdmin,
+            canAdd: _canAdd,
+            canUpdate: _canUpdate,
+            canDelete: _canDelete,
           ),
         )).then((_) => _loadCategories());
   }
@@ -296,7 +272,7 @@ class _TransportScreenState extends State<TransportScreen> {
                   ? _buildSearchResults()
                   : _buildCategoryGrid(),
           maxWidth: 600),
-      floatingActionButton: _isAdmin
+      floatingActionButton: _canAdd
           ? FloatingActionButton(
               backgroundColor: primaryColor,
               onPressed: _showAddCategoryDialog,
@@ -326,7 +302,7 @@ class _TransportScreenState extends State<TransportScreen> {
         final icon = _categoryIcon(cat['icon']?.toString());
         final count = cat['entry_count'] ?? 0;
         return GestureDetector(
-          onLongPress: _isAdmin ? () => _confirmDeleteCategory(cat) : null,
+          onLongPress: _canDelete ? () => _confirmDeleteCategory(cat) : null,
           onTap: () => _openCategory(cat),
           child: Container(
             decoration: BoxDecoration(
@@ -416,9 +392,7 @@ class _TransportScreenState extends State<TransportScreen> {
       ),
     );
     if (confirm != true) return;
-    final h = await _headers;
-    await http.delete(Uri.parse('$baseUrl/transport/categories/${cat['id']}'),
-        headers: h);
+    await Api.delete('/transport/categories/${cat['id']}');
     _loadCategories();
   }
 }
@@ -426,18 +400,18 @@ class _TransportScreenState extends State<TransportScreen> {
 // ── Per-category entry list ────────────────────────────────────────────────
 class _TransportCategoryScreen extends StatefulWidget {
   final Map category;
-  final String baseUrl;
-  final Future<Map<String, String>> Function() headers;
   final List<Color> colors;
   final IconData icon;
-  final bool isAdmin;
+  final bool canAdd;
+  final bool canUpdate;
+  final bool canDelete;
   const _TransportCategoryScreen(
       {required this.category,
-      required this.baseUrl,
-      required this.headers,
       required this.colors,
       required this.icon,
-      required this.isAdmin});
+      required this.canAdd,
+      required this.canUpdate,
+      required this.canDelete});
   @override
   State<_TransportCategoryScreen> createState() =>
       _TransportCategoryScreenState();
@@ -457,12 +431,8 @@ class _TransportCategoryScreenState extends State<_TransportCategoryScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final h = await widget.headers();
-      final res = await http.get(
-        Uri.parse(
-            '${widget.baseUrl}/transport/entries?category_id=${widget.category['id']}'),
-        headers: h,
-      );
+      final res = await Api.get(
+          '/transport/entries?category_id=${widget.category['id']}');
       if (res.statusCode == 200)
         setState(() => _entries = jsonDecode(res.body));
     } catch (e) {
@@ -526,7 +496,6 @@ class _TransportCategoryScreenState extends State<_TransportCategoryScreen> {
             onPressed: () async {
               if (nameCtrl.text.trim().isEmpty || phoneCtrl.text.trim().isEmpty)
                 return;
-              final h = await widget.headers();
               final body = jsonEncode({
                 'category_id': widget.category['id'],
                 'name': nameCtrl.text.trim(),
@@ -538,16 +507,9 @@ class _TransportCategoryScreenState extends State<_TransportCategoryScreen> {
                 'remarks': remarkCtrl.text.trim(),
               });
               if (isEdit) {
-                await http.put(
-                    Uri.parse(
-                        '${widget.baseUrl}/transport/entries/${entry['id']}'),
-                    headers: h,
-                    body: body);
+                await Api.put('/transport/entries/${entry['id']}', body: body);
               } else {
-                await http.post(
-                    Uri.parse('${widget.baseUrl}/transport/entries'),
-                    headers: h,
-                    body: body);
+                await Api.post('/transport/entries', body: body);
               }
               if (!mounted) return;
               Navigator.pop(context);
@@ -623,7 +585,7 @@ class _TransportCategoryScreenState extends State<_TransportCategoryScreen> {
                                     _makeCall(entry['additional_phone'] ?? '')),
                           _actionBtn(Icons.message, 'WhatsApp', Colors.blue,
                               () => _openWhatsApp(entry['phone'] ?? '')),
-                          if (widget.isAdmin)
+                          if (widget.canUpdate)
                             _actionBtn(Icons.edit, 'Edit', Colors.orange, () {
                               Navigator.pop(context);
                               _showEntry(entry, isEdit: true);
@@ -638,7 +600,7 @@ class _TransportCategoryScreenState extends State<_TransportCategoryScreen> {
                     _detail(Icons.receipt_long, 'GST', entry['gst']),
                     _detail(Icons.location_on, 'Location', entry['location']),
                     _detail(Icons.note, 'Remarks', entry['remarks']),
-                    if (widget.isAdmin) ...[
+                    if (widget.canDelete) ...[
                       const SizedBox(height: 16),
                       SizedBox(
                           width: double.infinity,
@@ -679,10 +641,7 @@ class _TransportCategoryScreenState extends State<_TransportCategoryScreen> {
       ),
     );
     if (confirm != true) return;
-    final h = await widget.headers();
-    await http.delete(
-        Uri.parse('${widget.baseUrl}/transport/entries/${entry['id']}'),
-        headers: h);
+    await Api.delete('/transport/entries/${entry['id']}');
     _load();
   }
 
@@ -834,11 +793,13 @@ class _TransportCategoryScreenState extends State<_TransportCategoryScreen> {
                         )),
         ),
       ]),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: themeColor,
-        onPressed: () => _showEntry({}, isEdit: false),
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
+      floatingActionButton: widget.canAdd
+          ? FloatingActionButton(
+              backgroundColor: themeColor,
+              onPressed: () => _showEntry({}, isEdit: false),
+              child: const Icon(Icons.add, color: Colors.white),
+            )
+          : null,
     );
   }
 }

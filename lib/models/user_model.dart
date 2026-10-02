@@ -44,7 +44,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'farm_attendance',
-    'levels': 'view,add,update,delete,approve',
+    'levels': 'view,add,update,delete,approve,reopen',
     'label': 'Farm Attendance',
     'description': 'Record daily attendance and wages for farm field workers',
     'route': '/farm-attendance',
@@ -70,7 +70,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'agri',
-    'levels': 'view,add,update,delete',
+    'levels': 'view,add,update,delete,reopen',
     'label': 'Crop Planning',
     'description':
         'Manage crop masters, orchard blocks and agronomy schedule templates',
@@ -79,7 +79,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'mandi_prices',
-    'levels': 'view,add,update',
+    'levels': 'view,add,update,delete',
     'label': 'Mandi Prices',
     'description':
         'Daily APMC prices for our crops, trends and the best time to sell. Add/update = manage tracked commodities, markets and MSP',
@@ -104,7 +104,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'outward_register',
-    'levels': 'view,add,update',
+    'levels': 'view,add,update,approve',
     'label': 'Outward Sales Register',
     'description': 'Log truck dispatches: weighment, bhada, invoice & agent',
     'route': '/outward-register',
@@ -172,7 +172,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   // ── Administrative modules ─────────────────────────────────────────────
   {
     'key': 'transport',
-    'levels': 'view,add,update',
+    'levels': 'view,add,update,delete',
     'label': 'Transport Directory',
     'description': 'View and manage the transporter contact directory',
     'route': '/transport',
@@ -193,12 +193,13 @@ const List<Map<String, String>> kModuleDefinitions = [
 //
 // Some modules have distinct sections/stages that need independently
 // grantable access (confirmed directly, using dispatch and farm
-// attendance as the named examples). Only 'update' level is meaningful
-// for a section grant — sections are about editing a specific part of
-// an existing record, not separately add/delete-able.
+// attendance as the named examples). Which levels can be granted per
+// section is listed in kSectionLevels below (update + approve for the
+// outward register; add + update + approve for farm attendance).
 //
 // A scoped grant is a permission entry like:
 //   {module: 'outward_register', scope: 'bhada', level: 'update'}
+//   {module: 'outward_register', scope: 'bhada', level: 'approve'}
 // which restricts to ONLY that section. An unscoped module-level grant
 // (no 'scope' field) continues to cover every section — scoping is an
 // additional restriction someone opts into, never an automatic new
@@ -216,6 +217,14 @@ const kSectionedModules = <String, List<Map<String, String>>>{
     {'key': 'attendance', 'label': 'Stage A: Attendance Marking'},
     {'key': 'allocation', 'label': 'Stage B: Work Allocation'},
   ],
+};
+
+// Levels that can be granted for a single section ("only these parts").
+// An unscoped grant of the same level covers every section. Mirrors
+// SECTION_LEVELS in the website's api/moduleDefinitions.js.
+const Map<String, List<String>> kSectionLevels = {
+  'outward_register': ['update', 'approve'],
+  'farm_attendance': ['add', 'update', 'approve'],
 };
 
 // ─── Per-module supported levels ────────────────────────────────────────
@@ -292,7 +301,7 @@ const List<String> kAgricultureModuleKeys = [
 class PermissionEntry {
   final String module;
   final String
-      level; // 'view' | 'add' | 'update' | 'delete' | 'approve' | (legacy) 'edit'
+      level; // 'view' | 'add' | 'update' | 'delete' | 'approve' | 'reopen' | (legacy) 'edit'
   // Optional - restricts this grant to one section/stage of the module
   // (e.g. 'bhada' for outward_register). Null means "applies to every
   // section" - see kSectionedModules for which modules have sections.
@@ -352,6 +361,22 @@ bool hasDeleteAccess(List<PermissionEntry> perms, String moduleKey) =>
 bool hasApproveAccess(List<PermissionEntry> perms, String moduleKey) =>
     perms.any((p) =>
         p.module == moduleKey && (p.level == 'approve' || p.level == 'edit'));
+
+// 'reopen' (Oct 2026): reopen a closed day / allocation, backfill a past
+// day, cancel or restore a crop cycle, link unassigned work. Was
+// admin-only. Legacy 'edit' covers it, like every other level.
+bool hasReopenAccess(List<PermissionEntry> perms, String moduleKey) =>
+    perms.any((p) =>
+        p.module == moduleKey && (p.level == 'reopen' || p.level == 'edit'));
+
+// Section-aware check: an unscoped grant covers every section, a scoped
+// one only its own. Matches the backend's _hasScopedLevel.
+bool hasScopedLevel(List<PermissionEntry> perms, String moduleKey,
+        String scope, String level) =>
+    perms.any((p) =>
+        p.module == moduleKey &&
+        (p.level == level || p.level == 'edit') &&
+        (p.scope == null || p.scope == scope));
 
 class AppUser {
   final String? id;
@@ -413,6 +438,9 @@ class AppUser {
 
   bool canApprove(String moduleKey) =>
       isAdmin || hasApproveAccess(permissions, moduleKey);
+
+  bool canReopen(String moduleKey) =>
+      isAdmin || hasReopenAccess(permissions, moduleKey);
 
   AppUser copyWith({
     String? username,

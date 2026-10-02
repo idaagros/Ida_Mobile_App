@@ -7,7 +7,7 @@ import '../services/image_helper.dart';
 import '../services/colored_date_picker.dart';
 import '../services/responsive.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_client.dart';
 
 import '../config/app_config.dart';
 class MachinePfScreen extends StatefulWidget {
@@ -81,21 +81,10 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
     if (mounted) setState(() {});
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _fetchReturnedRecord() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
-      final res = await http.get(
-        Uri.parse('$baseUrl/machine-pf/${widget.returnedRecordId}'),
-        headers: h,
-      );
+      final res = await Api.get('/machine-pf/${widget.returnedRecordId}');
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
@@ -154,12 +143,8 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
   Future<void> _loadPreviousReading() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
       final dateStr = DateFormat('yyyy-MM-dd').format(selectedDate);
-      final res = await http.get(
-        Uri.parse('$baseUrl/machine-pf/previous?date=$dateStr'),
-        headers: h,
-      );
+      final res = await Api.get('/machine-pf/previous?date=$dateStr');
       if (res.statusCode == 200 && res.body != 'null') {
         final data = jsonDecode(res.body);
         setState(() {
@@ -258,12 +243,8 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
   // submit regardless.
   Future<Map<String, dynamic>?> _checkDateStatus(DateTime date) async {
     try {
-      final h = await _headers;
       final dateStr = DateFormat('yyyy-MM-dd').format(date);
-      final res = await http.get(
-        Uri.parse('$baseUrl/machine-pf/check-date?date=$dateStr'),
-        headers: h,
-      );
+      final res = await Api.get('/machine-pf/check-date?date=$dateStr');
       if (res.statusCode == 200) {
         return jsonDecode(res.body) as Map<String, dynamic>;
       }
@@ -321,19 +302,17 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
     });
 
     try {
-      final h = await _headers;
       final dateStr = DateFormat('yyyy-MM-dd').format(selectedDate);
       final timeStr =
           '${selectedTime.hour.toString().padLeft(2, '0')}:${selectedTime.minute.toString().padLeft(2, '0')}:00';
 
       final isCorrection = widget.returnedRecordId != null;
       final reqUrl = isCorrection
-          ? Uri.parse('$baseUrl/machine-pf/${widget.returnedRecordId}')
-          : Uri.parse('$baseUrl/machine-pf');
+          ? Api.uri('/machine-pf/${widget.returnedRecordId}')
+          : Api.uri('/machine-pf');
 
       final request =
           http.MultipartRequest(isCorrection ? 'PUT' : 'POST', reqUrl)
-            ..headers.addAll(h)
             ..fields['reading_date'] = dateStr
             ..fields['reading_time'] = timeStr
             ..fields['pf_value'] = pfCtrl.text
@@ -345,8 +324,7 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
             filename: photoName, contentType: MediaType('image', 'jpeg')));
       }
 
-      final streamed = await request.send();
-      final res = await http.Response.fromStream(streamed);
+      final res = await Api.sendMultipart(request);
       final data = jsonDecode(res.body);
 
       if (res.statusCode == 200 || res.statusCode == 201) {
@@ -408,10 +386,10 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
           selectedTime = TimeOfDay.now();
         });
       } else {
-        setState(() => errorMessage = data['error'] ?? 'Submission failed');
+        setState(() => errorMessage = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => errorMessage = 'Error: $e');
+      setState(() => errorMessage = 'Error: ${Api.errorText(e)}');
     } finally {
       setState(() => submitting = false);
     }

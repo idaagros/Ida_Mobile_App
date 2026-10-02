@@ -12,7 +12,8 @@ class StageEditorScreen extends StatefulWidget {
   final Map? stage;
   final List<Map> steps; // numbered steps, to show which fall in this stage
   final bool canEdit;
-  const StageEditorScreen({super.key, required this.variety, this.stage, required this.steps, required this.canEdit});
+  final bool canDelete; // Delete level on Crop planning (deleting a stage)
+  const StageEditorScreen({super.key, required this.variety, this.stage, required this.steps, required this.canEdit, this.canDelete = false});
   @override
   State<StageEditorScreen> createState() => _StageEditorScreenState();
 }
@@ -127,7 +128,7 @@ class _StageEditorScreenState extends State<StageEditorScreen> {
           Text('${widget.variety['crop_name']} · ${widget.variety['name']}', style: const TextStyle(fontSize: 12, color: Colors.white70)),
         ]),
         actions: [
-          if (g != null && ed) IconButton(tooltip: 'Delete stage', onPressed: saving ? null : _delete, icon: const Icon(Icons.delete_outline)),
+          if (g != null && ed && widget.canDelete) IconButton(tooltip: 'Delete stage', onPressed: saving ? null : _delete, icon: const Icon(Icons.delete_outline)),
         ],
       ),
       body: ListView(padding: const EdgeInsets.all(16), children: [

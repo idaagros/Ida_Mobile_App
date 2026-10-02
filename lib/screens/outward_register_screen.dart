@@ -16,7 +16,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_client.dart';
 import '../services/image_helper.dart';
 import '../services/colored_date_picker.dart';
 import '../services/responsive.dart';
@@ -91,19 +91,11 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
     super.dispose();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _loadDropdowns() async {
     try {
-      final h = await _headers;
       final results = await Future.wait([
-        http.get(Uri.parse('$baseUrl/parties'), headers: h),
-        http.get(Uri.parse('$baseUrl/destinations'), headers: h),
+        Api.get('/parties'),
+        Api.get('/destinations'),
       ]);
       if (results[0].statusCode == 200) {
         setState(() => parties = jsonDecode(results[0].body));
@@ -119,9 +111,7 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
   Future<void> _loadRecord() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
-      final res = await http
-          .get(Uri.parse('$baseUrl/outward-register/$recordId'), headers: h);
+      final res = await Api.get('/outward-register/$recordId');
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
@@ -151,7 +141,7 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
         setState(() => errorMessage = 'Could not load this record');
       }
     } catch (e) {
-      setState(() => errorMessage = 'Error: $e');
+      setState(() => errorMessage = 'Error: ${Api.errorText(e)}');
     } finally {
       setState(() => loading = false);
     }
@@ -207,10 +197,8 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
       errorMessage = null;
     });
     try {
-      final h = await _headers;
-      final res = await http.post(
-        Uri.parse('$baseUrl/outward-register'),
-        headers: {...h, 'Content-Type': 'application/json'},
+      final res = await Api.post(
+        '/outward-register',
         body: jsonEncode({
           'dispatch_date': DateFormat('yyyy-MM-dd').format(dispatchDate),
           'truck_number': truckCtrl.text.trim(),
@@ -236,10 +224,10 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
         }
       } else {
         setState(
-            () => errorMessage = data['error'] ?? 'Failed to create entry');
+            () => errorMessage = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => errorMessage = 'Error: $e');
+      setState(() => errorMessage = 'Error: ${Api.errorText(e)}');
     } finally {
       setState(() => saving = false);
     }
@@ -247,10 +235,8 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
 
   Future<void> _saveHeaderField(String field, String value) async {
     try {
-      final h = await _headers;
-      final res = await http.patch(
-        Uri.parse('$baseUrl/outward-register/$recordId'),
-        headers: {...h, 'Content-Type': 'application/json'},
+      final res = await Api.patch(
+        '/outward-register/$recordId',
         body: jsonEncode({field: value}),
       );
       if (!mounted) return;
@@ -265,12 +251,8 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
           margin: const EdgeInsets.all(16),
         ));
       } else {
-        Map<String, dynamic> data = {};
-        try {
-          data = jsonDecode(res.body);
-        } catch (_) {}
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(data['error'] ?? 'Could not save — please try again'),
+          content: Text(Api.responseError(res)),
           backgroundColor: Colors.red.shade700,
           behavior: SnackBarBehavior.floating,
           shape:
@@ -281,7 +263,7 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Could not save: $e'),
+        content: Text('Could not save: ${Api.errorText(e)}'),
         backgroundColor: Colors.red.shade700,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -695,7 +677,6 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
       _WeighmentSectionCard(
         recordId: recordId!,
         baseUrl: baseUrl,
-        headers: () => _headers,
         slipsByType: slipsByType,
         onSaved: _refresh,
       ),
@@ -707,7 +688,6 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
         section: sectionsByKey['bhada'],
         recordId: recordId!,
         baseUrl: baseUrl,
-        headers: () => _headers,
         onSaved: _refresh,
         gateMessage: factoryNetTons == null
             ? 'Weigh the Factory slip in Weighment first — Bhada always uses factory net weight.'
@@ -730,7 +710,6 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
         section: sectionsByKey['halting'],
         recordId: recordId!,
         baseUrl: baseUrl,
-        headers: () => _headers,
         onSaved: _refresh,
         subtitle: 'Optional — only if the truck waited beyond schedule',
         modeOptions: const [], // no mode selector, just a flat amount
@@ -744,7 +723,6 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
         section: sectionsByKey['invoice'],
         recordId: recordId!,
         baseUrl: baseUrl,
-        headers: () => _headers,
         onSaved: _refresh,
         gateMessage: basisTons == null
             ? 'Choose a basis weighment slip in Weighment first.'
@@ -766,7 +744,6 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
         section: sectionsByKey['agent'],
         recordId: recordId!,
         baseUrl: baseUrl,
-        headers: () => _headers,
         onSaved: _refresh,
         gateMessage: basisTons == null
             ? 'Choose a basis weighment slip in Weighment first.'
@@ -789,7 +766,6 @@ class _OutwardRegisterScreenState extends State<OutwardRegisterScreen> {
         section: sectionsByKey['deduction'],
         recordId: recordId!,
         baseUrl: baseUrl,
-        headers: () => _headers,
         onSaved: _refresh,
         subtitle: 'Reference only — does not affect any calculation',
         modeOptions: const [],
@@ -1036,7 +1012,6 @@ class _SectionCard extends StatefulWidget {
       section; // existing section row, or null if not started
   final int recordId;
   final String baseUrl;
-  final Future<Map<String, String>> Function() headers;
   final Future<void> Function() onSaved;
   final String?
       gateMessage; // non-null = section is locked until a dependency is met
@@ -1053,7 +1028,6 @@ class _SectionCard extends StatefulWidget {
     required this.section,
     required this.recordId,
     required this.baseUrl,
-    required this.headers,
     required this.onSaved,
     this.gateMessage,
     this.contextLine,
@@ -1136,21 +1110,17 @@ class _SectionCardState extends State<_SectionCard> {
       localError = null;
     });
     try {
-      final h = await widget.headers();
-      final res = await http.put(
-        Uri.parse(
-            '${widget.baseUrl}/outward-register/${widget.recordId}/sections/${widget.sectionKey}'),
-        headers: {...h, 'Content-Type': 'application/json'},
+      final res = await Api.put(
+        '/outward-register/${widget.recordId}/sections/${widget.sectionKey}',
         body: jsonEncode({'mode': mode, 'fields': values}),
       );
-      final data = jsonDecode(res.body);
       if (res.statusCode == 200) {
         await widget.onSaved();
       } else {
-        setState(() => localError = data['error'] ?? 'Failed to save');
+        setState(() => localError = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => localError = 'Error: $e');
+      setState(() => localError = 'Error: ${Api.errorText(e)}');
     } finally {
       setState(() => saving = false);
     }
@@ -1395,14 +1365,12 @@ class _SectionCardState extends State<_SectionCard> {
 class _WeighmentSectionCard extends StatefulWidget {
   final int recordId;
   final String baseUrl;
-  final Future<Map<String, String>> Function() headers;
   final Map<String, dynamic> slipsByType;
   final Future<void> Function() onSaved;
 
   const _WeighmentSectionCard({
     required this.recordId,
     required this.baseUrl,
-    required this.headers,
     required this.slipsByType,
     required this.onSaved,
   });
@@ -1496,7 +1464,6 @@ class _WeighmentSectionCardState extends State<_WeighmentSectionCard> {
                 slip: widget.slipsByType['factory'],
                 recordId: widget.recordId,
                 baseUrl: widget.baseUrl,
-                headers: widget.headers,
                 onSaved: widget.onSaved,
               ),
               const SizedBox(height: 12),
@@ -1506,7 +1473,6 @@ class _WeighmentSectionCardState extends State<_WeighmentSectionCard> {
                 slip: widget.slipsByType['agent'],
                 recordId: widget.recordId,
                 baseUrl: widget.baseUrl,
-                headers: widget.headers,
                 onSaved: widget.onSaved,
               ),
               const SizedBox(height: 12),
@@ -1516,7 +1482,6 @@ class _WeighmentSectionCardState extends State<_WeighmentSectionCard> {
                 slip: widget.slipsByType['plant'],
                 recordId: widget.recordId,
                 baseUrl: widget.baseUrl,
-                headers: widget.headers,
                 onSaved: widget.onSaved,
               ),
             ]),
@@ -1533,7 +1498,6 @@ class _WeighSlipTile extends StatefulWidget {
   final Map<String, dynamic>? slip;
   final int recordId;
   final String baseUrl;
-  final Future<Map<String, String>> Function() headers;
   final Future<void> Function() onSaved;
 
   const _WeighSlipTile({
@@ -1543,7 +1507,6 @@ class _WeighSlipTile extends StatefulWidget {
     required this.slip,
     required this.recordId,
     required this.baseUrl,
-    required this.headers,
     required this.onSaved,
   });
 
@@ -1630,12 +1593,11 @@ class _WeighSlipTileState extends State<_WeighSlipTile> {
       localError = null;
     });
     try {
-      final h = await widget.headers();
       final request = http.MultipartRequest(
         'PUT',
-        Uri.parse(
-            '${widget.baseUrl}/outward-register/${widget.recordId}/weighslips/${widget.slipType}'),
-      )..headers.addAll(h);
+        Api.uri(
+            '/outward-register/${widget.recordId}/weighslips/${widget.slipType}'),
+      );
       if (isFactory) {
         if (tareCtrl.text.isNotEmpty)
           request.fields['tare_weight'] = tareCtrl.text;
@@ -1650,16 +1612,14 @@ class _WeighSlipTileState extends State<_WeighSlipTile> {
         request.files.add(http.MultipartFile.fromBytes('photo', photoBytes!,
             filename: photoName, contentType: MediaType('image', 'jpeg')));
       }
-      final streamed = await request.send();
-      final res = await http.Response.fromStream(streamed);
+      final res = await Api.sendMultipart(request);
       if (res.statusCode == 200) {
         await widget.onSaved();
       } else {
-        final data = jsonDecode(res.body);
-        setState(() => localError = data['error'] ?? 'Failed to save');
+        setState(() => localError = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => localError = 'Error: $e');
+      setState(() => localError = 'Error: ${Api.errorText(e)}');
     } finally {
       setState(() => saving = false);
     }

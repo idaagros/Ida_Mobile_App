@@ -207,6 +207,12 @@ class AppLocalizations {
   String get faWaDidNotWorkHint => _t('fa_wa_did_not_work_hint');
   String get faWaAddMissedWorker => _t('fa_wa_add_missed_worker');
   String get faWaAddMissedWorkerHint => _t('fa_wa_add_missed_worker_hint');
+  String get faReopenAlloc => _t('fa_reopen_alloc');
+  String get faReopenDay => _t('fa_reopen_day');
+  String get faReopenAllocHint => _t('fa_reopen_alloc_hint');
+  String get faReopenDayHint => _t('fa_reopen_day_hint');
+  String get faReopenReason => _t('fa_reopen_reason');
+  String get faReopenConfirm => _t('fa_reopen_confirm');
   String get faWaWorkerLabel => _t('fa_wa_worker_label');
   String get faWaFarmLabel => _t('fa_wa_farm_label');
   String get faWaWorkTypeOptionalLabel => _t('fa_wa_work_type_optional_label');
@@ -689,6 +695,14 @@ class AppLocalizations {
       'fa_wa_did_not_work': 'Did not work',
       'fa_wa_did_not_work_hint':
           'They were marked present this morning but did not actually work — removed from today\'s present count entirely, and no wage will be paid.',
+      'fa_reopen_alloc': 'Reopen work allocation',
+      'fa_reopen_day': 'Reopen whole day',
+      'fa_reopen_alloc_hint':
+          'The allocation stays filled in for you to change, and needs approving again.',
+      'fa_reopen_day_hint':
+          'Attendance goes back for correction and the approved work allocation is cleared (it is kept in the corrections log). Both steps need approving again.',
+      'fa_reopen_reason': 'Reason (required)',
+      'fa_reopen_confirm': 'Yes, reopen',
       'fa_wa_add_missed_worker': 'Add Missed Worker',
       'fa_wa_add_missed_worker_hint':
           'For a worker who actually worked today but was left out of the original headcount. Adds them to today\'s present count and pays them directly — final immediately, no further approval needed.',
@@ -1170,6 +1184,14 @@ class AppLocalizations {
       'fa_wa_did_not_work': 'काम केले नाही',
       'fa_wa_did_not_work_hint':
           'आज सकाळी उपस्थित नोंदवले होते पण प्रत्यक्षात काम केले नाही — आजच्या उपस्थिती संख्येतून पूर्णपणे वगळले जाईल, आणि मजुरी दिली जाणार नाही.',
+      'fa_reopen_alloc': 'कामाचे वाटप पुन्हा उघडा',
+      'fa_reopen_day': 'संपूर्ण दिवस पुन्हा उघडा',
+      'fa_reopen_alloc_hint':
+          'वाटप भरलेले राहील, तुम्ही बदल करू शकता; पुन्हा मंजुरी लागेल.',
+      'fa_reopen_day_hint':
+          'हजेरी दुरुस्तीसाठी परत जाईल आणि मंजूर कामाचे वाटप काढले जाईल (ते दुरुस्ती नोंदीत जतन राहते). दोन्ही टप्प्यांना पुन्हा मंजुरी लागेल.',
+      'fa_reopen_reason': 'कारण (आवश्यक)',
+      'fa_reopen_confirm': 'होय, पुन्हा उघडा',
       'fa_wa_add_missed_worker': 'चुकलेला मजूर जोडा',
       'fa_wa_add_missed_worker_hint':
           'ज्या मजुराने आज प्रत्यक्षात काम केले पण मूळ हजेरीत सुटला त्याच्यासाठी. आजच्या उपस्थिती संख्येत जोडले जाईल आणि थेट मजुरी दिली जाईल — लगेच अंतिम, पुढील मंजुरीची गरज नाही.',

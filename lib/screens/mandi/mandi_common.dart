@@ -5,12 +5,10 @@
 // number and date formatting, and the coloured change chip.
 // Web counterpart: src/pages/mandi/mandiUtils.jsx.
 
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../config/app_config.dart';
+import '../../services/api_client.dart';
 
 const Color mandiGreen = Color(0xFF3B7A28);
 const Color mandiDark = Color(0xFF1E4012);
@@ -27,69 +25,29 @@ class MandiApiException implements Exception {
 }
 
 class MandiApi {
-  static String get _base => AppConfig.apiBaseUrl;
-
-  static Future<Map<String, String>> _headers({bool json = false}) async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      if (json) 'Content-Type': 'application/json',
-    };
-  }
-
-  static dynamic _decode(http.Response res) {
-    dynamic body;
+  static Future<dynamic> _call(String method, String path, Map<String, dynamic>? body, Duration timeout) async {
+    http.Response res;
     try {
-      body = res.body.isEmpty ? null : jsonDecode(res.body);
-    } catch (_) {
-      body = null;
+      res = await Api.send(method, path, body: body, timeout: timeout);
+    } catch (e) {
+      throw MandiApiException(Api.errorText(e), 0);
     }
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      final msg = (body is Map && body['error'] != null)
-          ? body['error'].toString()
-          : 'Request failed (${res.statusCode})';
-      throw MandiApiException(msg, res.statusCode);
+      throw MandiApiException(Api.responseError(res), res.statusCode);
     }
-    return body;
+    return Api.decode(res);
   }
 
-  static Future<dynamic> get(String path) async {
-    final res = await http
-        .get(Uri.parse('$_base$path'), headers: await _headers())
-        .timeout(const Duration(seconds: 60));
-    return _decode(res);
-  }
+  static Future<dynamic> get(String path) => _call('GET', path, null, const Duration(seconds: 60));
 
-  static Future<dynamic> post(String path, [Map<String, dynamic>? body]) async {
-    final res = await http
-        .post(Uri.parse('$_base$path'),
-            headers: await _headers(json: true), body: jsonEncode(body ?? {}))
-        .timeout(const Duration(seconds: 120));
-    return _decode(res);
-  }
+  static Future<dynamic> post(String path, [Map<String, dynamic>? body]) =>
+      _call('POST', path, body ?? <String, dynamic>{}, const Duration(seconds: 120));
 
-  static Future<dynamic> patch(String path, Map<String, dynamic> body) async {
-    final res = await http
-        .patch(Uri.parse('$_base$path'),
-            headers: await _headers(json: true), body: jsonEncode(body))
-        .timeout(const Duration(seconds: 60));
-    return _decode(res);
-  }
+  static Future<dynamic> patch(String path, Map<String, dynamic> body) => _call('PATCH', path, body, const Duration(seconds: 60));
 
-  static Future<dynamic> put(String path, Map<String, dynamic> body) async {
-    final res = await http
-        .put(Uri.parse('$_base$path'),
-            headers: await _headers(json: true), body: jsonEncode(body))
-        .timeout(const Duration(seconds: 60));
-    return _decode(res);
-  }
+  static Future<dynamic> put(String path, Map<String, dynamic> body) => _call('PUT', path, body, const Duration(seconds: 60));
 
-  static Future<dynamic> delete(String path) async {
-    final res = await http
-        .delete(Uri.parse('$_base$path'), headers: await _headers())
-        .timeout(const Duration(seconds: 60));
-    return _decode(res);
-  }
+  static Future<dynamic> delete(String path) => _call('DELETE', path, null, const Duration(seconds: 60));
 }
 
 // ── Formatting ───────────────────────────────────────────────────────

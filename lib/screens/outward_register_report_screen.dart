@@ -4,17 +4,14 @@
 // range, choose Excel or PDF, optionally restrict to fully-approved
 // records only.
 
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
+import '../services/api_client.dart';
 import '../services/pdf_download_helper.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
 class OutwardRegisterReportScreen extends StatefulWidget {
   const OutwardRegisterReportScreen({super.key});
   @override
@@ -26,20 +23,12 @@ class _OutwardRegisterReportScreenState
     extends State<OutwardRegisterReportScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   DateTime fromDate = DateTime.now().subtract(const Duration(days: 7));
   DateTime toDate = DateTime.now();
   bool approvedOnly = false;
   bool generating = false;
   String? errorMessage;
-
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
 
   Future<void> _pickDate({required bool isFrom}) async {
     final picked = await showDatePicker(
@@ -71,12 +60,11 @@ class _OutwardRegisterReportScreenState
       errorMessage = null;
     });
     try {
-      final h = await _headers;
       final fromStr = DateFormat('yyyy-MM-dd').format(fromDate);
       final toStr = DateFormat('yyyy-MM-dd').format(toDate);
-      final url = '$baseUrl/outward-register/report'
+      final url = '/outward-register/report'
           '?from=$fromStr&to=$toStr&format=$format&approved_only=${approvedOnly ? '1' : '0'}';
-      final res = await http.get(Uri.parse(url), headers: h);
+      final res = await Api.get(url);
 
       if (res.statusCode == 200) {
         final filename = 'outward_register_${fromStr}_to_${toStr}'
@@ -97,15 +85,10 @@ class _OutwardRegisterReportScreenState
           await _showResultSheet(result.filePath!, filename);
         }
       } else {
-        Map<String, dynamic> data = {};
-        try {
-          data = jsonDecode(res.body);
-        } catch (_) {}
-        setState(
-            () => errorMessage = data['error'] ?? 'Failed to generate report');
+        setState(() => errorMessage = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => errorMessage = 'Error: $e');
+      setState(() => errorMessage = 'Error: ${Api.errorText(e)}');
     } finally {
       setState(() => generating = false);
     }

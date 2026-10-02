@@ -7,7 +7,7 @@ import '../services/image_helper.dart';
 import '../services/colored_date_picker.dart';
 import '../services/responsive.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_client.dart';
 
 import '../config/app_config.dart';
 class MachineReadingScreen extends StatefulWidget {
@@ -87,13 +87,6 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
     super.dispose();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   // Formats a reading_date ('yyyy-MM-dd') + optional reading_time
   // ('HH:mm:ss') pair into 'dd-MMM-yyyy hh:mm a', e.g. '20-Jun-2026 09:45 AM'.
   String _formatRecordedOn(String? dateStr, String? timeStr) {
@@ -145,10 +138,7 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
   Future<void> _fetchReturnedRecord() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
-      final res = await http.get(
-          Uri.parse('$baseUrl/machine/${widget.returnedRecordId}'),
-          headers: h);
+      final res = await Api.get('/machine/${widget.returnedRecordId}');
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
@@ -176,9 +166,8 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
   Future<void> _loadData() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
       final results = await Future.wait([
-        http.get(Uri.parse('$baseUrl/machine/summary'), headers: h),
+        Api.get('/machine/summary'),
       ]);
       if (results[0].statusCode == 200) {
         final data = jsonDecode(results[0].body);
@@ -206,12 +195,8 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
   // date-relative previous reading.
   Future<void> _loadPreviousReading() async {
     try {
-      final h = await _headers;
       final dateStr = DateFormat('yyyy-MM-dd').format(selectedDate);
-      final res = await http.get(
-        Uri.parse('$baseUrl/machine/previous?date=$dateStr'),
-        headers: h,
-      );
+      final res = await Api.get('/machine/previous?date=$dateStr');
       if (res.statusCode == 200 && res.body != 'null') {
         final data = jsonDecode(res.body);
         setState(() {
@@ -312,12 +297,8 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
   // submit regardless.
   Future<Map<String, dynamic>?> _checkDateStatus(DateTime date) async {
     try {
-      final h = await _headers;
       final dateStr = DateFormat('yyyy-MM-dd').format(date);
-      final res = await http.get(
-        Uri.parse('$baseUrl/machine/check-date?date=$dateStr'),
-        headers: h,
-      );
+      final res = await Api.get('/machine/check-date?date=$dateStr');
       if (res.statusCode == 200) {
         return jsonDecode(res.body) as Map<String, dynamic>;
       }
@@ -368,18 +349,16 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
     });
 
     try {
-      final h = await _headers;
       final dateStr = DateFormat('yyyy-MM-dd').format(selectedDate);
       final timeStr =
           '${selectedTime.hour.toString().padLeft(2, '0')}:${selectedTime.minute.toString().padLeft(2, '0')}:00';
       final isCorrection = widget.returnedRecordId != null;
       final reqUrl = isCorrection
-          ? Uri.parse('$baseUrl/machine/${widget.returnedRecordId}')
-          : Uri.parse('$baseUrl/machine');
+          ? Api.uri('/machine/${widget.returnedRecordId}')
+          : Api.uri('/machine');
 
       final request =
           http.MultipartRequest(isCorrection ? 'PUT' : 'POST', reqUrl)
-            ..headers.addAll(h)
             ..fields['reading_date'] = dateStr
             ..fields['reading_time'] = timeStr
             ..fields['meter_reading'] = readingCtrl.text
@@ -391,7 +370,7 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
             filename: photoName, contentType: MediaType('image', 'jpeg')));
       }
 
-      final res = await http.Response.fromStream(await request.send());
+      final res = await Api.sendMultipart(request);
       final data = jsonDecode(res.body);
 
       if (res.statusCode == 200 || res.statusCode == 201) {
@@ -482,10 +461,10 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
           errorMessage = null;
         });
       } else {
-        setState(() => errorMessage = data['error'] ?? 'Submission failed');
+        setState(() => errorMessage = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => errorMessage = 'Error: $e');
+      setState(() => errorMessage = 'Error: ${Api.errorText(e)}');
     } finally {
       setState(() => submitting = false);
     }

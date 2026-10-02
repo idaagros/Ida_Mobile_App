@@ -9,9 +9,9 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/api_client.dart';
+import '../services/api_service.dart';
 import '../services/responsive.dart';
 
 import '../config/app_config.dart';
@@ -40,18 +40,10 @@ class _OutwardRegisterReviewListScreenState
     _load();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _load() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
-      String url = '$baseUrl/outward-register';
+      String url = '/outward-register';
       switch (filter) {
         case ReviewFilter.needsAttention:
           url += '?needs_attention=1';
@@ -62,7 +54,7 @@ class _OutwardRegisterReviewListScreenState
         case ReviewFilter.allRecords:
           break; // no filter param — every record
       }
-      final res = await http.get(Uri.parse(url), headers: h);
+      final res = await Api.get(url);
       if (res.statusCode == 200) {
         setState(() => records = jsonDecode(res.body));
       }
@@ -280,20 +272,10 @@ class _OutwardRegisterReviewScreenState
     _load();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _load() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
-      final res = await http.get(
-          Uri.parse('$baseUrl/outward-register/${widget.recordId}'),
-          headers: h);
+      final res = await Api.get('/outward-register/${widget.recordId}');
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
@@ -360,7 +342,6 @@ class _OutwardRegisterReviewScreenState
                               section: sectionsByKey['bhada'],
                               recordId: widget.recordId,
                               baseUrl: baseUrl,
-                              headers: () => _headers,
                               onChanged: _load,
                               modeLabels: const {
                                 'fixed': 'Fixed Rate',
@@ -376,7 +357,6 @@ class _OutwardRegisterReviewScreenState
                               section: sectionsByKey['halting'],
                               recordId: widget.recordId,
                               baseUrl: baseUrl,
-                              headers: () => _headers,
                               onChanged: _load,
                               modeLabels: const {},
                             ),
@@ -388,7 +368,6 @@ class _OutwardRegisterReviewScreenState
                               section: sectionsByKey['invoice'],
                               recordId: widget.recordId,
                               baseUrl: baseUrl,
-                              headers: () => _headers,
                               onChanged: _load,
                               modeLabels: const {
                                 'per_ton': 'Per Ton',
@@ -403,7 +382,6 @@ class _OutwardRegisterReviewScreenState
                               section: sectionsByKey['agent'],
                               recordId: widget.recordId,
                               baseUrl: baseUrl,
-                              headers: () => _headers,
                               onChanged: _load,
                               modeLabels: const {
                                 'commission_per_ton': 'Per Ton',
@@ -419,7 +397,6 @@ class _OutwardRegisterReviewScreenState
                               section: sectionsByKey['deduction'],
                               recordId: widget.recordId,
                               baseUrl: baseUrl,
-                              headers: () => _headers,
                               onChanged: _load,
                               modeLabels: const {},
                             ),
@@ -596,7 +573,6 @@ class _AdminSectionCard extends StatefulWidget {
   final Map<String, dynamic>? section;
   final int recordId;
   final String baseUrl;
-  final Future<Map<String, String>> Function() headers;
   final VoidCallback onChanged;
   final Map<String, String> modeLabels;
 
@@ -607,7 +583,6 @@ class _AdminSectionCard extends StatefulWidget {
     required this.section,
     required this.recordId,
     required this.baseUrl,
-    required this.headers,
     required this.onChanged,
     required this.modeLabels,
   });
@@ -622,6 +597,18 @@ class _AdminSectionCardState extends State<_AdminSectionCard> {
 
   bool expanded = true; // sections needing review default open
   bool saving = false;
+  // Approve / Return for this part: Approve on this section of the outward
+  // register (an unscoped Approve covers every part; admin always).
+  bool canApprove = false;
+
+  @override
+  void initState() {
+    super.initState();
+    ApiService.canApproveSection('outward_register', widget.sectionKey)
+        .then((v) {
+      if (mounted) setState(() => canApprove = v);
+    });
+  }
 
   String get status => widget.section == null
       ? 'not_started'
@@ -649,11 +636,8 @@ class _AdminSectionCardState extends State<_AdminSectionCard> {
   Future<void> _setStatus(String newStatus, {String? note}) async {
     setState(() => saving = true);
     try {
-      final h = await widget.headers();
-      await http.patch(
-        Uri.parse(
-            '${widget.baseUrl}/outward-register/${widget.recordId}/sections/${widget.sectionKey}/status'),
-        headers: {...h, 'Content-Type': 'application/json'},
+      await Api.patch(
+        '/outward-register/${widget.recordId}/sections/${widget.sectionKey}/status',
         body: jsonEncode(
             {'status': newStatus, if (note != null) 'admin_note': note}),
       );
@@ -812,7 +796,7 @@ class _AdminSectionCardState extends State<_AdminSectionCard> {
                           fontSize: 12, color: Color(0xFFB23A3A))),
                 ),
               ],
-              if (status == 'pending' || status == 'returned') ...[
+              if ((status == 'pending' || status == 'returned') && canApprove) ...[
                 const SizedBox(height: 14),
                 Row(children: [
                   Expanded(

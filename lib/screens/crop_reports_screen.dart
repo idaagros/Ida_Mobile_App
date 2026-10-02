@@ -13,11 +13,9 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'crop_calendar_screen.dart';
 import 'agri/cycle_common.dart' show inr, toInt, qtlText;
 import '../services/pdf_download_helper.dart';
@@ -25,7 +23,7 @@ import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
+import '../services/api_client.dart';
 class CropReportsScreen extends StatefulWidget {
   const CropReportsScreen({super.key});
   @override
@@ -36,7 +34,6 @@ class _CropReportsScreenState extends State<CropReportsScreen>
     with SingleTickerProviderStateMixin {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   late TabController _tabController;
   List farms = [];
@@ -72,19 +69,11 @@ class _CropReportsScreenState extends State<CropReportsScreen>
     super.dispose();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _loadFilters() async {
     try {
-      final h = await _headers;
       final results = await Future.wait([
-        http.get(Uri.parse('$baseUrl/farms'), headers: h),
-        http.get(Uri.parse('$baseUrl/agri/crop-varieties'), headers: h),
+        Api.get('/farms'),
+        Api.get('/agri/crop-varieties'),
       ]);
       if (results[0].statusCode == 200) farms = jsonDecode(results[0].body);
       if (results[1].statusCode == 200) varieties = jsonDecode(results[1].body);
@@ -110,7 +99,6 @@ class _CropReportsScreenState extends State<CropReportsScreen>
   Future<void> _runPlanningReport() async {
     setState(() => loadingPlanning = true);
     try {
-      final h = await _headers;
       final statuses = [if (showOverdue) 'overdue', if (showPending) 'pending'];
       final params = {
         'from': DateFormat('yyyy-MM-dd').format(planFrom),
@@ -119,9 +107,7 @@ class _CropReportsScreenState extends State<CropReportsScreen>
         if (planFarmId != null) 'farm_id': planFarmId.toString(),
         if (planVarietyId != null) 'crop_variety_id': planVarietyId.toString(),
       };
-      final uri = Uri.parse('$baseUrl/agri/reports/planning')
-          .replace(queryParameters: params);
-      final res = await http.get(uri, headers: h);
+      final res = await Api.get('/agri/reports/planning', query: params);
       if (res.statusCode == 200) {
         setState(() => planningReport = jsonDecode(res.body));
       }
@@ -158,26 +144,21 @@ class _CropReportsScreenState extends State<CropReportsScreen>
   }
 
   Future<void> _generateCostReport() async {
-    final loc = AppLocalizations.of(context)!;
     setState(() => loadingCost = true);
     try {
-      final h = await _headers;
       final params = {
         'from': DateFormat('yyyy-MM-dd').format(costFrom),
         'to': DateFormat('yyyy-MM-dd').format(costTo),
         'group_by': groupByDims.join(','),
       };
-      final uri = Uri.parse('$baseUrl/agri/reports/cost-yield')
-          .replace(queryParameters: params);
-      final res = await http.get(uri, headers: h);
+      final res = await Api.get('/agri/reports/cost-yield', query: params);
       if (res.statusCode == 200) {
         setState(() => costReport = jsonDecode(res.body));
       } else {
-        final data = jsonDecode(res.body);
-        _showSnack(data['error'] ?? loc.agriFailedSave, isError: true);
+        _showSnack(Api.responseError(res), isError: true);
       }
     } catch (e) {
-      _showSnack('Error: $e', isError: true);
+      _showSnack('Error: ${Api.errorText(e)}', isError: true);
     } finally {
       if (mounted) setState(() => loadingCost = false);
     }
@@ -185,7 +166,6 @@ class _CropReportsScreenState extends State<CropReportsScreen>
 
   Future<void> _exportCostReportXlsx() async {
     try {
-      final h = await _headers;
       final from = DateFormat('yyyy-MM-dd').format(costFrom);
       final to = DateFormat('yyyy-MM-dd').format(costTo);
       final params = {
@@ -194,9 +174,7 @@ class _CropReportsScreenState extends State<CropReportsScreen>
         'group_by': groupByDims.join(','),
         'format': 'xlsx'
       };
-      final uri = Uri.parse('$baseUrl/agri/reports/cost-yield')
-          .replace(queryParameters: params);
-      final res = await http.get(uri, headers: h);
+      final res = await Api.get('/agri/reports/cost-yield', query: params);
       if (res.statusCode == 200) {
         final filename = 'agri-cost-yield-report_${from}_to_$to.xlsx';
         final result = await savePdfBytes(res.bodyBytes, filename);
@@ -207,10 +185,10 @@ class _CropReportsScreenState extends State<CropReportsScreen>
           _showResultSheet(result.filePath!, filename);
         }
       } else {
-        _showSnack('Failed to export report', isError: true);
+        _showSnack(Api.responseError(res), isError: true);
       }
     } catch (e) {
-      _showSnack('Error: $e', isError: true);
+      _showSnack('Error: ${Api.errorText(e)}', isError: true);
     }
   }
 

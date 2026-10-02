@@ -24,7 +24,7 @@ class MandiSettingsScreen extends StatefulWidget {
 }
 
 class _MandiSettingsScreenState extends State<MandiSettingsScreen> {
-  bool isAdmin = false, mayAdd = false, mayUpdate = false;
+  bool isAdmin = false, mayAdd = false, mayUpdate = false, mayDelete = false;
 
   @override
   void initState() {
@@ -36,11 +36,13 @@ class _MandiSettingsScreenState extends State<MandiSettingsScreen> {
     final a = await ApiService.isAdmin();
     final add = await ApiService.canAdd('mandi_prices');
     final upd = await ApiService.canUpdate('mandi_prices');
+    final del = await ApiService.canDelete('mandi_prices'); // MSP delete
     if (mounted) {
       setState(() {
         isAdmin = a;
         mayAdd = a || add;
         mayUpdate = a || upd;
+        mayDelete = a || del;
       });
     }
   }
@@ -67,7 +69,7 @@ class _MandiSettingsScreenState extends State<MandiSettingsScreen> {
         body: TabBarView(children: [
           _CommoditiesTab(mayAdd: mayAdd, mayUpdate: mayUpdate),
           _MarketsTab(mayUpdate: mayUpdate),
-          _MspTab(mayAdd: mayAdd, mayUpdate: mayUpdate),
+          _MspTab(mayAdd: mayAdd, mayUpdate: mayUpdate, mayDelete: mayDelete),
           _DataTab(isAdmin: isAdmin, mayUpdate: mayUpdate),
         ]),
       ),
@@ -610,8 +612,8 @@ class _MarketsTabState extends State<_MarketsTab> {
 
 // ── MSP ───────────────────────────────────────────────────────────────
 class _MspTab extends StatefulWidget {
-  final bool mayAdd, mayUpdate;
-  const _MspTab({required this.mayAdd, required this.mayUpdate});
+  final bool mayAdd, mayUpdate, mayDelete;
+  const _MspTab({required this.mayAdd, required this.mayUpdate, required this.mayDelete});
   @override
   State<_MspTab> createState() => _MspTabState();
 }
@@ -823,7 +825,7 @@ class _MspTabState extends State<_MspTab> {
                 Text(rupees(r['msp_price']), style: const TextStyle(fontWeight: FontWeight.w800, color: mandiDark)),
                 if (widget.mayAdd)
                   IconButton(icon: const Icon(Icons.edit_outlined, size: 20), tooltip: 'Change', onPressed: () => _add(r)),
-                if (widget.mayUpdate)
+                if (widget.mayDelete)
                   IconButton(icon: Icon(Icons.delete_outline, color: Colors.red.shade400, size: 20), onPressed: () => _delete(r)),
               ]),
             )),

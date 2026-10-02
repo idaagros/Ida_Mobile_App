@@ -8,12 +8,10 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+import '../services/api_client.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
 class OtpApprovalsScreen extends StatefulWidget {
   const OtpApprovalsScreen({super.key});
   @override
@@ -23,7 +21,6 @@ class OtpApprovalsScreen extends StatefulWidget {
 class _OtpApprovalsScreenState extends State<OtpApprovalsScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   List _requests = [];
   bool _loading = true;
@@ -36,20 +33,10 @@ class _OtpApprovalsScreenState extends State<OtpApprovalsScreen> {
     _load();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'Content-Type': 'application/json',
-    };
-  }
-
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final h = await _headers;
-      final res = await http.get(Uri.parse('$baseUrl/passwords/otp/pending'),
-          headers: h);
+      final res = await Api.get('/passwords/otp/pending');
       if (res.statusCode == 200)
         setState(() => _requests = jsonDecode(res.body));
     } catch (e) {
@@ -61,11 +48,7 @@ class _OtpApprovalsScreenState extends State<OtpApprovalsScreen> {
 
   Future<void> _approve(Map req) async {
     try {
-      final h = await _headers;
-      final res = await http.patch(
-        Uri.parse('$baseUrl/passwords/otp/${req['id']}/approve'),
-        headers: h,
-      );
+      final res = await Api.patch('/passwords/otp/${req['id']}/approve');
       if (!mounted) return;
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -75,14 +58,13 @@ class _OtpApprovalsScreenState extends State<OtpApprovalsScreen> {
         _showOtpDialog(req['username']?.toString() ?? 'User', otpCode);
         _load();
       } else {
-        final data = jsonDecode(res.body);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(data['error'] ?? 'Failed to approve'),
+            content: Text(Api.responseError(res)),
             backgroundColor: Colors.red));
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+          SnackBar(content: Text('Error: ${Api.errorText(e)}'), backgroundColor: Colors.red));
     }
   }
 
@@ -107,9 +89,7 @@ class _OtpApprovalsScreenState extends State<OtpApprovalsScreen> {
       ),
     );
     if (confirm != true) return;
-    final h = await _headers;
-    await http.patch(Uri.parse('$baseUrl/passwords/otp/${req['id']}/reject'),
-        headers: h);
+    await Api.patch('/passwords/otp/${req['id']}/reject');
     _load();
   }
 

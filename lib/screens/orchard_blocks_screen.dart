@@ -9,12 +9,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/api_service.dart';
+import '../services/api_client.dart';
 import '../services/responsive.dart';
-import '../config/app_config.dart';
 
 class OrchardBlocksScreen extends StatefulWidget {
   const OrchardBlocksScreen({super.key});
@@ -25,13 +24,12 @@ class OrchardBlocksScreen extends StatefulWidget {
 class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   List farms = [];
   List varieties = [];
   List orchardBlocks = [];
   bool loading = true;
-  bool _canEditAgri = false;
+  bool _canAddAgri = false;
 
   List get perennialVarieties =>
       varieties.where((v) => v['crop_type'] == 'perennial').toList();
@@ -40,26 +38,18 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
   void initState() {
     super.initState();
     _loadAll();
-    ApiService.canEdit('agri').then((v) {
-      if (mounted) setState(() => _canEditAgri = v);
+    ApiService.canAdd('agri').then((v) {
+      if (mounted) setState(() => _canAddAgri = v);
     });
-  }
-
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
   }
 
   Future<void> _loadAll() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
       final results = await Future.wait([
-        http.get(Uri.parse('$baseUrl/farms'), headers: h),
-        http.get(Uri.parse('$baseUrl/agri/crop-varieties'), headers: h),
-        http.get(Uri.parse('$baseUrl/agri/orchard-blocks'), headers: h),
+        Api.get('/farms'),
+        Api.get('/agri/crop-varieties'),
+        Api.get('/agri/orchard-blocks'),
       ]);
       if (results[0].statusCode == 200) farms = jsonDecode(results[0].body);
       if (results[1].statusCode == 200) varieties = jsonDecode(results[1].body);
@@ -248,13 +238,11 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
                   ? null
                   : () async {
                       setDialogState(() => submitting = true);
-                      final h = await _headers;
                       http.Response res;
                       if (block == null) {
-                        res = await http.post(
-                          Uri.parse('$baseUrl/agri/orchard-blocks'),
-                          headers: {...h, 'Content-Type': 'application/json'},
-                          body: jsonEncode({
+                        res = await Api.post(
+                          '/agri/orchard-blocks',
+                          body: {
                             'farm_id': farmId,
                             'crop_variety_id': varietyId,
                             'planting_date':
@@ -265,14 +253,12 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
                                 double.tryParse(plantSpacingCtrl.text.trim()),
                             'no_of_trees': int.tryParse(treesCtrl.text.trim()),
                             'area_acre': double.tryParse(areaCtrl.text.trim()),
-                          }),
+                          },
                         );
                       } else {
-                        res = await http.patch(
-                          Uri.parse(
-                              '$baseUrl/agri/orchard-blocks/${block['id']}'),
-                          headers: {...h, 'Content-Type': 'application/json'},
-                          body: jsonEncode({
+                        res = await Api.patch(
+                          '/agri/orchard-blocks/${block['id']}',
+                          body: {
                             'row_spacing_m':
                                 double.tryParse(rowSpacingCtrl.text.trim()),
                             'plant_spacing_m':
@@ -280,7 +266,7 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
                             'no_of_trees': int.tryParse(treesCtrl.text.trim()),
                             'area_acre': double.tryParse(areaCtrl.text.trim()),
                             'status': status,
-                          }),
+                          },
                         );
                       }
                       if (ctx.mounted) Navigator.pop(ctx);
@@ -288,9 +274,7 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
                         _loadAll();
                         _showSnack(loc.agriSaved);
                       } else {
-                        final data = jsonDecode(res.body);
-                        _showSnack(data['error'] ?? loc.agriFailedSave,
-                            isError: true);
+                        _showSnack(Api.responseError(res), isError: true);
                       }
                     },
               child: submitting
@@ -320,7 +304,7 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
         title: Text(loc.agriOrchardBlocksTab,
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       ),
-      floatingActionButton: !_canEditAgri
+      floatingActionButton: !_canAddAgri
           ? null
           : FloatingActionButton(
               backgroundColor: idaGreen,

@@ -6,11 +6,9 @@
 // screen, it just gets you to a specific farm's Precision Ag view.
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'farm_precision_ag_screen.dart';
 
-import '../config/app_config.dart';
+import '../services/api_client.dart';
 class FarmPickerScreen extends StatefulWidget {
   final bool canEdit; // draw/edit boundary + trigger refresh, vs read-only
   const FarmPickerScreen({super.key, required this.canEdit});
@@ -21,7 +19,6 @@ class FarmPickerScreen extends StatefulWidget {
 class _FarmPickerScreenState extends State<FarmPickerScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   List farms = [];
   bool loading = true;
@@ -34,27 +31,19 @@ class _FarmPickerScreenState extends State<FarmPickerScreen> {
     _load();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _load() async {
     setState(() { loading = true; error = null; });
     try {
-      final h = await _headers;
-      final res = await http.get(Uri.parse('$baseUrl/farms'), headers: h);
+      final res = await Api.get('/farms');
       if (res.statusCode == 200) {
         farms = jsonDecode(res.body);
         farms.sort((a, b) => (a['name'] ?? '').toString().toLowerCase()
             .compareTo((b['name'] ?? '').toString().toLowerCase()));
       } else {
-        error = 'Could not load farms (${res.statusCode})';
+        error = Api.responseError(res);
       }
     } catch (e) {
-      error = 'Could not reach server: $e';
+      error = 'Could not reach server: ${Api.errorText(e)}';
     } finally {
       if (mounted) setState(() => loading = false);
     }

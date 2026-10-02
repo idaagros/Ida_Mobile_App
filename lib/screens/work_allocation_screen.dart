@@ -18,15 +18,14 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
+import '../services/api_client.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
 class WorkAllocationScreen extends StatefulWidget {
   final DateTime attendanceDate;
   const WorkAllocationScreen({super.key, required this.attendanceDate});
@@ -54,12 +53,18 @@ class _TaskGroup {
 class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   bool loading = true;
   bool saving = false;
   bool decidingAllocation = false;
   bool isAdmin = false;
+  // Section-level access (farm_attendance, Stage B 'allocation'), same
+  // rules as the server: build / change an allocation = add or update on
+  // the section; approve / return = approve on the section; reopen a day or
+  // allocation and add a missed worker = the Reopen level. Admin has all.
+  bool canWriteAlloc = false;
+  bool canApproveAlloc = false;
+  bool canReopenDay = false;
   String? error;
 
   List farms = [];
@@ -89,26 +94,22 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
     super.dispose();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _init() async {
     isAdmin = await ApiService.isAdmin();
+    canWriteAlloc =
+        await ApiService.canWriteSection('farm_attendance', 'allocation');
+    canApproveAlloc =
+        await ApiService.canApproveSection('farm_attendance', 'allocation');
+    canReopenDay = await ApiService.canReopen('farm_attendance');
     await _loadMasters();
     await _loadDay();
   }
 
   Future<void> _loadMasters() async {
     try {
-      final h = await _headers;
       final results = await Future.wait([
-        http.get(Uri.parse('$baseUrl/farms'), headers: h),
-        http.get(Uri.parse('$baseUrl/work-types?applies_to=worker'),
-            headers: h),
+        Api.get('/farms'),
+        Api.get('/work-types?applies_to=worker'),
       ]);
       if (results[0].statusCode == 200) farms = jsonDecode(results[0].body);
       if (results[1].statusCode == 200) workTypes = jsonDecode(results[1].body);
@@ -123,9 +124,7 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
       error = null;
     });
     try {
-      final h = await _headers;
-      final res = await http.get(Uri.parse('$baseUrl/attendance/day/$_dateStr'),
-          headers: h);
+      final res = await Api.get('/attendance/day/$_dateStr');
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
@@ -151,10 +150,13 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
         });
         if (_canBuild && groups.isEmpty) {
           await _loadDraft();
+          // A returned / reopened allocation comes back already filled in,
+          // so only the wrong parts need changing.
+          if (groups.isEmpty) _prefillFromSaved();
         }
       }
     } catch (e) {
-      setState(() => error = 'Could not reach server: $e');
+      setState(() => error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -166,7 +168,8 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
       .toList();
 
   bool get _canBuild =>
-      allocationStatus == null || allocationStatus == 'returned';
+      canWriteAlloc &&
+      (allocationStatus == null || allocationStatus == 'returned');
 
   // ── Draft persistence ────────────────────────────────────────────
   //
@@ -203,6 +206,41 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
             })
         .toList();
     await prefs.setString(_draftKey, jsonEncode(data));
+  }
+
+  // Rebuilds the task groups from the allocation saved on the server
+  // (same farm + work + crop = one task), used when a day comes back
+  // for correction or an admin reopens it.
+  void _prefillFromSaved() {
+    if (savedAllocations.isEmpty || !mounted) return;
+    final byTask = <String, _TaskGroup>{};
+    for (final a in savedAllocations) {
+      final ct = a['cycle_type']?.toString();
+      final cid = a['cycle_id']?.toString();
+      final key = '${a['farm_id']}|${a['work_type_id']}|$ct|$cid';
+      final g = byTask.putIfAbsent(key, () {
+        final ng = _TaskGroup()
+          ..farmId = int.tryParse(a['farm_id'].toString())
+          ..workTypeId = a['work_type_id'] == null
+              ? null
+              : int.tryParse(a['work_type_id'].toString())
+          ..crop = ct == null
+              ? null
+              : (ct == 'none' ? 'none:x' : (cid == null ? null : '$ct:$cid'));
+        return ng;
+      });
+      final wid = int.tryParse(a['worker_id'].toString());
+      if (wid == null) continue;
+      final rate = double.tryParse(a['wage_snapshot'].toString()) ?? 0;
+      final rateText =
+          rate == rate.roundToDouble() ? rate.toInt().toString() : rate.toString();
+      final note = a['notes']?.toString() ?? '';
+      g.workerIds.add(wid);
+      g.rateCtrls[wid] = TextEditingController(text: rateText);
+      g.noteCtrls[wid] = TextEditingController(text: note);
+    }
+    if (byTask.isEmpty) return;
+    setState(() => groups.addAll(byTask.values));
   }
 
   Future<void> _loadDraft() async {
@@ -360,10 +398,7 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
   Future<List> _cropsOn(int farmId) async {
     if (_farmCrops.containsKey(farmId)) return _farmCrops[farmId]!;
     try {
-      final h = await _headers;
-      final res = await http.get(
-          Uri.parse('$baseUrl/agri/cycles/on-farm?farm_id=$farmId&date=$_dateStr'),
-          headers: h);
+      final res = await Api.get('/agri/cycles/on-farm?farm_id=$farmId&date=$_dateStr');
       if (res.statusCode == 200) {
         _farmCrops[farmId] = (jsonDecode(res.body)['cycles'] as List?) ?? [];
       } else {
@@ -493,7 +528,6 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
       return;
     }
     try {
-      final h = await _headers;
       final payload = groups
           .map((g) => {
                 'farm_id': g.farmId,
@@ -511,10 +545,9 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
                     .toList(),
               })
           .toList();
-      final res = await http.post(
-        Uri.parse('$baseUrl/attendance/day/$_dateStr/allocation'),
-        headers: {...h, 'Content-Type': 'application/json'},
-        body: jsonEncode({'allocations': payload}),
+      final res = await Api.post(
+        '/attendance/day/$_dateStr/allocation',
+        body: {'allocations': payload},
       );
       if (res.statusCode == 200) {
         setState(() {
@@ -524,11 +557,10 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
         await _clearDraft();
         await _loadDay();
       } else {
-        final data = jsonDecode(res.body);
-        setState(() => error = data['error'] ?? loc.faWaErrSaveAllocation);
+        setState(() => error = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => error = '${loc.faErrServer}: $e');
+      setState(() => error = '${loc.faErrServer}: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => saving = false);
     }
@@ -543,24 +575,151 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
     }
     setState(() => decidingAllocation = true);
     try {
-      final h = await _headers;
-      final res = await http.patch(
-        Uri.parse('$baseUrl/attendance/day/$_dateStr/allocation-decision'),
-        headers: {...h, 'Content-Type': 'application/json'},
-        body:
-            jsonEncode({'decision': decision, if (note != null) 'note': note}),
+      final res = await Api.patch(
+        '/attendance/day/$_dateStr/allocation-decision',
+        body: {'decision': decision, if (note != null) 'note': note},
       );
       if (res.statusCode == 200) {
         await _loadDay();
       } else {
-        final data = jsonDecode(res.body);
-        setState(() => error = data['error'] ?? loc.faErrRecordDecision);
+        setState(() => error = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => error = '${loc.faErrServer}: $e');
+      setState(() => error = '${loc.faErrServer}: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => decidingAllocation = false);
     }
+  }
+
+  // Needs the Reopen level (admin always): reopen an approved day. kind = 'allocation' (a wrong farm /
+  // work / rate was approved) or 'day' (the whole day was wrong).
+  Future<void> _reopen(String kind) async {
+    final loc = AppLocalizations.of(context)!;
+    final reasonCtrl = TextEditingController();
+    String? validationError;
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(kind == 'day' ? loc.faReopenDay : loc.faReopenAlloc,
+              style:
+                  const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+          content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(kind == 'day' ? loc.faReopenDayHint : loc.faReopenAllocHint,
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: reasonCtrl,
+                  autofocus: true,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                      labelText: loc.faReopenReason,
+                      isDense: true,
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10))),
+                ),
+                if (validationError != null) ...[
+                  const SizedBox(height: 10),
+                  Text(validationError!,
+                      style: const TextStyle(
+                          color: Color(0xFFC0392B), fontSize: 12)),
+                ],
+              ]),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFC0392B)),
+              onPressed: () {
+                if (reasonCtrl.text.trim().isEmpty) {
+                  setDialogState(() => validationError = loc.faReopenReason);
+                  return;
+                }
+                Navigator.pop(ctx, reasonCtrl.text.trim());
+              },
+              child: Text(loc.faReopenConfirm),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (reason == null || reason.isEmpty) return;
+    setState(() {
+      decidingAllocation = true;
+      error = null;
+    });
+    try {
+      final res = await Api.post(
+        '/attendance/day/$_dateStr/${kind == 'day' ? 'reopen-day' : 'reopen-allocation'}',
+        body: {'reason': reason},
+      );
+      if (res.statusCode == 200) {
+        setState(() {
+          for (final g in groups) g.dispose();
+          groups.clear();
+        });
+        await _clearDraft();
+        await _loadDay();
+      } else {
+        setState(() => error = Api.responseError(res));
+      }
+    } catch (e) {
+      setState(() => error = '${loc.faErrServer}: ${Api.errorText(e)}');
+    } finally {
+      if (mounted) setState(() => decidingAllocation = false);
+    }
+  }
+
+  // Box at the bottom of the screen for the Reopen level (admin always):
+  // reopen what was approved.
+  Widget _reopenSection(AppLocalizations loc) {
+    if (!canReopenDay || attendanceStatus != 'approved') {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 20),
+      child: Column(children: [
+        if (allocationStatus == 'approved')
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.lock_open, size: 16, color: idaGreen),
+              label: Text(loc.faReopenAlloc,
+                  style: const TextStyle(
+                      color: idaGreen,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13)),
+              style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: idaGreen),
+                  padding: const EdgeInsets.symmetric(vertical: 10)),
+              onPressed: decidingAllocation ? null : () => _reopen('allocation'),
+            ),
+          ),
+        if (allocationStatus == 'approved') const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.restart_alt,
+                size: 16, color: Color(0xFFC0392B)),
+            label: Text(loc.faReopenDay,
+                style: const TextStyle(
+                    color: Color(0xFFC0392B),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13)),
+            style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Color(0xFFC0392B)),
+                padding: const EdgeInsets.symmetric(vertical: 10)),
+            onPressed: decidingAllocation ? null : () => _reopen('day'),
+          ),
+        ),
+      ]),
+    );
   }
 
   Future<String?> _promptForNote(String title, String hint) async {
@@ -640,6 +799,7 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
                             _readOnlyAllocations(loc),
                             _decisionButtons(loc),
                           ],
+                          _reopenSection(loc),
                           if (error != null) ...[
                             const SizedBox(height: 10),
                             Text(error!,
@@ -722,7 +882,7 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
   // reasons) before the buttons are even in view. Nothing to approve
   // blind against.
   Widget _decisionButtons(AppLocalizations loc) {
-    if (allocationStatus != 'pending' || !isAdmin)
+    if (allocationStatus != 'pending' || !canApproveAlloc)
       return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(top: 16),
@@ -1166,15 +1326,12 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
                       // Worker's fix: an unexpected failure here must never
                       // leave the button stuck spinning forever.
                       try {
-                        final h = await _headers;
-                        final res = await http.post(
-                          Uri.parse(
-                              '$baseUrl/attendance/day/$_dateStr/did-not-work'),
-                          headers: {...h, 'Content-Type': 'application/json'},
-                          body: jsonEncode({
+                        final res = await Api.post(
+                          '/attendance/day/$_dateStr/did-not-work',
+                          body: {
                             'worker_id': workerId,
                             'reason': reasonCtrl.text.trim()
-                          }),
+                          },
                         );
                         if (res.statusCode == 200) {
                           if (ctx.mounted) Navigator.pop(ctx);
@@ -1194,17 +1351,15 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
                           await _saveDraft();
                           await _loadDay();
                         } else {
-                          final data = jsonDecode(res.body);
                           setDialogState(() {
                             submitting = false;
-                            validationError =
-                                data['error'] ?? loc.faWaErrAddTaskGroup;
+                            validationError = Api.responseError(res);
                           });
                         }
                       } catch (e) {
                         setDialogState(() {
                           submitting = false;
-                          validationError = 'Could not reach server: $e';
+                          validationError = 'Could not reach server: ${Api.errorText(e)}';
                         });
                       }
                     },
@@ -1225,8 +1380,7 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
 
   Future<void> _showAddMissedWorkerDialog() async {
     final loc = AppLocalizations.of(context)!;
-    final h = await _headers;
-    final res = await http.get(Uri.parse('$baseUrl/farm-workers'), headers: h);
+    final res = await Api.get('/farm-workers');
     if (res.statusCode != 200) return;
     final allWorkers = List<Map<String, dynamic>>.from(jsonDecode(res.body));
     final presentIds = presentWorkers.map((p) => p['worker_id']).toSet();
@@ -1402,34 +1556,29 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
                       // button stuck showing its spinner forever with
                       // submitting stuck true and no way to retry or see why.
                       try {
-                        final h2 = await _headers;
-                        final res2 = await http.post(
-                          Uri.parse(
-                              '$baseUrl/attendance/day/$_dateStr/retroactive-add'),
-                          headers: {...h2, 'Content-Type': 'application/json'},
-                          body: jsonEncode({
+                        final res2 = await Api.post(
+                          '/attendance/day/$_dateStr/retroactive-add',
+                          body: {
                             'worker_id': selectedWorkerId,
                             'farm_id': selectedFarmId,
                             'work_type_id': selectedWorkTypeId,
                             'rate': rate,
                             'reason': reasonCtrl.text.trim(),
-                          }),
+                          },
                         );
                         if (res2.statusCode == 200) {
                           if (ctx.mounted) Navigator.pop(ctx);
                           await _loadDay();
                         } else {
-                          final data = jsonDecode(res2.body);
                           setDialogState(() {
                             submitting = false;
-                            validationError =
-                                data['error'] ?? loc.faWaErrAddTaskGroup;
+                            validationError = Api.responseError(res2);
                           });
                         }
                       } catch (e) {
                         setDialogState(() {
                           submitting = false;
-                          validationError = 'Could not reach server: $e';
+                          validationError = 'Could not reach server: ${Api.errorText(e)}';
                         });
                       }
                     },
@@ -1727,8 +1876,9 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
         final workTypeName =
             parts.length > 1 && parts[1] != '—' ? tl(context, parts[1]) : null;
         Widget personTile(Map<String, dynamic> a) {
-          final canMarkDidNotWork = allocationStatus == 'pending' ||
-              (allocationStatus == 'approved' && isAdmin);
+          final canMarkDidNotWork = canWriteAlloc &&
+              (allocationStatus == 'pending' ||
+                  (allocationStatus == 'approved' && isAdmin));
           return ListTile(
             dense: true,
             title: Text(tl(context, a['worker_name'] ?? ''),
@@ -1803,7 +1953,7 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
           ]),
         );
       }),
-      if (isAdmin) ...[
+      if (canReopenDay) ...[
         const SizedBox(height: 16),
         SizedBox(
           width: double.infinity,

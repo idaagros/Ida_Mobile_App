@@ -6,14 +6,12 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../localization/app_localizations.dart';
 import '../../localization/transliterate.dart';
 import '../../services/api_service.dart';
+import '../../services/api_client.dart';
 import '../../services/responsive.dart';
 
-import '../../config/app_config.dart';
 enum _Tab { crops, varieties }
 
 class CropMastersScreen extends StatefulWidget {
@@ -25,37 +23,28 @@ class CropMastersScreen extends StatefulWidget {
 class _CropMastersScreenState extends State<CropMastersScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   _Tab _tab = _Tab.crops;
   List crops = [];
   List varieties = [];
   bool loading = true;
-  bool _canEditAgri = false;
+  bool _canAddAgri = false;
 
   @override
   void initState() {
     super.initState();
     _loadAll();
-    ApiService.canEdit('agri').then((v) {
-      if (mounted) setState(() => _canEditAgri = v);
+    ApiService.canAdd('agri').then((v) {
+      if (mounted) setState(() => _canAddAgri = v);
     });
-  }
-
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
   }
 
   Future<void> _loadAll() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
       final results = await Future.wait([
-        http.get(Uri.parse('$baseUrl/agri/crops'), headers: h),
-        http.get(Uri.parse('$baseUrl/agri/crop-varieties'), headers: h),
+        Api.get('/agri/crops'),
+        Api.get('/agri/crop-varieties'),
       ]);
       if (results[0].statusCode == 200) crops = jsonDecode(results[0].body);
       if (results[1].statusCode == 200) varieties = jsonDecode(results[1].body);
@@ -134,34 +123,21 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
                   : () async {
                       if (nameCtrl.text.trim().isEmpty) return;
                       setDialogState(() => submitting = true);
-                      final h = await _headers;
-                      final body = jsonEncode({
+                      final body = {
                         'name': nameCtrl.text.trim(),
                         'category': categoryCtrl.text.trim(),
                         'crop_type': cropType
-                      });
+                      };
                       final res = crop == null
-                          ? await http.post(Uri.parse('$baseUrl/agri/crops'),
-                              headers: {
-                                ...h,
-                                'Content-Type': 'application/json'
-                              },
-                              body: body)
-                          : await http.patch(
-                              Uri.parse('$baseUrl/agri/crops/${crop['id']}'),
-                              headers: {
-                                ...h,
-                                'Content-Type': 'application/json'
-                              },
+                          ? await Api.post('/agri/crops', body: body)
+                          : await Api.patch('/agri/crops/${crop['id']}',
                               body: body);
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (res.statusCode == 200 || res.statusCode == 201) {
                         _loadAll();
                         _showSnack(loc.agriSaved);
                       } else {
-                        final data = jsonDecode(res.body);
-                        _showSnack(data['error'] ?? loc.agriFailedSave,
-                            isError: true);
+                        _showSnack(Api.responseError(res), isError: true);
                       }
                     },
               child: submitting
@@ -274,8 +250,7 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
                       if (cropId == null || nameCtrl.text.trim().isEmpty)
                         return;
                       setDialogState(() => submitting = true);
-                      final h = await _headers;
-                      final body = jsonEncode({
+                      final body = {
                         'crop_id': cropId,
                         'name': nameCtrl.text.trim(),
                         'source_notes': notesCtrl.text.trim(),
@@ -283,31 +258,18 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
                         'std_yield_per_plant':
                             double.tryParse(yieldCtrl.text.trim()),
                         'std_yield_unit': yieldUnitCtrl.text.trim(),
-                      });
+                      };
                       final res = variety == null
-                          ? await http.post(
-                              Uri.parse('$baseUrl/agri/crop-varieties'),
-                              headers: {
-                                ...h,
-                                'Content-Type': 'application/json'
-                              },
-                              body: body)
-                          : await http.patch(
-                              Uri.parse(
-                                  '$baseUrl/agri/crop-varieties/${variety['id']}'),
-                              headers: {
-                                ...h,
-                                'Content-Type': 'application/json'
-                              },
+                          ? await Api.post('/agri/crop-varieties', body: body)
+                          : await Api.patch(
+                              '/agri/crop-varieties/${variety['id']}',
                               body: body);
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (res.statusCode == 200 || res.statusCode == 201) {
                         _loadAll();
                         _showSnack(loc.agriSaved);
                       } else {
-                        final data = jsonDecode(res.body);
-                        _showSnack(data['error'] ?? loc.agriFailedSave,
-                            isError: true);
+                        _showSnack(Api.responseError(res), isError: true);
                       }
                     },
               child: submitting
@@ -336,7 +298,7 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
         title: Text(loc.agriCropMastersTitle,
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
       ),
-      floatingActionButton: !_canEditAgri
+      floatingActionButton: !_canAddAgri
           ? null
           : FloatingActionButton(
               backgroundColor: idaGreen,

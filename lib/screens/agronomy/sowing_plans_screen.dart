@@ -259,6 +259,8 @@ class _SowingPlanScreenState extends State<SowingPlanScreen> {
 
   int? _farmId;
   int? _varietyId;
+  int? _patternId; // row pattern picked for a new sowing
+  List<Map<String, dynamic>> _patterns = [];
   final _season = TextEditingController();
   DateTime _sown = DateTime.now();
   final _acres = TextEditingController();
@@ -305,7 +307,7 @@ class _SowingPlanScreenState extends State<SowingPlanScreen> {
     _origKey = _key();
   }
 
-  String _key() => [_acres.text, _layout, ..._d.values.map((c) => c.text), ..._u.values, _farmId, _varietyId, _season.text, _sown.toIso8601String()].join('|');
+  String _key() => [_acres.text, _layout, _patternId, ..._d.values.map((c) => c.text), ..._u.values, _farmId, _varietyId, _season.text, _sown.toIso8601String()].join('|');
 
   Future<void> _loadCalc() async {
     final p = _plan;
@@ -328,6 +330,37 @@ class _SowingPlanScreenState extends State<SowingPlanScreen> {
         setState(() {});
       }
     } catch (_) {}
+  }
+
+  // Row patterns offered for the variety picked in a new sowing.
+  Future<void> _loadPatterns() async {
+    final id = _varietyId;
+    if (id == null) {
+      setState(() => _patterns = []);
+      return;
+    }
+    try {
+      final r = await AdminApi.get('/agri/sowing-patterns?for_variety=$id');
+      if (mounted && _varietyId == id) setState(() => _patterns = _maps(r));
+    } catch (_) {
+      if (mounted) setState(() => _patterns = []);
+    }
+  }
+
+  // Picking a pattern fills in the layout and spacing; every field can still be changed.
+  void _applyPattern(int? id) {
+    final pt = id == null ? null : _patterns.where((x) => '${x['id']}' == '$id').firstOrNull;
+    setState(() {
+      _patternId = pt == null ? null : id;
+      if (pt == null) return;
+      _layout = '${pt['row_arrangement'] ?? 'uniform'}';
+      for (final k in _d.keys) {
+        _d[k]!.text = _n(pt[k]);
+      }
+      for (final k in _u.keys) {
+        _u[k] = _units.contains('${pt[k]}') ? '${pt[k]}' : 'cm';
+      }
+    });
   }
 
   Map<String, dynamic> _spacing() => {
@@ -358,6 +391,7 @@ class _SowingPlanScreenState extends State<SowingPlanScreen> {
           'sowing_date': DateFormat('yyyy-MM-dd').format(_sown),
           'area_sown_acre': acres,
           ..._spacing(),
+          if (_patternId != null) 'pattern_id': _patternId,
         });
       } else {
         saved = await AdminApi.put('/agri/sowing-plans/${_plan!['id']}', {'area_sown_acre': acres, ..._spacing()});
@@ -415,7 +449,14 @@ class _SowingPlanScreenState extends State<SowingPlanScreen> {
                   isExpanded: true,
                   decoration: aInput('Crop · variety'),
                   items: [for (final v in _seasonal) DropdownMenuItem<int>(value: int.tryParse('${v['id']}') ?? 0, child: Text('${v['crop_name']} · ${v['name']}', overflow: TextOverflow.ellipsis))],
-                  onChanged: (v) => setState(() => _varietyId = v),
+                  onChanged: (v) {
+                    setState(() {
+                      _varietyId = v;
+                      _patternId = null;
+                      _patterns = [];
+                    });
+                    _loadPatterns();
+                  },
                 ),
                 const SizedBox(height: 10),
                 TextField(controller: _season, onChanged: (_) => setState(() {}), decoration: aInput('Season', hint: 'e.g. Kharif 2026')),
@@ -431,6 +472,23 @@ class _SowingPlanScreenState extends State<SowingPlanScreen> {
                   ),
                 ),
                 const SizedBox(height: 10),
+                if (_varietyId != null) ...[
+                  DropdownButtonFormField<int?>(
+                    value: _patternId,
+                    isExpanded: true,
+                    decoration: aInput('Row pattern', helper: _patterns.isEmpty ? 'No saved pattern for this crop yet. Add them under Row patterns.' : 'Fills in the layout and spacing below. You can still change them.'),
+                    items: [
+                      const DropdownMenuItem<int?>(value: null, child: Text('No pattern — I will set the rows myself', overflow: TextOverflow.ellipsis)),
+                      for (final pt in _patterns)
+                        DropdownMenuItem<int?>(
+                          value: int.tryParse('${pt['id']}'),
+                          child: Text('${pt['name']} · ${pt['row_arrangement'] == 'sequence' ? '${_maps(pt['lines']).length} lines' : spacingText(pt)}', overflow: TextOverflow.ellipsis),
+                        ),
+                    ],
+                    onChanged: _applyPattern,
+                  ),
+                  const SizedBox(height: 10),
+                ],
               ],
               TextField(
                 controller: _acres,
@@ -458,7 +516,7 @@ class _SowingPlanScreenState extends State<SowingPlanScreen> {
                     ? 'The same gap between every row.'
                     : _layout == 'paired'
                         ? 'Rows in pairs: a small gap inside each pair, a wide gap between pairs.'
-                        : 'A repeating order of lines (one crop or several). Set the lines under “Crops grown together” after saving.',
+                        : (_patternId != null ? 'A repeating order of lines. The lines come from the pattern; change them under “Crops grown together” after saving.' : 'A repeating order of lines (one crop or several). Set the lines under “Crops grown together” after saving.'),
                 style: const TextStyle(fontSize: 12.5, color: aMuted),
               ),
               if (_layout != 'sequence') ...[
@@ -540,6 +598,7 @@ class _SowingPlanScreenState extends State<SowingPlanScreen> {
         Wrap(spacing: 6, runSpacing: 6, children: [
           if (st == 'active') const AChip.ok('Growing') else AChip(st == 'cancelled' ? 'Cancelled' : 'Finished'),
           AChip('${p['farm_name']} · ${p['season']}'),
+          if (p['pattern_name'] != null) AChip('Row pattern: ${p['pattern_name']}'),
         ]),
         const SizedBox(height: 10),
         Row(children: [
@@ -848,7 +907,7 @@ class _LinesSheetState extends State<_LinesSheet> {
       final ls = _maps(d is Map ? d['lines'] : null);
       _lines = ls.isEmpty
           ? [_Line()]
-          : ls.map((l) => _Line(variety: int.tryParse('${l['crop_variety_id']}'), gapText: _n(l['gap_to_next_cm']), unit: _units.contains(l['gap_to_next_unit']) ? '${l['gap_to_next_unit']}' : 'cm')).toList();
+          : ls.map((l) => _Line(variety: int.tryParse('${l['crop_variety_id']}'), gapText: _n(l['gap_to_next'] ?? l['gap_to_next_cm']), unit: _units.contains(l['gap_to_next_unit']) ? '${l['gap_to_next_unit']}' : 'cm')).toList();
     } catch (e) {
       _error = errText(e);
       _lines = [_Line()];

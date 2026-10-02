@@ -27,14 +27,14 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
+import '../services/api_service.dart';
+import '../services/api_client.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
 import 'agronomy/agronomy_common.dart' show fmtQty, trimNum, toD, KindChip, SmallChip, mainKind, AgriApi;
 import 'agronomy/record_spray_screen.dart';
 import 'agri/cycle_common.dart';
@@ -55,7 +55,6 @@ class CropCalendarScreen extends StatefulWidget {
 class _CropCalendarScreenState extends State<CropCalendarScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   List items = [];
   List workers = [];
@@ -66,6 +65,14 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
   List harvest = [];
   String tab = 'jobs';
   bool isAdmin = false;
+  // Crop planning ('agri') levels - the same rules the server applies:
+  // record = Add, correct = Update, delete = Delete, finish = Update,
+  // cancel / restore a cycle = Reopen (admin always has all of them).
+  bool mayAddAgri = false;
+  bool mayUpdateAgri = false;
+  bool mayDeleteAgri = false;
+  bool mayReopenAgri = false;
+  bool get mayOpenEntry => mayUpdateAgri || mayDeleteAgri;
 
   @override
   void initState() {
@@ -73,23 +80,19 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
     _load();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _load() async {
     if (items.isEmpty) setState(() => loading = true);
     final prefs = await SharedPreferences.getInstance();
     isAdmin = prefs.getBool('is_admin') ?? (prefs.getString('role') == 'admin');
+    mayAddAgri = await ApiService.canAdd('agri');
+    mayUpdateAgri = await ApiService.canUpdate('agri');
+    mayDeleteAgri = await ApiService.canDelete('agri');
+    mayReopenAgri = await ApiService.canReopen('agri');
     final base = '/agri/cycles/${widget.cycleType}/${widget.cycleId}';
     try {
-      final h = await _headers;
       final results = await Future.wait([
-        http.get(Uri.parse('$baseUrl$base/schedule'), headers: h),
-        http.get(Uri.parse('$baseUrl/farm-workers'), headers: h),
+        Api.get('$base/schedule'),
+        Api.get('/farm-workers'),
       ]);
       if (results[0].statusCode == 200) {
         final d = jsonDecode(results[0].body);
@@ -310,11 +313,9 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
                   ? null
                   : () async {
                       setDialogState(() => submitting = true);
-                      final h = await _headers;
-                      final res = await http.post(
-                        Uri.parse('$baseUrl/agri/actual-operations'),
-                        headers: {...h, 'Content-Type': 'application/json'},
-                        body: jsonEncode({
+                      final res = await Api.post(
+                        '/agri/actual-operations',
+                        body: {
                           'cycle_type': widget.cycleType,
                           'cycle_id': widget.cycleId,
                           'operation_date':
@@ -331,16 +332,14 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
                           'cost': double.tryParse(costCtrl.text.trim()) ?? 0,
                           'worker_id': workerId,
                           'schedule_item_id': item['id'],
-                        }),
+                        },
                       );
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (res.statusCode == 200 || res.statusCode == 201) {
                         _load();
                         _showSnack(loc.agriSaved);
                       } else {
-                        final data = jsonDecode(res.body);
-                        _showSnack(data['error'] ?? loc.agriFailedSave,
-                            isError: true);
+                        _showSnack(Api.responseError(res), isError: true);
                       }
                     },
               child: submitting
@@ -390,25 +389,20 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
                   ? null
                   : () async {
                       setDialogState(() => submitting = true);
-                      final h = await _headers;
-                      final res = await http.patch(
-                        Uri.parse(
-                            '$baseUrl/agri/cycle-schedule-items/${item['id']}/skip'),
-                        headers: {...h, 'Content-Type': 'application/json'},
-                        body: jsonEncode({
+                      final res = await Api.patch(
+                        '/agri/cycle-schedule-items/${item['id']}/skip',
+                        body: {
                           'remarks': remarksCtrl.text.trim().isEmpty
                               ? null
                               : remarksCtrl.text.trim()
-                        }),
+                        },
                       );
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (res.statusCode == 200) {
                         _load();
                         _showSnack(loc.agriSkipAction);
                       } else {
-                        final data = jsonDecode(res.body);
-                        _showSnack(data['error'] ?? loc.agriFailedSave,
-                            isError: true);
+                        _showSnack(Api.responseError(res), isError: true);
                       }
                     },
               child: submitting
@@ -448,10 +442,7 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
 
   Future<void> _showAddIntercropDialog() async {
     final loc = AppLocalizations.of(context)!;
-    final h = await _headers;
-    final res = await http.get(
-        Uri.parse('$baseUrl/agri/crop-varieties?crop_type=seasonal'),
-        headers: h);
+    final res = await Api.get('/agri/crop-varieties?crop_type=seasonal');
     if (res.statusCode != 200) {
       _showSnack(loc.agriFailedSave, isError: true);
       return;
@@ -608,12 +599,9 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
                   ? null
                   : () async {
                       setDialogState(() => submitting = true);
-                      final h2 = await _headers;
-                      final res2 = await http.post(
-                        Uri.parse(
-                            '$baseUrl/agri/sowing-plans/${widget.cycleId}/add-intercrop'),
-                        headers: {...h2, 'Content-Type': 'application/json'},
-                        body: jsonEncode({
+                      final res2 = await Api.post(
+                        '/agri/sowing-plans/${widget.cycleId}/add-intercrop',
+                        body: {
                           'crop_variety_id': varietyId,
                           'sowing_date':
                               DateFormat('yyyy-MM-dd').format(sowingDate),
@@ -629,15 +617,13 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
                           'plant_to_plant_unit': plantSpacingUnit,
                           'shared_physical_area_acre':
                               double.tryParse(sharedAreaCtrl.text.trim()),
-                        }),
+                        },
                       );
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (res2.statusCode == 201) {
                         _showSnack(loc.agriIntercropAddedMsg);
                       } else {
-                        final data = jsonDecode(res2.body);
-                        _showSnack(data['error'] ?? loc.agriFailedSave,
-                            isError: true);
+                        _showSnack(Api.responseError(res2), isError: true);
                       }
                     },
               child: submitting
@@ -660,7 +646,7 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
       _showSnack(done);
       _load();
     } catch (e) {
-      _showSnack('$e', isError: true);
+      _showSnack(Api.errorText(e), isError: true);
     }
   }
 
@@ -696,7 +682,7 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
 
   Future<void> _labour([Map? row]) async {
     if (sum == null) return;
-    final ok = await showLabourSheet(context, cycle: sum!, entry: row, canDelete: isAdmin);
+    final ok = await showLabourSheet(context, cycle: sum!, entry: row, canDelete: mayDeleteAgri, canSave: row == null || mayUpdateAgri);
     if (ok == true) {
       setState(() => tab = 'labour');
       _load();
@@ -705,7 +691,7 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
 
   Future<void> _harvest([Map? row]) async {
     if (sum == null) return;
-    final ok = await showHarvestSheet(context, cycle: sum!, record: row, canDelete: isAdmin);
+    final ok = await showHarvestSheet(context, cycle: sum!, record: row, canDelete: mayDeleteAgri, canSave: row == null || mayUpdateAgri);
     if (ok == true) {
       setState(() => tab = 'harvest');
       _load();
@@ -744,12 +730,12 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
             PopupMenuButton<String>(
               onSelected: _menu,
               itemBuilder: (_) => [
-                if (widget.cycleType == 'seasonal' && st == 'running')
+                if (widget.cycleType == 'seasonal' && st == 'running' && mayAddAgri)
                   PopupMenuItem(value: 'intercrop', child: Text(loc.agriAddIntercropButton)),
-                if (st == 'running') const PopupMenuItem(value: 'finish', child: Text('Mark finished')),
-                if (st == 'running' && isAdmin)
+                if (st == 'running' && mayUpdateAgri) const PopupMenuItem(value: 'finish', child: Text('Mark finished')),
+                if (st == 'running' && mayReopenAgri)
                   const PopupMenuItem(value: 'cancel', child: Text('Cancel this cycle', style: TextStyle(color: cRed))),
-                if (st != 'running' && isAdmin) const PopupMenuItem(value: 'restore', child: Text('Make running again')),
+                if (st != 'running' && mayReopenAgri) const PopupMenuItem(value: 'restore', child: Text('Make running again')),
               ],
             ),
         ],
@@ -776,7 +762,7 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
                           child: Text.rich(TextSpan(children: [
                             TextSpan(text: '${stateLabel[st]}. ', style: const TextStyle(fontWeight: FontWeight.w800)),
                             if (st == 'cancelled') TextSpan(text: 'Reason: ${s['cancel_reason'] ?? '—'}. '),
-                            TextSpan(text: 'Its records are kept.${isAdmin ? ' It can be made running again from the ⋮ menu.' : ''}'),
+                            TextSpan(text: 'Its records are kept.${mayReopenAgri ? ' It can be made running again from the ⋮ menu.' : ''}'),
                           ]), style: const TextStyle(fontSize: 13.5)),
                         ),
                       if (s != null) ...[
@@ -793,7 +779,7 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
                         showSelectedIcon: false,
                         onSelectionChanged: (v) => setState(() => tab = v.first),
                       ),
-                      if (s != null && st != 'cancelled') ...[
+                      if (s != null && st != 'cancelled' && mayAddAgri) ...[
                         const SizedBox(height: 10),
                         Row(children: [
                           Expanded(
@@ -939,7 +925,7 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
     return _card([
       for (final r in rows)
         InkWell(
-          onTap: r['source'] == 'entry' && isAdmin ? () => _labour(Map.from(r)) : null,
+          onTap: r['source'] == 'entry' && mayOpenEntry ? () => _labour(Map.from(r)) : null,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
             decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFEEF1EA)))),
@@ -984,7 +970,7 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
           Text(inr(labour!['total']), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
         ]),
       ),
-      if (isAdmin)
+      if (mayOpenEntry)
         const Padding(
           padding: EdgeInsets.fromLTRB(14, 8, 14, 10),
           child: Text('Tap a piece-rate or contract entry to correct or delete it. Attendance work is changed in Farm attendance.', style: TextStyle(fontSize: 12, color: cMuted)),
@@ -998,7 +984,7 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
     return _card([
       for (final r in harvest)
         InkWell(
-          onTap: isAdmin ? () => _harvest(Map.from(r)) : null,
+          onTap: mayOpenEntry ? () => _harvest(Map.from(r)) : null,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
             decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFEEF1EA)))),
@@ -1026,7 +1012,7 @@ class _CropCalendarScreenState extends State<CropCalendarScreen> {
           Text(qtlText(total), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
         ]),
       ),
-      if (isAdmin)
+      if (mayOpenEntry)
         const Padding(
           padding: EdgeInsets.fromLTRB(14, 8, 14, 10),
           child: Text('Tap a record to correct or delete it.', style: TextStyle(fontSize: 12, color: cMuted)),

@@ -10,14 +10,12 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../localization/app_localizations.dart';
 import '../../localization/transliterate.dart';
 import '../face_enrollment_screen.dart';
 import '../../services/responsive.dart';
+import '../../services/api_client.dart';
 
-import '../../config/app_config.dart';
 class FarmMastersScreen extends StatefulWidget {
   const FarmMastersScreen({super.key});
   @override
@@ -29,7 +27,6 @@ enum _Tab { farms, workTypes, workers }
 class _FarmMastersScreenState extends State<FarmMastersScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   _Tab _tab = _Tab.farms;
   bool loading = true;
@@ -44,22 +41,14 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
     _loadAll();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _loadAll() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
       final results = await Future.wait([
-        http.get(Uri.parse('$baseUrl/farms?all=1'), headers: h),
-        http.get(Uri.parse('$baseUrl/work-types'), headers: h),
-        http.get(Uri.parse('$baseUrl/farm-workers?all=1'), headers: h),
-        http.get(Uri.parse('$baseUrl/face/status'), headers: h),
+        Api.get('/farms?all=1'),
+        Api.get('/work-types'),
+        Api.get('/farm-workers?all=1'),
+        Api.get('/face/status'),
       ]);
       if (results[0].statusCode == 200) farms = jsonDecode(results[0].body);
       if (results[1].statusCode == 200) workTypes = jsonDecode(results[1].body);
@@ -113,8 +102,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
     bool? sprinklerPossible,
   }) async {
     try {
-      final h = await _headers;
-      final body = jsonEncode({
+      final body = {
         'name': name,
         'location': location,
         'total_area_acre': totalAreaAcre,
@@ -124,30 +112,25 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
         'gps_long': gpsLong,
         // Oct 2026: shown on the owner's TV dashboard (water stress card)
         if (sprinklerPossible != null) 'sprinkler_possible': sprinklerPossible,
-      });
+      };
       final res = id == null
-          ? await http.post(Uri.parse('$baseUrl/farms'),
-              headers: {...h, 'Content-Type': 'application/json'}, body: body)
-          : await http.patch(Uri.parse('$baseUrl/farms/$id'),
-              headers: {...h, 'Content-Type': 'application/json'}, body: body);
+          ? await Api.post('/farms', body: body)
+          : await Api.patch('/farms/$id', body: body);
       if (res.statusCode == 200) {
         _loadAll();
       } else {
-        final data = jsonDecode(res.body);
-        _showSnack(data['error'] ?? 'Failed to save farm', isError: true);
+        _showSnack(Api.responseError(res), isError: true);
       }
     } catch (e) {
-      _showSnack('Error: $e', isError: true);
+      _showSnack('Error: ${Api.errorText(e)}', isError: true);
     }
   }
 
   Future<void> _toggleFarmActive(Map farm) async {
     try {
-      final h = await _headers;
-      await http.patch(
-        Uri.parse('$baseUrl/farms/${farm['id']}'),
-        headers: {...h, 'Content-Type': 'application/json'},
-        body: jsonEncode({'is_active': farm['is_active'] == 1 ? false : true}),
+      await Api.patch(
+        '/farms/${farm['id']}',
+        body: {'is_active': farm['is_active'] == 1 ? false : true},
       );
       _loadAll();
     } catch (e) {
@@ -159,22 +142,18 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
   Future<void> _saveWorkType(
       {int? id, required String name, String appliesTo = 'both'}) async {
     try {
-      final h = await _headers;
       final res = id == null
-          ? await http.post(Uri.parse('$baseUrl/work-types'),
-              headers: {...h, 'Content-Type': 'application/json'},
-              body: jsonEncode({'name': name, 'applies_to': appliesTo}))
-          : await http.patch(Uri.parse('$baseUrl/work-types/$id'),
-              headers: {...h, 'Content-Type': 'application/json'},
-              body: jsonEncode({'name': name, 'applies_to': appliesTo}));
+          ? await Api.post('/work-types',
+              body: {'name': name, 'applies_to': appliesTo})
+          : await Api.patch('/work-types/$id',
+              body: {'name': name, 'applies_to': appliesTo});
       if (res.statusCode == 200) {
         _loadAll();
       } else {
-        final data = jsonDecode(res.body);
-        _showSnack(data['error'] ?? 'Failed to save work type', isError: true);
+        _showSnack(Api.responseError(res), isError: true);
       }
     } catch (e) {
-      _showSnack('Error: $e', isError: true);
+      _showSnack('Error: ${Api.errorText(e)}', isError: true);
     }
   }
 
@@ -190,8 +169,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
     bool? isPermanent,
   }) async {
     try {
-      final h = await _headers;
-      final body = jsonEncode({
+      final body = {
         'name': name,
         'daily_wage': dailyWage,
         'work_type_id': workTypeId,
@@ -199,31 +177,25 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
         'phone': phone,
         'gender': gender,
         if (isPermanent != null) 'is_permanent': isPermanent,
-      });
+      };
       final res = id == null
-          ? await http.post(Uri.parse('$baseUrl/farm-workers'),
-              headers: {...h, 'Content-Type': 'application/json'}, body: body)
-          : await http.patch(Uri.parse('$baseUrl/farm-workers/$id'),
-              headers: {...h, 'Content-Type': 'application/json'}, body: body);
+          ? await Api.post('/farm-workers', body: body)
+          : await Api.patch('/farm-workers/$id', body: body);
       if (res.statusCode == 200) {
         _loadAll();
       } else {
-        final data = jsonDecode(res.body);
-        _showSnack(data['error'] ?? 'Failed to save worker', isError: true);
+        _showSnack(Api.responseError(res), isError: true);
       }
     } catch (e) {
-      _showSnack('Error: $e', isError: true);
+      _showSnack('Error: ${Api.errorText(e)}', isError: true);
     }
   }
 
   Future<void> _toggleWorkerActive(Map worker) async {
     try {
-      final h = await _headers;
-      await http.patch(
-        Uri.parse('$baseUrl/farm-workers/${worker['id']}'),
-        headers: {...h, 'Content-Type': 'application/json'},
-        body:
-            jsonEncode({'is_active': worker['is_active'] == 1 ? false : true}),
+      await Api.patch(
+        '/farm-workers/${worker['id']}',
+        body: {'is_active': worker['is_active'] == 1 ? false : true},
       );
       _loadAll();
     } catch (e) {

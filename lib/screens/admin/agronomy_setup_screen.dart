@@ -37,7 +37,8 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
   List products = [];
   int? varietyId;
   bool loading = true;
-  bool canEdit = false;
+  bool canEdit = false; // Add or Update on Crop planning
+  bool canDelete = false; // Delete on Crop planning (steps, stages, products, brands)
   String? error;
   // products filters
   String q = '';
@@ -47,10 +48,16 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
   @override
   void initState() {
     super.initState();
-    ApiService.canEdit('agri').then((v) {
-      if (mounted) setState(() => canEdit = v);
+    ApiService.canDelete('agri').then((v) {
+      if (mounted) setState(() => canDelete = v);
     });
+    _loadEditAccess();
     _load();
+  }
+
+  Future<void> _loadEditAccess() async {
+    final v = await ApiService.canAdd('agri') || await ApiService.canUpdate('agri');
+    if (mounted) setState(() => canEdit = v);
   }
 
   Future<void> _load() async {
@@ -117,19 +124,19 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
     await Navigator.push(
         context,
         MaterialPageRoute(
-            builder: (_) => StepEditorScreen(variety: variety!, steps: vSteps, step: step, products: products, canEdit: canEdit)));
+            builder: (_) => StepEditorScreen(variety: variety!, steps: vSteps, step: step, products: products, canEdit: canEdit, canDelete: canDelete)));
     _load();
   }
 
   Future<void> _openStage(Map? stage) async {
     if (variety == null) return;
     await Navigator.push(context,
-        MaterialPageRoute(builder: (_) => StageEditorScreen(variety: variety!, stage: stage, steps: vSteps, canEdit: canEdit)));
+        MaterialPageRoute(builder: (_) => StageEditorScreen(variety: variety!, stage: stage, steps: vSteps, canEdit: canEdit, canDelete: canDelete)));
     _load();
   }
 
   Future<void> _openProduct(Map? product) async {
-    await Navigator.push(context, MaterialPageRoute(builder: (_) => ProductEditorScreen(product: product, canEdit: canEdit)));
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => ProductEditorScreen(product: product, canEdit: canEdit, canDelete: canDelete)));
     _load();
   }
 

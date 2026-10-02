@@ -8,14 +8,12 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
+import '../services/api_client.dart';
 class FarmTractorDieselScreen extends StatefulWidget {
   const FarmTractorDieselScreen({super.key});
   @override
@@ -26,7 +24,6 @@ class FarmTractorDieselScreen extends StatefulWidget {
 class _FarmTractorDieselScreenState extends State<FarmTractorDieselScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   List tractors = [];
   int? selectedTractorId;
@@ -41,19 +38,10 @@ class _FarmTractorDieselScreenState extends State<FarmTractorDieselScreen> {
     _loadTractors();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _loadTractors() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
-      final res = await http.get(Uri.parse('$baseUrl/farm-tractor/tractors'),
-          headers: h);
+      final res = await Api.get('/farm-tractor/tractors');
       if (res.statusCode == 200) {
         tractors = jsonDecode(res.body);
         if (tractors.isNotEmpty) {
@@ -72,20 +60,10 @@ class _FarmTractorDieselScreenState extends State<FarmTractorDieselScreen> {
     if (selectedTractorId == null) return;
     setState(() => loading = true);
     try {
-      final h = await _headers;
       final results = await Future.wait([
-        http.get(
-            Uri.parse(
-                '$baseUrl/farm-tractor/diesel-logs?tractor_id=$selectedTractorId'),
-            headers: h),
-        http.get(
-            Uri.parse(
-                '$baseUrl/farm-tractor/diesel-logs/$selectedTractorId/average'),
-            headers: h),
-        http.get(
-            Uri.parse(
-                '$baseUrl/farm-tractor/diesel/summary?tractor_id=$selectedTractorId'),
-            headers: h),
+        Api.get('/farm-tractor/diesel-logs?tractor_id=$selectedTractorId'),
+        Api.get('/farm-tractor/diesel-logs/$selectedTractorId/average'),
+        Api.get('/farm-tractor/diesel/summary?tractor_id=$selectedTractorId'),
       ]);
       if (results[0].statusCode == 200) logs = jsonDecode(results[0].body);
       if (results[1].statusCode == 200) average = jsonDecode(results[1].body);
@@ -188,10 +166,8 @@ class _FarmTractorDieselScreenState extends State<FarmTractorDieselScreen> {
               style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
               onPressed: () async {
                 if (litersCtrl.text.trim().isEmpty) return;
-                final h = await _headers;
-                final res = await http.post(
-                  Uri.parse('$baseUrl/farm-tractor/diesel-logs'),
-                  headers: {...h, 'Content-Type': 'application/json'},
+                final res = await Api.post(
+                  '/farm-tractor/diesel-logs',
                   body: jsonEncode({
                     'tractor_id': selectedTractorId,
                     'log_date': DateFormat('yyyy-MM-dd').format(logDate),

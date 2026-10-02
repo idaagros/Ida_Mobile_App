@@ -1,11 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
-
-import '../config/app_config.dart';
+import '../services/api_client.dart';
 // ── Downtime reason options ───────────────────────────────
 const _reasonOptions = [
   {'value': 'lunch', 'label': 'Lunch break', 'icon': '🍱'},
@@ -33,7 +30,6 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   DateTime selectedDate = DateTime.now().subtract(const Duration(days: 1));
   List entries = [];
@@ -48,27 +44,14 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
     _loadData();
   }
 
-  Future<String> get _token async {
-    final p = await SharedPreferences.getInstance();
-    return p.getString('token') ?? '';
-  }
-
-  Map<String, String> _hdrs(String token) => {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      };
-
   String get _dateStr => DateFormat('yyyy-MM-dd').format(selectedDate);
 
   Future<void> _loadData() async {
     setState(() => loading = true);
     try {
-      final t = await _token;
-      final h = _hdrs(t);
       final results = await Future.wait([
-        http.get(Uri.parse('$baseUrl/factory?date=$_dateStr'), headers: h),
-        http.get(Uri.parse('$baseUrl/factory/summary?date=$_dateStr'),
-            headers: h),
+        Api.get('/factory?date=$_dateStr'),
+        Api.get('/factory/summary?date=$_dateStr'),
       ]);
       if (results[0].statusCode == 200)
         setState(() => entries = jsonDecode(results[0].body));
@@ -76,10 +59,8 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
         setState(() => summary = jsonDecode(results[1].body));
       // Older servers don't have closed days: just treat as not closed.
       try {
-        final c = await http.get(
-            Uri.parse(
-                '$baseUrl/factory/closed-days?from=$_dateStr&to=$_dateStr'),
-            headers: h);
+        final c = await Api.get(
+            '/factory/closed-days?from=$_dateStr&to=$_dateStr');
         final list = c.statusCode == 200 ? jsonDecode(c.body) : null;
         setState(() => closedDay =
             (list is List && list.isNotEmpty) ? Map.from(list.first) : null);
@@ -117,8 +98,6 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
         backgroundColor: Colors.transparent,
         builder: (_) => _FactoryEntryForm(
           initialDate: selectedDate,
-          baseUrl: baseUrl,
-          getToken: () => _token,
           onSaved: _loadData,
         ),
       );
@@ -162,14 +141,10 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
 
   Future<void> _sendClosed(bool close, [String reason = '']) async {
     try {
-      final h = _hdrs(await _token);
       final res = close
-          ? await http.post(Uri.parse('$baseUrl/factory/closed-days'),
-              headers: h,
+          ? await Api.post('/factory/closed-days',
               body: jsonEncode({'date': _dateStr, 'reason': reason}))
-          : await http.delete(
-              Uri.parse('$baseUrl/factory/closed-days/$_dateStr'),
-              headers: h);
+          : await Api.delete('/factory/closed-days/$_dateStr');
       if (!mounted) return;
       if (res.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -179,17 +154,14 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
           backgroundColor: idaGreen,
         ));
       } else {
-        String msg = 'Could not save';
-        try {
-          msg = jsonDecode(res.body)['error'] ?? msg;
-        } catch (_) {}
+        final msg = Api.responseError(res);
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(msg), backgroundColor: Colors.red));
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+            SnackBar(content: Text('Error: ${Api.errorText(e)}'), backgroundColor: Colors.red));
       }
     }
     await _loadData();
@@ -572,14 +544,9 @@ class _DowntimeSlot {
 
 class _FactoryEntryForm extends StatefulWidget {
   final DateTime initialDate;
-  final String baseUrl;
-  final Future<String> Function() getToken;
   final VoidCallback onSaved;
   const _FactoryEntryForm(
-      {required this.initialDate,
-      required this.baseUrl,
-      required this.getToken,
-      required this.onSaved});
+      {required this.initialDate, required this.onSaved});
   @override
   State<_FactoryEntryForm> createState() => _FactoryEntryFormState();
 }
@@ -714,7 +681,6 @@ class _FactoryEntryFormState extends State<_FactoryEntryForm> {
     });
 
     try {
-      final token = await widget.getToken();
       final dateStr = DateFormat('yyyy-MM-dd').format(entryDate);
 
       final body = jsonEncode({
@@ -732,14 +698,7 @@ class _FactoryEntryFormState extends State<_FactoryEntryForm> {
             .toList(),
       });
 
-      final res = await http.post(
-        Uri.parse('${widget.baseUrl}/factory'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: body,
-      );
+      final res = await Api.post('/factory', body: body);
 
       debugPrint('FACTORY STATUS: ${res.statusCode}');
       debugPrint('FACTORY BODY: ${res.body}');
@@ -762,10 +721,10 @@ class _FactoryEntryFormState extends State<_FactoryEntryForm> {
           ));
         }
       } else {
-        setState(() => errorMsg = data['error'] ?? 'Submission failed');
+        setState(() => errorMsg = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => errorMsg = 'Error: $e');
+      setState(() => errorMsg = 'Error: ${Api.errorText(e)}');
     } finally {
       setState(() => submitting = false);
     }

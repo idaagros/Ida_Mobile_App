@@ -12,12 +12,10 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
+import '../services/api_client.dart';
 class WeatherScreen extends StatefulWidget {
   const WeatherScreen({super.key});
   @override
@@ -27,14 +25,6 @@ class WeatherScreen extends StatefulWidget {
 class _WeatherScreenState extends State<WeatherScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
-
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
 
   bool loading = true;
   String? error;
@@ -55,8 +45,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
       error = null;
     });
     try {
-      final h = await _headers;
-      final res = await http.get(Uri.parse('$baseUrl/farms'), headers: h);
+      final res = await Api.get('/farms');
       if (res.statusCode == 200) {
         final all = List<Map<String, dynamic>>.from(jsonDecode(res.body));
         // Only farms with coordinates actually set - nothing useful to
@@ -71,10 +60,10 @@ class _WeatherScreenState extends State<WeatherScreen> {
         });
         if (selectedFarmId != null) await _loadWeather(selectedFarmId!);
       } else {
-        setState(() => error = 'Failed to load farms');
+        setState(() => error = Api.responseError(res));
       }
     } catch (e) {
-      setState(() => error = 'Could not reach server: $e');
+      setState(() => error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -86,22 +75,19 @@ class _WeatherScreenState extends State<WeatherScreen> {
       error = null;
     });
     try {
-      final h = await _headers;
-      final res = await http.get(Uri.parse('$baseUrl/weather/farm/$farmId'),
-          headers: h);
+      final res = await Api.get('/weather/farm/$farmId');
       if (res.statusCode == 200) {
         setState(() => weatherData = jsonDecode(res.body));
       } else {
-        final data = jsonDecode(res.body);
         setState(() {
           weatherData = null;
-          error = data['error'] ?? 'Failed to load weather';
+          error = Api.responseError(res);
         });
       }
     } catch (e) {
       setState(() {
         weatherData = null;
-        error = 'Could not reach server: $e';
+        error = 'Could not reach server: ${Api.errorText(e)}';
       });
     } finally {
       if (mounted) setState(() => loadingWeather = false);

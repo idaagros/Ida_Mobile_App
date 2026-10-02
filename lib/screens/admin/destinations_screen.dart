@@ -6,11 +6,9 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/responsive.dart';
+import '../../services/api_client.dart';
 
-import '../../config/app_config.dart';
 class DestinationsScreen extends StatefulWidget {
   const DestinationsScreen({super.key});
   @override
@@ -20,7 +18,6 @@ class DestinationsScreen extends StatefulWidget {
 class _DestinationsScreenState extends State<DestinationsScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   List destinations = [];
   bool loading = true;
@@ -31,19 +28,10 @@ class _DestinationsScreenState extends State<DestinationsScreen> {
     _load();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _load() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
-      final res =
-          await http.get(Uri.parse('$baseUrl/destinations?all=1'), headers: h);
+      final res = await Api.get('/destinations?all=1');
       if (res.statusCode == 200)
         setState(() => destinations = jsonDecode(res.body));
     } catch (e) {
@@ -55,31 +43,25 @@ class _DestinationsScreenState extends State<DestinationsScreen> {
 
   Future<void> _addDestination(String name) async {
     try {
-      final h = await _headers;
-      final res = await http.post(
-        Uri.parse('$baseUrl/destinations'),
-        headers: {...h, 'Content-Type': 'application/json'},
-        body: jsonEncode({'name': name}),
+      final res = await Api.post(
+        '/destinations',
+        body: {'name': name},
       );
       if (res.statusCode == 200) {
         _load();
       } else {
-        final data = jsonDecode(res.body);
-        _showSnack(data['error'] ?? 'Failed to add destination', isError: true);
+        _showSnack(Api.responseError(res), isError: true);
       }
     } catch (e) {
-      _showSnack('Error: $e', isError: true);
+      _showSnack('Error: ${Api.errorText(e)}', isError: true);
     }
   }
 
   Future<void> _toggleActive(Map destination) async {
     try {
-      final h = await _headers;
-      await http.patch(
-        Uri.parse('$baseUrl/destinations/${destination['id']}'),
-        headers: {...h, 'Content-Type': 'application/json'},
-        body: jsonEncode(
-            {'is_active': destination['is_active'] == 1 ? false : true}),
+      await Api.patch(
+        '/destinations/${destination['id']}',
+        body: {'is_active': destination['is_active'] == 1 ? false : true},
       );
       _load();
     } catch (e) {

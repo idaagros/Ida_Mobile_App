@@ -15,7 +15,6 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'crop_calendar_screen.dart';
@@ -23,9 +22,10 @@ import 'agri/cycle_common.dart';
 import 'agronomy/agronomy_common.dart' show AgriApi;
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
+import '../services/api_service.dart';
+import '../services/api_client.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
 class CropCyclesScreen extends StatefulWidget {
   const CropCyclesScreen({super.key});
   @override
@@ -35,7 +35,6 @@ class CropCyclesScreen extends StatefulWidget {
 class _CropCyclesScreenState extends State<CropCyclesScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   List cycles = [];
   Map counts = {};
@@ -44,6 +43,7 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
   String state = 'running';
   String search = '';
   bool isAdmin = false;
+  bool mayReopenAgri = false;
   String? loadError;
 
   List farms = [];
@@ -57,17 +57,12 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
     _loadAll();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _loadAll() async {
     if (cycles.isEmpty) setState(() => loading = true);
     final prefs = await SharedPreferences.getInstance();
     isAdmin = prefs.getBool('is_admin') ?? (prefs.getString('role') == 'admin');
+    // Linking unassigned work to a crop needs the Reopen level on Crop planning (admin always).
+    mayReopenAgri = await ApiService.canReopen('agri');
     try {
       final d = await AgriApi.get('/agri/cycles?state=all');
       cycles = (d?['cycles'] as List?) ?? [];
@@ -75,9 +70,9 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
       totals = Map.from(d?['totals'] ?? {});
       loadError = null;
     } catch (e) {
-      loadError = '$e';
+      loadError = Api.errorText(e);
     }
-    if (isAdmin) {
+    if (mayReopenAgri) {
       try {
         final u = await AgriApi.get('/agri/cycles/unassigned-work');
         unassigned = (u?['items'] as List?) ?? [];
@@ -87,11 +82,10 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
     }
     // For the "+" dialogs.
     try {
-      final h = await _headers;
       final results = await Future.wait([
-        http.get(Uri.parse('$baseUrl/farms'), headers: h),
-        http.get(Uri.parse('$baseUrl/agri/crop-varieties'), headers: h),
-        http.get(Uri.parse('$baseUrl/agri/orchard-blocks'), headers: h),
+        Api.get('/farms'),
+        Api.get('/agri/crop-varieties'),
+        Api.get('/agri/orchard-blocks'),
       ]);
       if (results[0].statusCode == 200) farms = jsonDecode(results[0].body);
       if (results[1].statusCode == 200) {
@@ -386,11 +380,9 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                   ? null
                   : () async {
                       setDialogState(() => submitting = true);
-                      final h = await _headers;
-                      final res = await http.post(
-                        Uri.parse('$baseUrl/agri/sowing-plans'),
-                        headers: {...h, 'Content-Type': 'application/json'},
-                        body: jsonEncode({
+                      final res = await Api.post(
+                        '/agri/sowing-plans',
+                        body: {
                           'farm_id': farmId,
                           'season': season,
                           'crop_variety_id': varietyId,
@@ -417,7 +409,7 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                                 double.tryParse(interPairCtrl.text.trim()),
                           if (rowArrangement == 'paired')
                             'inter_pair_distance_unit': interPairUnit,
-                        }),
+                        },
                       );
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (res.statusCode == 201) {
@@ -435,9 +427,7 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                                           '${tl(context, data['crop_variety_name'])} — ${tl(context, data['farm_name'])}')));
                         }
                       } else {
-                        final data = jsonDecode(res.body);
-                        _showSnack(data['error'] ?? loc.agriFailedSave,
-                            isError: true);
+                        _showSnack(Api.responseError(res), isError: true);
                       }
                     },
               child: submitting
@@ -537,11 +527,9 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                   ? null
                   : () async {
                       setDialogState(() => submitting = true);
-                      final h = await _headers;
-                      final res = await http.post(
-                        Uri.parse('$baseUrl/agri/orchard-cycles'),
-                        headers: {...h, 'Content-Type': 'application/json'},
-                        body: jsonEncode({
+                      final res = await Api.post(
+                        '/agri/orchard-cycles',
+                        body: {
                           'orchard_block_id': blockId,
                           'cycle_year': cycleYear,
                           'bahar_name': baharCtrl.text.trim().isEmpty
@@ -550,7 +538,7 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                           'flowering_start_date': floweringDate != null
                               ? DateFormat('yyyy-MM-dd').format(floweringDate!)
                               : null,
-                        }),
+                        },
                       );
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (res.statusCode == 201) {
@@ -568,9 +556,7 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                                           '${tl(context, data['crop_variety_name'])} — ${tl(context, data['farm_name'])}')));
                         }
                       } else {
-                        final data = jsonDecode(res.body);
-                        _showSnack(data['error'] ?? loc.agriFailedSave,
-                            isError: true);
+                        _showSnack(Api.responseError(res), isError: true);
                       }
                     },
               child: submitting
@@ -650,7 +636,7 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
                       ),
                     _tiles(),
                     const SizedBox(height: 12),
-                    if (isAdmin && unassigned.isNotEmpty) ...[
+                    if (mayReopenAgri && unassigned.isNotEmpty) ...[
                       Material(
                         color: const Color(0xFFFFF7EA),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Color(0xFFF3D7A6))),
@@ -869,7 +855,7 @@ class _UnassignedSheetState extends State<_UnassignedSheet> {
       });
       setState(() => items = items.where((x) => keyOf(x) != keyOf(i)).toList());
     } catch (e) {
-      setState(() => error = '$e');
+      setState(() => error = Api.errorText(e));
     }
   }
 

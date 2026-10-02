@@ -6,14 +6,16 @@
 //    (new) or a new password (leave empty to keep it).
 //  - Access: a tab per group (Factory / Office / Farms / Dispatch &
 //    sales); each area shows chips for the actions it has (View, Add,
-//    Edit, Delete, Approve). Outward register and Farm attendance can
-//    instead give Edit on single parts ("Or only these parts").
+//    Edit, Delete, Approve, Reopen / correct). Outward register and Farm
+//    attendance can instead give single levels (see kSectionLevels) on
+//    single parts ("Or Edit only these parts", "Or Approve only ...").
 //  - Copy access from another person; View everything; Clear all.
 //  - Face login: set it up or redo it here (needs the camera).
 //  - A bar at the bottom says how many changes are not saved yet.
 // Permission shape sent to the server: {module, level} per level, plus
-// {module, scope, level:'update'} per part. The old combined 'edit'
-// level reads as add + update + delete.
+// {module, scope, level} per part and level. The old combined 'edit'
+// level reads as add + update + delete (+ approve / reopen where the area
+// has them); an old part entry reads as update.
 // Web counterpart: src/pages/Users.jsx.
 // API: POST /admin/users, PUT /admin/users/:id
 
@@ -55,8 +57,8 @@ const List<(String, String, List<(String, String, String)>)> kPermGroups = [
   ]),
 ];
 
-const List<String> kLevelOrder = ['view', 'add', 'update', 'delete', 'approve'];
-const Map<String, String> kLevelLabels = {'view': 'View', 'add': 'Add', 'update': 'Edit', 'delete': 'Delete', 'approve': 'Approve'};
+const List<String> kLevelOrder = ['view', 'add', 'update', 'delete', 'approve', 'reopen'];
+const Map<String, String> kLevelLabels = {'view': 'View', 'add': 'Add', 'update': 'Edit', 'delete': 'Delete', 'approve': 'Approve', 'reopen': 'Reopen / correct'};
 
 String _shortName(String module) {
   for (final g in kPermGroups) {
@@ -83,6 +85,7 @@ class _UserFormScreenState extends State<UserFormScreen> {
   bool _active = true;
   bool _admin = false;
   Map<String, Set<String>> _perms = {};
+  // 'module::part::level' for every "only these parts" grant.
   Set<String> _parts = {};
   // What was loaded, to tell what changed.
   late final Set<String> _before;
@@ -129,10 +132,19 @@ class _UserFormScreenState extends State<UserFormScreen> {
     final s = <String>{};
     for (final e in list) {
       if (e.scope != null) {
-        s.add('${e.module}::${e.scope}');
+        final List<String> partLevels = e.level == 'edit' ? (kSectionLevels[e.module] ?? const ['update']) : [e.level];
+        for (final l in partLevels) {
+          s.add('${e.module}::${e.scope}::$l');
+        }
         continue;
       }
-      final levels = e.level == 'edit' ? const ['add', 'update', 'delete'] : [e.level];
+      final List<String> levels;
+      if (e.level == 'edit') {
+        final sup = moduleSupportedLevels(e.module);
+        levels = ['add', 'update', 'delete', for (final l in const ['approve', 'reopen']) if (sup.contains(l)) l];
+      } else {
+        levels = [e.level];
+      }
       (p[e.module] ??= <String>{}).addAll(levels);
     }
     _perms = p;
@@ -148,7 +160,12 @@ class _UserFormScreenState extends State<UserFormScreen> {
   List<Map<String, String>> _flatten() => [
         for (final e in _perms.entries)
           for (final l in e.value) {'module': e.key, 'level': l},
-        for (final s in _parts) {'module': s.split('::')[0], 'scope': s.split('::')[1], 'level': 'update'},
+        for (final s in _parts)
+          {
+            'module': s.split('::')[0],
+            'scope': s.split('::')[1],
+            'level': s.split('::').length > 2 ? s.split('::')[2] : 'update',
+          },
       ];
 
   int get _changes {
@@ -178,8 +195,8 @@ class _UserFormScreenState extends State<UserFormScreen> {
     });
   }
 
-  void _togglePart(String module, String part) {
-    final k = '$module::$part';
+  void _togglePart(String module, String part, String level) {
+    final k = '$module::$part::$level';
     setState(() {
       if (!_parts.remove(k)) _parts.add(k);
     });
@@ -461,12 +478,14 @@ class _UserFormScreenState extends State<UserFormScreen> {
             if (supported.contains(l)) _levelChip(module, l, got.contains(l)),
         ]),
         if (parts != null) ...[
-          const SizedBox(height: 8),
-          const Text('Or Edit only these parts:', style: TextStyle(fontSize: 12.5, color: aMuted)),
-          const SizedBox(height: 6),
-          Wrap(spacing: 6, runSpacing: 6, children: [
-            for (final p in parts) _partChip(module, p['key']!, _partLabel(p['label']!), _parts.contains('$module::${p['key']}')),
-          ]),
+          for (final lv in (kSectionLevels[module] ?? const ['update'])) ...[
+            const SizedBox(height: 8),
+            Text('Or ${kLevelLabels[lv]} only these parts:', style: const TextStyle(fontSize: 12.5, color: aMuted)),
+            const SizedBox(height: 6),
+            Wrap(spacing: 6, runSpacing: 6, children: [
+              for (final p in parts) _partChip(module, p['key']!, lv, _partLabel(p['label']!), _parts.contains('$module::${p['key']}::$lv')),
+            ]),
+          ],
         ],
       ]),
     );
@@ -475,7 +494,9 @@ class _UserFormScreenState extends State<UserFormScreen> {
   String _partLabel(String l) => l.replaceFirst('Stage A: ', '').replaceFirst('Stage B: ', '');
 
   Widget _levelChip(String module, String level, bool on) {
-    final color = level == 'approve' ? aBlue : (level == 'delete' ? const Color(0xFFB3392B) : aGreen);
+    final color = level == 'approve'
+        ? aBlue
+        : (level == 'delete' ? const Color(0xFFB3392B) : (level == 'reopen' ? const Color(0xFF8A5628) : aGreen));
     return Semantics(
       checked: on,
       label: '${_shortName(module)}: ${kLevelLabels[level]}',
@@ -499,9 +520,9 @@ class _UserFormScreenState extends State<UserFormScreen> {
     );
   }
 
-  Widget _partChip(String module, String key, String label, bool on) => InkWell(
+  Widget _partChip(String module, String key, String level, String label, bool on) => InkWell(
         borderRadius: BorderRadius.circular(99),
-        onTap: () => _togglePart(module, key),
+        onTap: () => _togglePart(module, key, level),
         child: Container(
           height: 32,
           padding: const EdgeInsets.symmetric(horizontal: 11),

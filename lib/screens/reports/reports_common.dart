@@ -14,8 +14,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../config/app_config.dart';
+import '../../services/api_client.dart';
 import '../../services/pdf_download_helper.dart';
 
 const Color rGreen = Color(0xFF3B7A28);
@@ -24,29 +23,24 @@ const Color rMuted = Color(0xFF5F6A58);
 const Color rBorder = Color(0xFFE0E7D8);
 
 class ReportApi {
-  static Future<Map<String, String>> _headers() async {
-    final prefs = await SharedPreferences.getInstance();
-    return {'Authorization': 'Bearer ${prefs.getString('token') ?? ''}'};
-  }
-
-  static String _error(http.Response res) {
+  static Future<http.Response> _fetch(String path, Duration timeout) async {
     try {
-      final d = jsonDecode(res.body);
-      if (d is Map && d['error'] != null) return d['error'].toString();
-    } catch (_) {}
-    return 'Something went wrong (${res.statusCode})';
+      return await Api.get(path, timeout: timeout);
+    } catch (e) {
+      throw Exception(Api.errorText(e));
+    }
   }
 
   static Future<dynamic> get(String path) async {
-    final res = await http.get(Uri.parse('${AppConfig.apiBaseUrl}$path'), headers: await _headers()).timeout(const Duration(seconds: 90));
-    if (res.statusCode < 200 || res.statusCode >= 300) throw Exception(_error(res));
+    final res = await _fetch(path, const Duration(seconds: 90));
+    if (res.statusCode < 200 || res.statusCode >= 300) throw Exception(Api.responseError(res));
     return jsonDecode(res.body);
   }
 
   // Downloads a file and shows Open / Share (or "downloaded" on web).
   static Future<void> download(BuildContext context, String path, String filename) async {
-    final res = await http.get(Uri.parse('${AppConfig.apiBaseUrl}$path'), headers: await _headers()).timeout(const Duration(seconds: 180));
-    if (res.statusCode != 200) throw Exception(_error(res));
+    final res = await _fetch(path, const Duration(seconds: 180));
+    if (res.statusCode != 200) throw Exception(Api.responseError(res));
     final saved = await savePdfBytes(res.bodyBytes, filename);
     if (!context.mounted) return;
     if (saved.isWeb) {

@@ -15,9 +15,7 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'attendance_screen.dart';
 import 'work_allocation_screen.dart';
 import 'review/review_queue_screen.dart';
@@ -31,9 +29,9 @@ import 'machine_pf_screen.dart';
 import 'pf_alerts_screen.dart';
 import 'tractor_screen.dart';
 import 'reading_reminder_settings_screen.dart';
+import '../services/api_client.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
 class NeedsAttentionScreen extends StatefulWidget {
   const NeedsAttentionScreen({super.key});
   @override
@@ -43,18 +41,10 @@ class NeedsAttentionScreen extends StatefulWidget {
 class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   bool loading = true;
   String? error;
   List<Map<String, dynamic>> items = [];
-
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
 
   static const Map<String, String> _sectorLabels = {
     'factory': 'Factory',
@@ -74,9 +64,7 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
       error = null;
     });
     try {
-      final h = await _headers;
-      final res =
-          await http.get(Uri.parse('$baseUrl/needs-attention'), headers: h);
+      final res = await Api.get('/needs-attention');
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(
@@ -85,7 +73,7 @@ class _NeedsAttentionScreenState extends State<NeedsAttentionScreen> {
         setState(() => error = 'Failed to load');
       }
     } catch (e) {
-      setState(() => error = 'Could not reach server: $e');
+      setState(() => error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => loading = false);
     }

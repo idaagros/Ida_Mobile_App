@@ -6,11 +6,9 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/responsive.dart';
+import '../../services/api_client.dart';
 
-import '../../config/app_config.dart';
 class PartiesScreen extends StatefulWidget {
   const PartiesScreen({super.key});
   @override
@@ -20,7 +18,6 @@ class PartiesScreen extends StatefulWidget {
 class _PartiesScreenState extends State<PartiesScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   List parties = [];
   bool loading = true;
@@ -31,19 +28,10 @@ class _PartiesScreenState extends State<PartiesScreen> {
     _load();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _load() async {
     setState(() => loading = true);
     try {
-      final h = await _headers;
-      final res =
-          await http.get(Uri.parse('$baseUrl/parties?all=1'), headers: h);
+      final res = await Api.get('/parties?all=1');
       if (res.statusCode == 200) setState(() => parties = jsonDecode(res.body));
     } catch (e) {
       debugPrint('Load error: $e');
@@ -54,30 +42,25 @@ class _PartiesScreenState extends State<PartiesScreen> {
 
   Future<void> _addParty(String name) async {
     try {
-      final h = await _headers;
-      final res = await http.post(
-        Uri.parse('$baseUrl/parties'),
-        headers: {...h, 'Content-Type': 'application/json'},
-        body: jsonEncode({'name': name}),
+      final res = await Api.post(
+        '/parties',
+        body: {'name': name},
       );
       if (res.statusCode == 200) {
         _load();
       } else {
-        final data = jsonDecode(res.body);
-        _showSnack(data['error'] ?? 'Failed to add party', isError: true);
+        _showSnack(Api.responseError(res), isError: true);
       }
     } catch (e) {
-      _showSnack('Error: $e', isError: true);
+      _showSnack('Error: ${Api.errorText(e)}', isError: true);
     }
   }
 
   Future<void> _toggleActive(Map party) async {
     try {
-      final h = await _headers;
-      await http.patch(
-        Uri.parse('$baseUrl/parties/${party['id']}'),
-        headers: {...h, 'Content-Type': 'application/json'},
-        body: jsonEncode({'is_active': party['is_active'] == 1 ? false : true}),
+      await Api.patch(
+        '/parties/${party['id']}',
+        body: {'is_active': party['is_active'] == 1 ? false : true},
       );
       _load();
     } catch (e) {

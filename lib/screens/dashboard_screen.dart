@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../models/user_model.dart';
 import '../services/responsive.dart';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import 'electricity_screen.dart';
@@ -35,6 +34,7 @@ import 'admin/agronomy_setup_screen.dart';
 import 'crop_cycles_screen.dart';
 import 'orchard_blocks_screen.dart';
 import 'agronomy/sowing_plans_screen.dart';
+import 'agronomy/sowing_patterns_screen.dart';
 import 'crop_reports_screen.dart';
 import 'sector_picker_screen.dart';
 import 'needs_attention_screen.dart';
@@ -44,13 +44,13 @@ import 'electricity_bill_projection_screen.dart';
 import '../localization/app_localizations.dart';
 import '../localization/app_locale.dart';
 import '../services/api_service.dart';
+import '../services/api_client.dart';
 import '../services/push_service.dart';
 import 'notifications_screen.dart';
 import 'transport_screen.dart';
 import 'password_screen.dart';
 import 'otp_approvals_screen.dart';
 
-import '../config/app_config.dart';
 // ── Returned record model ─────────────────────────────────────────────────────
 class ReturnedRecord {
   final String id;
@@ -84,7 +84,6 @@ class _DashboardScreenState extends State<DashboardScreen>
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
   static const amber = Color(0xFFF5A623);
-  static String get _base => AppConfig.apiBaseUrl;
 
   String _displayName = '';
   bool _isAdmin = false;
@@ -228,10 +227,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     final token = prefs.getString('token') ?? '';
     if (token.isEmpty) return;
 
-    final headers = {
-      'Authorization': 'Bearer $token',
-    };
-
     final modules = {
       'electricity': 'Electricity Reading',
       'tractor': 'Tractor Hours',
@@ -245,12 +240,9 @@ class _DashboardScreenState extends State<DashboardScreen>
       // Fetch both 'returned' (needs correction) and 'rejected' (final decision)
       for (final fetchStatus in ['returned', 'rejected']) {
         try {
-          final res = await http
-              .get(
-                Uri.parse('$_base/${m.key}?status=$fetchStatus&mine=1'),
-                headers: headers,
-              )
-              .timeout(const Duration(seconds: 6));
+          final res = await Api.get(
+              '/${m.key}?status=$fetchStatus&mine=1',
+              timeout: const Duration(seconds: 6));
           if (res.statusCode == 200) {
             final body = jsonDecode(res.body);
             final list = body is List ? body : (body['data'] as List? ?? []);
@@ -291,12 +283,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     final token = prefs.getString('token') ?? '';
     if (token.isEmpty) return;
     try {
-      final res = await http.get(
-        Uri.parse('$_base/needs-attention'),
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
-      ).timeout(const Duration(seconds: 6));
+      final res = await Api.get('/needs-attention',
+          timeout: const Duration(seconds: 6));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (mounted) setState(() => _needsAttentionCount = data['total'] ?? 0);
@@ -306,6 +294,22 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   bool _can(String key) => _isAdmin || hasModuleAccess(_permissions, key);
   bool _canEdit(String key) => _isAdmin || hasEditAccess(_permissions, key);
+  // Approve level (admin always). Review Submissions is for anyone who can
+  // approve one of the reviewable modules (same rule as the website menu and
+  // the server's review queue); Dispatch Review for Approve on any part of
+  // the outward register.
+  bool _canApprove(String key) =>
+      _isAdmin || hasApproveAccess(_permissions, key);
+  bool get _canReview => const [
+        'electricity',
+        'tractor',
+        'factory',
+        'machine',
+        'machine_pf',
+        'machine_maintenance',
+        'tractor_maintenance',
+      ].any(_canApprove);
+  bool get _canDispatchReview => _canApprove('outward_register');
 
   // Called when user taps "Fix now" on a returned record
   void _openModuleForFix(ReturnedRecord r) {
@@ -425,8 +429,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       // Stop this phone receiving the signed-out user's notifications
       // (must run before the saved login is cleared).
       await PushService.unregisterDevice();
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.clear();
+      await Api.endSession(); // keeps the saved server address
       if (mounted) Navigator.pushReplacementNamed(context, '/');
     }
   }
@@ -1060,6 +1063,17 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 builder: (_) => const SowingPlansScreen())),
                       ),
                       _tile(
+                        icon: Icons.view_week_outlined,
+                        label: 'Row patterns',
+                        sub: 'Saved row layouts per crop, e.g. Soybean 30 in',
+                        iconBg: const Color(0xFFE8F5E2),
+                        iconColor: idaGreen,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const SowingPatternsScreen())),
+                      ),
+                      _tile(
                         icon: Icons.calendar_month_outlined,
                         label: AppLocalizations.of(context)!.agriCyclesTitle,
                         sub:
@@ -1110,12 +1124,13 @@ class _DashboardScreenState extends State<DashboardScreen>
               ],
 
               // ── Administration (admin only) ────────────────────────────
-              if (_isAdmin) ...[
+              if (_isAdmin || _canReview || _canDispatchReview) ...[
                 const SizedBox(height: 20),
                 _sectionHeader(
                     AppLocalizations.of(context)!.sectionAdministration),
                 const SizedBox(height: 12),
                 _tileGrid(context, [
+                  if (_canReview)
                   _tile(
                     icon: Icons.fact_check_outlined,
                     label: 'Review Submissions',
@@ -1127,6 +1142,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                         MaterialPageRoute(
                             builder: (_) => const ReviewQueueScreen())),
                   ),
+                  if (_canDispatchReview)
                   _tile(
                     icon: Icons.local_shipping_outlined,
                     label: 'Dispatch Review',
@@ -1139,6 +1155,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                             builder: (_) =>
                                 const OutwardRegisterReviewListScreen())),
                   ),
+                  if (_isAdmin) ...[
                   _tile(
                     icon: Icons.lock_clock_outlined,
                     label: 'OTP Approvals',
@@ -1201,6 +1218,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                         MaterialPageRoute(
                             builder: (_) => const AppSettingsScreen())),
                   ),
+                  ],
                 ]),
               ],
 

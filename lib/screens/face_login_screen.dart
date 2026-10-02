@@ -16,10 +16,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:camera/camera.dart';
 import '../services/face_recognition_service.dart';
 import '../services/api_service.dart';
+import '../services/api_client.dart';
 
 class FaceLoginScreen extends StatefulWidget {
   const FaceLoginScreen({super.key});
@@ -108,14 +108,11 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
             'No face detected — please retake with your face clearly visible');
         return;
       }
-      final res = await http.post(
-        Uri.parse('${ApiService.baseUrl}/api/auth/face-login'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        // Deliberately no Authorization header - this IS the login,
-        // there's no token to send yet.
-        body: jsonEncode({'embedding': embedding}),
+      // auth: false - this IS the login, there's no token to send yet.
+      final res = await Api.post(
+        '/auth/face-login',
+        body: {'embedding': embedding},
+        auth: false,
       );
       final result = jsonDecode(res.body);
       if (res.statusCode == 200 && result['token'] != null) {
@@ -131,7 +128,7 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     } on MultipleFacesException catch (e) {
       setState(() => _error = e.toString());
     } catch (e) {
-      setState(() => _error = 'Could not reach server: $e');
+      setState(() => _error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => _processing = false);
     }

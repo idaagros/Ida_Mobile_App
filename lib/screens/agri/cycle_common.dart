@@ -153,16 +153,18 @@ Widget _err(String? e) => e == null
 Future<DateTime?> _pickDate(BuildContext context, DateTime initial) =>
     showDatePicker(context: context, initialDate: initial, firstDate: DateTime(2020), lastDate: DateTime.now());
 
-// Record labour (new) or correct / delete an entry (admin).
-Future<bool?> showLabourSheet(BuildContext context, {required Map cycle, Map? entry, bool canDelete = false}) {
-  return _sheet(context, _LabourSheet(cycle: cycle, entry: entry, canDelete: canDelete));
+// Record labour (new) or correct (Update) / delete (Delete) an entry.
+// canSave=false (opened only to delete: Delete level without Update) hides the Save button.
+Future<bool?> showLabourSheet(BuildContext context, {required Map cycle, Map? entry, bool canDelete = false, bool canSave = true}) {
+  return _sheet(context, _LabourSheet(cycle: cycle, entry: entry, canDelete: canDelete, canSave: canSave));
 }
 
 class _LabourSheet extends StatefulWidget {
   final Map cycle;
   final Map? entry;
   final bool canDelete;
-  const _LabourSheet({required this.cycle, this.entry, this.canDelete = false});
+  final bool canSave;
+  const _LabourSheet({required this.cycle, this.entry, this.canDelete = false, this.canSave = true});
   @override
   State<_LabourSheet> createState() => _LabourSheetState();
 }
@@ -350,6 +352,7 @@ class _LabourSheetState extends State<_LabourSheet> {
             OutlinedButton(onPressed: saving ? null : _delete, style: OutlinedButton.styleFrom(foregroundColor: cRed, minimumSize: const Size(0, 48)), child: const Text('Delete')),
             const SizedBox(width: 10),
           ],
+          if (widget.canSave)
           Expanded(
             child: FilledButton(
               onPressed: saving ? null : _save,
@@ -361,16 +364,17 @@ class _LabourSheetState extends State<_LabourSheet> {
   }
 }
 
-// Record harvest (kg) or correct / delete a record (admin).
-Future<bool?> showHarvestSheet(BuildContext context, {required Map cycle, Map? record, bool canDelete = false}) {
-  return _sheet(context, _HarvestSheet(cycle: cycle, record: record, canDelete: canDelete));
+// Record harvest (kg) or correct (Update) / delete (Delete) a record.
+Future<bool?> showHarvestSheet(BuildContext context, {required Map cycle, Map? record, bool canDelete = false, bool canSave = true}) {
+  return _sheet(context, _HarvestSheet(cycle: cycle, record: record, canDelete: canDelete, canSave: canSave));
 }
 
 class _HarvestSheet extends StatefulWidget {
   final Map cycle;
   final Map? record;
   final bool canDelete;
-  const _HarvestSheet({required this.cycle, this.record, this.canDelete = false});
+  final bool canSave;
+  const _HarvestSheet({required this.cycle, this.record, this.canDelete = false, this.canSave = true});
   @override
   State<_HarvestSheet> createState() => _HarvestSheetState();
 }
@@ -452,6 +456,7 @@ class _HarvestSheetState extends State<_HarvestSheet> {
             OutlinedButton(onPressed: saving ? null : _delete, style: OutlinedButton.styleFrom(foregroundColor: cRed, minimumSize: const Size(0, 48)), child: const Text('Delete')),
             const SizedBox(width: 10),
           ],
+          if (widget.canSave)
           Expanded(
             child: FilledButton(
               onPressed: saving ? null : _save,
@@ -463,7 +468,7 @@ class _HarvestSheetState extends State<_HarvestSheet> {
   }
 }
 
-// Cancel a cycle (admin). Returns true when cancelled.
+// Cancel a cycle (Reopen level; admin always). Returns true when cancelled.
 Future<bool?> showCancelCycleSheet(BuildContext context, Map cycle) => _sheet(context, _CancelSheet(cycle: cycle));
 
 class _CancelSheet extends StatefulWidget {

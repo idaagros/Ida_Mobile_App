@@ -11,12 +11,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:camera/camera.dart';
 import '../services/face_recognition_service.dart';
+import '../services/api_client.dart';
 
-import '../config/app_config.dart';
 class FaceMatchResult {
   final int workerId;
   final String name;
@@ -40,7 +38,6 @@ class _FaceAttendanceCaptureScreenState
     extends State<FaceAttendanceCaptureScreen> {
   static const idaGreen = Color(0xFF3B7A28);
   static const idaDark = Color(0xFF1E4012);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   CameraController? _controller;
   final _faceService = FaceRecognitionService();
@@ -104,26 +101,20 @@ class _FaceAttendanceCaptureScreenState
             'No face detected — please retake with your face clearly visible');
         return;
       }
-      final prefs = await SharedPreferences.getInstance();
-      final res = await http.post(
-        Uri.parse('$baseUrl/face/match'),
-        headers: {
-          'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({'embedding': embedding}),
+      final res = await Api.post(
+        '/face/match',
+        body: {'embedding': embedding},
       );
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() => _matchResult = data);
       } else {
-        final data = jsonDecode(res.body);
-        setState(() => _error = data['error'] ?? 'Recognition failed');
+        setState(() => _error = Api.responseError(res));
       }
     } on MultipleFacesException catch (e) {
       setState(() => _error = e.toString());
     } catch (e) {
-      setState(() => _error = 'Could not reach server: $e');
+      setState(() => _error = 'Could not reach server: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => _processing = false);
     }

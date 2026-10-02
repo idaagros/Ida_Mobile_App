@@ -10,11 +10,9 @@
 //     changed; recommended = dose x acres (or trees) sprayed, actual is
 //     typed in.
 
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../config/app_config.dart';
+import '../../services/api_client.dart';
 
 const Color agGreen = Color(0xFF3B7A28);
 const Color agDark = Color(0xFF1E4012);
@@ -24,43 +22,22 @@ const Color agMuted = Color(0xFF5F6A58);
 
 // ── API ────────────────────────────────────────────────────────────────
 class AgriApi {
-  static String get baseUrl => AppConfig.apiBaseUrl;
-
-  static Future<Map<String, String>> _headers() async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-      'Content-Type': 'application/json',
-    };
-  }
-
-  static dynamic _decode(http.Response res) {
-    dynamic data;
+  static Future<dynamic> _call(String method, String path, [Map? body]) async {
+    http.Response res;
     try {
-      data = res.body.isEmpty ? null : jsonDecode(res.body);
-    } catch (_) {
-      data = null;
+      res = await Api.send(method, path, body: body);
+    } catch (e) {
+      throw AgriApiError(Api.errorText(e));
     }
-    if (res.statusCode >= 200 && res.statusCode < 300) return data;
-    final msg = data is Map && data['error'] != null
-        ? data['error'].toString()
-        : 'Something went wrong (${res.statusCode})';
-    throw AgriApiError(msg);
+    if (res.statusCode >= 200 && res.statusCode < 300) return Api.decode(res);
+    throw AgriApiError(Api.responseError(res));
   }
 
-  static Future<dynamic> get(String path) async => _decode(
-      await http.get(Uri.parse('$baseUrl$path'), headers: await _headers()));
-  static Future<dynamic> post(String path, Map body) async =>
-      _decode(await http.post(Uri.parse('$baseUrl$path'),
-          headers: await _headers(), body: jsonEncode(body)));
-  static Future<dynamic> put(String path, Map body) async =>
-      _decode(await http.put(Uri.parse('$baseUrl$path'),
-          headers: await _headers(), body: jsonEncode(body)));
-  static Future<dynamic> patch(String path, Map body) async =>
-      _decode(await http.patch(Uri.parse('$baseUrl$path'),
-          headers: await _headers(), body: jsonEncode(body)));
-  static Future<dynamic> delete(String path) async => _decode(
-      await http.delete(Uri.parse('$baseUrl$path'), headers: await _headers()));
+  static Future<dynamic> get(String path) => _call('GET', path);
+  static Future<dynamic> post(String path, Map body) => _call('POST', path, body);
+  static Future<dynamic> put(String path, Map body) => _call('PUT', path, body);
+  static Future<dynamic> patch(String path, Map body) => _call('PATCH', path, body);
+  static Future<dynamic> delete(String path) => _call('DELETE', path);
 }
 
 class AgriApiError implements Exception {
@@ -80,23 +57,13 @@ class AgKind {
 }
 
 const Map<String, AgKind> agKinds = {
-  'fertilizer': AgKind(
-      'Fertiliser', Color(0xFFE3F0DA), Color(0xFF2C5E17), Color(0xFF5D9A37)),
-  'pesticide': AgKind(
-      'Pesticide', Color(0xFFFDE6D2), Color(0xFF8C3F06), Color(0xFFF47D1E)),
-  'fungicide': AgKind(
-      'Fungicide', Color(0xFFDDE9F7), Color(0xFF1D4D86), Color(0xFF3B73B9)),
-  'weedicide': AgKind(
-      'Weedicide', Color(0xFFF1E4F6), Color(0xFF6B2C86), Color(0xFF8A4AA6)),
-  'pruning': AgKind(
-      'Pruning', Color(0xFFECEEE8), Color(0xFF3A4833), Color(0xFF6B7566)),
+  'fertilizer': AgKind('Fertiliser', Color(0xFFE3F0DA), Color(0xFF2C5E17), Color(0xFF5D9A37)),
+  'pesticide': AgKind('Pesticide', Color(0xFFFDE6D2), Color(0xFF8C3F06), Color(0xFFF47D1E)),
+  'fungicide': AgKind('Fungicide', Color(0xFFDDE9F7), Color(0xFF1D4D86), Color(0xFF3B73B9)),
+  'weedicide': AgKind('Weedicide', Color(0xFFF1E4F6), Color(0xFF6B2C86), Color(0xFF8A4AA6)),
+  'pruning': AgKind('Pruning', Color(0xFFECEEE8), Color(0xFF3A4833), Color(0xFF6B7566)),
 };
-const List<String> agKindKeys = [
-  'fertilizer',
-  'pesticide',
-  'fungicide',
-  'weedicide'
-];
+const List<String> agKindKeys = ['fertilizer', 'pesticide', 'fungicide', 'weedicide'];
 const List<String> agUnits = ['ml', 'L', 'g', 'kg'];
 const List<String> agAgeBrackets = ['1-3', '4-6', '7-10', '10+'];
 
@@ -109,13 +76,10 @@ class KindChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-          color: k?.bg ?? const Color(0xFFFCEFD2),
-          borderRadius: BorderRadius.circular(20)),
+          color: k?.bg ?? const Color(0xFFFCEFD2), borderRadius: BorderRadius.circular(20)),
       child: Text(k?.label ?? 'Kind?',
           style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: k?.fg ?? const Color(0xFF7A4D00))),
+              fontSize: 11, fontWeight: FontWeight.w700, color: k?.fg ?? const Color(0xFF7A4D00))),
     );
   }
 }
@@ -124,20 +88,15 @@ class SmallChip extends StatelessWidget {
   final String text;
   final Color bg;
   final Color fg;
-  const SmallChip(this.text,
-      {super.key, this.bg = Colors.white, this.fg = const Color(0xFF3A4833)});
+  const SmallChip(this.text, {super.key, this.bg = Colors.white, this.fg = const Color(0xFF3A4833)});
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
             color: bg,
             borderRadius: BorderRadius.circular(20),
-            border: bg == Colors.white
-                ? Border.all(color: const Color(0xFFD5DCCD))
-                : null),
-        child: Text(text,
-            style: TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w700, color: fg)),
+            border: bg == Colors.white ? Border.all(color: const Color(0xFFD5DCCD)) : null),
+        child: Text(text, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: fg)),
       );
 }
 
@@ -150,8 +109,7 @@ double convertQty(double qty, String from, String to) {
   return qty * _toBase(from) / _toBase(to);
 }
 
-List<String> familyUnits(String unit) =>
-    _liquid(unit) ? ['ml', 'L'] : ['g', 'kg'];
+List<String> familyUnits(String unit) => _liquid(unit) ? ['ml', 'L'] : ['g', 'kg'];
 
 String niceUnit(double qty, String unit) {
   if (unit == 'ml' && qty >= 1000) return 'L';
@@ -230,8 +188,7 @@ String whenText(Map step, int no) {
 List<Map> numberSteps(List steps) {
   final sorted = steps.map((s) => Map.from(s as Map)).toList()
     ..sort((a, b) {
-      final c = (toI(a['sequence_order']) ?? 0)
-          .compareTo(toI(b['sequence_order']) ?? 0);
+      final c = (toI(a['sequence_order']) ?? 0).compareTo(toI(b['sequence_order']) ?? 0);
       return c != 0 ? c : (toI(a['id']) ?? 0).compareTo(toI(b['id']) ?? 0);
     });
   Map? prev;
@@ -240,9 +197,7 @@ List<Map> numberSteps(List steps) {
     int? est;
     if (s['trigger_type'] == 'DAS' || s['trigger_type'] == 'DAF') {
       est = toI(s['trigger_days']);
-    } else if (s['trigger_type'] == 'DAPREV' &&
-        prev != null &&
-        prev['est'] != null) {
+    } else if (s['trigger_type'] == 'DAPREV' && prev != null && prev['est'] != null) {
       est = (prev['est'] as int) + (toI(s['trigger_days']) ?? 0);
     }
     s['no'] = i + 1;
@@ -264,16 +219,11 @@ List<int> chainOrder(List<Map> numbered) {
   }
   const rank = {'DAS': 0, 'DAF': 0, 'DAP': 1, 'DAH': 2};
   chains.sort((a, b) {
-    final r = (rank[a.first['trigger_type']] ?? 3)
-        .compareTo(rank[b.first['trigger_type']] ?? 3);
+    final r = (rank[a.first['trigger_type']] ?? 3).compareTo(rank[b.first['trigger_type']] ?? 3);
     if (r != 0) return r;
-    return (toI(a.first['trigger_days']) ?? 0)
-        .compareTo(toI(b.first['trigger_days']) ?? 0);
+    return (toI(a.first['trigger_days']) ?? 0).compareTo(toI(b.first['trigger_days']) ?? 0);
   });
-  return [
-    for (final c in chains)
-      for (final s in c) toI(s['id'])!
-  ];
+  return [for (final c in chains) for (final s in c) toI(s['id'])!];
 }
 
 String mainKind(Map step) {
@@ -298,9 +248,7 @@ String mainKind(Map step) {
 }
 
 // ── Common form bits ───────────────────────────────────────────────────
-InputDecoration agInput(String label,
-        {String? hint, String? helper, String? suffix}) =>
-    InputDecoration(
+InputDecoration agInput(String label, {String? hint, String? helper, String? suffix}) => InputDecoration(
       labelText: label,
       hintText: hint,
       helperText: helper,
@@ -314,11 +262,7 @@ InputDecoration agInput(String label,
 
 Widget agLabel(String text) => Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      child: Text(text,
-          style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF34422D))),
+      child: Text(text, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF34422D))),
     );
 
 void agSnack(BuildContext context, String msg, {bool isError = false}) {
@@ -337,19 +281,12 @@ class AgSeg<T> extends StatelessWidget {
   final List<String> labels;
   final T value;
   final ValueChanged<T>? onChanged;
-  const AgSeg(
-      {super.key,
-      required this.values,
-      required this.labels,
-      required this.value,
-      this.onChanged});
+  const AgSeg({super.key, required this.values, required this.labels, required this.value, this.onChanged});
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-          color: const Color(0xFFEEF1EA),
-          borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(color: const Color(0xFFEEF1EA), borderRadius: BorderRadius.circular(10)),
       child: Row(children: [
         for (var i = 0; i < values.length; i++)
           Expanded(
@@ -362,12 +299,7 @@ class AgSeg<T> extends StatelessWidget {
                   color: values[i] == value ? Colors.white : Colors.transparent,
                   borderRadius: BorderRadius.circular(8),
                   boxShadow: values[i] == value
-                      ? [
-                          BoxShadow(
-                              color: Colors.black.withOpacity(0.08),
-                              blurRadius: 2,
-                              offset: const Offset(0, 1))
-                        ]
+                      ? [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 2, offset: const Offset(0, 1))]
                       : null,
                 ),
                 child: Text(labels[i],
@@ -376,12 +308,8 @@ class AgSeg<T> extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                         fontSize: 13.5,
-                        fontWeight: values[i] == value
-                            ? FontWeight.w700
-                            : FontWeight.w600,
-                        color: values[i] == value
-                            ? const Color(0xFF1F2D17)
-                            : const Color(0xFF56614F))),
+                        fontWeight: values[i] == value ? FontWeight.w700 : FontWeight.w600,
+                        color: values[i] == value ? const Color(0xFF1F2D17) : const Color(0xFF56614F))),
               ),
             ),
           ),
@@ -393,16 +321,13 @@ class AgSeg<T> extends StatelessWidget {
 // ── Product picker (bottom sheet) ──────────────────────────────────────
 // Returns the picked product (Map) — an existing one, or a new one
 // created on the spot.
-Future<Map?> pickProduct(BuildContext context, List products,
-    {List<int> exclude = const [], bool canAdd = true}) {
+Future<Map?> pickProduct(BuildContext context, List products, {List<int> exclude = const [], bool canAdd = true}) {
   return showModalBottomSheet<Map>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.white,
-    shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-    builder: (_) => _ProductPickerSheet(
-        products: products, exclude: exclude, canAdd: canAdd),
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (_) => _ProductPickerSheet(products: products, exclude: exclude, canAdd: canAdd),
   );
 }
 
@@ -410,8 +335,7 @@ class _ProductPickerSheet extends StatefulWidget {
   final List products;
   final List<int> exclude;
   final bool canAdd;
-  const _ProductPickerSheet(
-      {required this.products, required this.exclude, required this.canAdd});
+  const _ProductPickerSheet({required this.products, required this.exclude, required this.canAdd});
   @override
   State<_ProductPickerSheet> createState() => _ProductPickerSheetState();
 }
@@ -429,18 +353,14 @@ class _ProductPickerSheetState extends State<_ProductPickerSheet> {
 
   List get list {
     final s = q.trim().toLowerCase();
-    return widget.products
-        .where((p) {
-          if (p['is_active'] == false || p['is_active'] == 0) return false;
-          if (widget.exclude.contains(toI(p['id']))) return false;
-          if (s.isEmpty) return true;
-          final brands = (p['brands'] as List?) ?? [];
-          return p['name'].toString().toLowerCase().contains(s) ||
-              brands.any(
-                  (b) => b['brand_name'].toString().toLowerCase().contains(s));
-        })
-        .take(30)
-        .toList();
+    return widget.products.where((p) {
+      if (p['is_active'] == false || p['is_active'] == 0) return false;
+      if (widget.exclude.contains(toI(p['id']))) return false;
+      if (s.isEmpty) return true;
+      final brands = (p['brands'] as List?) ?? [];
+      return p['name'].toString().toLowerCase().contains(s) ||
+          brands.any((b) => b['brand_name'].toString().toLowerCase().contains(s));
+    }).take(30).toList();
   }
 
   Future<void> _create() async {
@@ -495,42 +415,32 @@ class _ProductPickerSheetState extends State<_ProductPickerSheet> {
           Expanded(
             child: TextField(
               autofocus: true,
-              decoration: agInput('Find a product or brand')
-                  .copyWith(prefixIcon: const Icon(Icons.search)),
+              decoration: agInput('Find a product or brand').copyWith(prefixIcon: const Icon(Icons.search)),
               onChanged: (v) => setState(() => q = v),
             ),
           ),
-          IconButton(
-              onPressed: () => Navigator.pop(context),
-              icon: const Icon(Icons.close)),
+          IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
         ]),
       ),
       Expanded(
         child: ListView(children: [
           for (final p in items)
             ListTile(
-              title: Text(p['name'],
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text(
-                  '${p['unit']} · ${p['preferred_brand_name'] != null ? 'brand ${p['preferred_brand_name']}' : 'no brand yet'}'),
+              title: Text(p['name'], style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text('${p['unit']} · ${p['preferred_brand_name'] != null ? 'brand ${p['preferred_brand_name']}' : 'no brand yet'}'),
               trailing: KindChip(p['product_type']),
               onTap: () => Navigator.pop(context, p as Map),
             ),
           if (items.isEmpty)
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Text('No product matches “$q”.',
-                  style: const TextStyle(color: agMuted)),
+              child: Text('No product matches “$q”.', style: const TextStyle(color: agMuted)),
             ),
           if (widget.canAdd)
             ListTile(
               leading: const Icon(Icons.add, color: agGreen),
-              title: Text(
-                  q.trim().isEmpty
-                      ? 'New product — add it to Products'
-                      : 'New product “${q.trim()}” — add it to Products',
-                  style: const TextStyle(
-                      color: agGreen, fontWeight: FontWeight.w700)),
+              title: Text(q.trim().isEmpty ? 'New product — add it to Products' : 'New product “${q.trim()}” — add it to Products',
+                  style: const TextStyle(color: agGreen, fontWeight: FontWeight.w700)),
               onTap: () => setState(() {
                 adding = true;
                 nameCtrl.text = q.trim();
@@ -544,16 +454,11 @@ class _ProductPickerSheetState extends State<_ProductPickerSheet> {
   Widget _addForm() {
     return ListView(padding: const EdgeInsets.all(16), children: [
       Row(children: [
-        IconButton(
-            onPressed: () => setState(() => adding = false),
-            icon: const Icon(Icons.arrow_back)),
-        const Text('New product',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        IconButton(onPressed: () => setState(() => adding = false), icon: const Icon(Icons.arrow_back)),
+        const Text('New product', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
       ]),
       const SizedBox(height: 12),
-      TextField(
-          controller: nameCtrl,
-          decoration: agInput('Product name', hint: 'e.g. Carbendazim 50% WP')),
+      TextField(controller: nameCtrl, decoration: agInput('Product name', hint: 'e.g. Carbendazim 50% WP')),
       const SizedBox(height: 14),
       agLabel('Kind'),
       Wrap(spacing: 8, runSpacing: 8, children: [
@@ -562,9 +467,7 @@ class _ProductPickerSheetState extends State<_ProductPickerSheet> {
             label: Text(agKinds[k]!.label),
             selected: kind == k,
             selectedColor: agDark,
-            labelStyle: TextStyle(
-                color: kind == k ? Colors.white : const Color(0xFF3A4833),
-                fontWeight: FontWeight.w600),
+            labelStyle: TextStyle(color: kind == k ? Colors.white : const Color(0xFF3A4833), fontWeight: FontWeight.w600),
             onSelected: (_) => setState(() {
               kind = k;
               if (!unitTouched) unit = k == 'fertilizer' ? 'kg' : 'ml';
@@ -582,9 +485,7 @@ class _ProductPickerSheetState extends State<_ProductPickerSheet> {
                 unitTouched = true;
               })),
       const SizedBox(height: 14),
-      TextField(
-          controller: brandCtrl,
-          decoration: agInput('Preferred brand (optional)')),
+      TextField(controller: brandCtrl, decoration: agInput('Preferred brand (optional)')),
       if (error != null) ...[
         const SizedBox(height: 10),
         Text(error!, style: TextStyle(color: Colors.red.shade800)),
@@ -593,8 +494,7 @@ class _ProductPickerSheetState extends State<_ProductPickerSheet> {
       SizedBox(
         height: 48,
         child: ElevatedButton.icon(
-          style: ElevatedButton.styleFrom(
-              backgroundColor: agGreen, foregroundColor: Colors.white),
+          style: ElevatedButton.styleFrom(backgroundColor: agGreen, foregroundColor: Colors.white),
           onPressed: busy ? null : _create,
           icon: const Icon(Icons.add),
           label: Text(busy ? 'Adding…' : 'Add product'),

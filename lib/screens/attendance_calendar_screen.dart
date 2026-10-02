@@ -16,13 +16,11 @@
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../localization/app_localizations.dart';
 import '../services/responsive.dart';
 
-import '../config/app_config.dart';
+import '../services/api_client.dart';
 class AttendanceCalendarScreen extends StatefulWidget {
   const AttendanceCalendarScreen({super.key});
   @override
@@ -36,7 +34,6 @@ class _AttendanceCalendarScreenState extends State<AttendanceCalendarScreen> {
   static const violet = Color(0xFF7C4DFF);
   static const red = Color(0xFFC0392B);
   static const orange = Color(0xFFE67E22);
-  static String get baseUrl => AppConfig.apiBaseUrl;
 
   late DateTime _visibleMonth =
       DateTime(DateTime.now().year, DateTime.now().month, 1);
@@ -50,27 +47,17 @@ class _AttendanceCalendarScreenState extends State<AttendanceCalendarScreen> {
     _loadMonth();
   }
 
-  Future<Map<String, String>> get _headers async {
-    final prefs = await SharedPreferences.getInstance();
-    return {
-      'Authorization': 'Bearer ${prefs.getString('token') ?? ''}',
-    };
-  }
-
   Future<void> _loadMonth() async {
     setState(() {
       loading = true;
       error = null;
     });
     try {
-      final h = await _headers;
       final firstDay = DateTime(_visibleMonth.year, _visibleMonth.month, 1);
       final lastDay = DateTime(_visibleMonth.year, _visibleMonth.month + 1, 0);
       final from = DateFormat('yyyy-MM-dd').format(firstDay);
       final to = DateFormat('yyyy-MM-dd').format(lastDay);
-      final res = await http.get(
-          Uri.parse('$baseUrl/attendance/calendar?from=$from&to=$to'),
-          headers: h);
+      final res = await Api.get('/attendance/calendar?from=$from&to=$to');
       if (res.statusCode == 200) {
         final list = jsonDecode(res.body) as List;
         final map = <String, String>{};
@@ -86,7 +73,7 @@ class _AttendanceCalendarScreenState extends State<AttendanceCalendarScreen> {
     } catch (e) {
       if (mounted)
         setState(
-            () => error = '${AppLocalizations.of(context)!.faErrServer}: $e');
+            () => error = '${AppLocalizations.of(context)!.faErrServer}: ${Api.errorText(e)}');
     } finally {
       if (mounted) setState(() => loading = false);
     }

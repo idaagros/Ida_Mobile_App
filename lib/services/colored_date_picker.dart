@@ -7,9 +7,8 @@
 // this is a small custom calendar grid instead.
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'api_client.dart';
 
 /// Shows a custom month-grid calendar with days colored by entry status
 /// for the given module, and returns the picked date (or null if
@@ -77,15 +76,8 @@ class _ColoredCalendarDialogState extends State<_ColoredCalendarDialog> {
   Future<void> _loadMonthStatus() async {
     setState(() => _loading = true);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token') ?? '';
-      final res = await http.get(
-        Uri.parse(
-            '${widget.baseUrl}/${widget.module}/month-status?year=${_visibleMonth.year}&month=${_visibleMonth.month}'),
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
-      );
+      final res = await Api.get(
+          '/${widget.module}/month-status?year=${_visibleMonth.year}&month=${_visibleMonth.month}');
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         setState(() {
