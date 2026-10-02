@@ -46,6 +46,8 @@ import '../localization/app_locale.dart';
 import '../services/api_service.dart';
 import '../services/api_client.dart';
 import '../services/push_service.dart';
+import '../services/offline_queue.dart';
+import '../widgets/offline_status_bar.dart';
 import 'notifications_screen.dart';
 import 'transport_screen.dart';
 import 'password_screen.dart';
@@ -181,9 +183,12 @@ class _DashboardScreenState extends State<DashboardScreen>
       _loaded = true;
     });
 
-    // Non-admin users: poll for returned records every 60 seconds
+    // Non-admin users: poll for returned records every 60 seconds.
+    // (These calls fail quietly without signal; the tiles above stay usable.)
     if (!_isAdmin) {
-      await _fetchReturned();
+      try {
+        await _fetchReturned();
+      } catch (_) {}
       _pollTimer = Timer.periodic(
         const Duration(seconds: 60),
         (_) => _fetchReturned(),
@@ -194,7 +199,10 @@ class _DashboardScreenState extends State<DashboardScreen>
     // with edit access to at least one reviewable module, so this
     // runs unconditionally; the backend's own permission filtering
     // decides what (if anything) comes back.
-    await _fetchNeedsAttention();
+    try {
+      await _fetchNeedsAttention();
+    } catch (_) {}
+    if (!mounted) return;
     _needsAttentionTimer = Timer.periodic(
       const Duration(seconds: 60),
       (_) => _fetchNeedsAttention(),
@@ -402,6 +410,33 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _logout() async {
+    // Entries saved without signal stay on the phone; make sure the person knows.
+    final waiting = Offline.pendingCount.value;
+    if (waiting > 0) {
+      final off = AppLocalizations.of(context)!;
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(off.offSignOutTitle,
+              style: const TextStyle(fontWeight: FontWeight.w700)),
+          content: Text(off.offSignOutWarn(waiting)),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: Text(off.cancel,
+                    style: const TextStyle(color: Colors.grey))),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
+              child: Text(off.offSignOutBtn,
+                  style: const TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+      if (go != true || !mounted) return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -544,6 +579,9 @@ class _DashboardScreenState extends State<DashboardScreen>
         child: Responsive.constrainedContent(
             context,
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // ── Offline: waiting / not sent / saved data notice ────────
+              const OfflineStatusBar(),
+
               // ── Returned records banner (non-admin, pulsing) ───────────
               if (!_isAdmin && _activeReturned.isNotEmpty) ...[
                 _ReturnedBanner(

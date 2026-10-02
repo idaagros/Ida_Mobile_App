@@ -20,6 +20,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
+import 'offline_queue.dart';
 import 'push_service.dart' show appNavigatorKey;
 
 class ApiException implements Exception {
@@ -84,6 +85,16 @@ class Api {
   /// (sent as is). Returns the http.Response whatever the status; only a
   /// network failure or timeout throws. [auth]: false for calls made before
   /// signing in (login, face login, health check).
+  ///
+  /// Offline entry (phone only): pass [queueLabel] and [queueKey] on a
+  /// save (POST/PUT/PATCH/DELETE) that may be made without signal. If the
+  /// server cannot be reached, the entry is kept on the phone and sent
+  /// later; the call then returns status 202 with {"queued":true} instead
+  /// of throwing. [queueKey] names the entry (same key = the newer save
+  /// replaces the older waiting one). A save carrying these always sends an
+  /// X-Request-Id so a repeat is never saved twice.
+  /// Reads of lists listed in Offline.cacheablePrefixes are saved, and the
+  /// saved answer is returned when the server cannot be reached.
   static Future<http.Response> send(
     String method,
     String path, {
@@ -92,51 +103,149 @@ class Api {
     Map<String, dynamic>? query,
     Duration? timeout,
     bool auth = true,
+    String? queueLabel,
+    String? queueKey,
   }) async {
-    final h = await Api.headers(extra: headers, auth: auth);
+    final m = method.toUpperCase();
+    final queued = queueLabel != null && queueKey != null && m != 'GET';
+    final reqId = queued ? Offline.newRequestId() : null;
+    final extra = <String, String>{...?headers, if (reqId != null) 'X-Request-Id': reqId};
+    final h = await Api.headers(extra: extra, auth: auth);
     final u = uri(path, query);
-    final limit = timeout ?? _timeoutFor(path);
+    final limit = timeout ?? (queued ? const Duration(seconds: 25) : _timeoutFor(path));
     final b = body == null ? null : (body is String ? body : jsonEncode(body));
+    final readKey = (m == 'GET' && auth && Offline.isCacheable(u.path + (u.hasQuery ? '?${u.query}' : ''))) ? (u.path + (u.hasQuery ? '?${u.query}' : '')) : null;
+
+    Future<http.Response> keep() async {
+      await Offline.enqueue(id: reqId!, method: m, path: path + (query == null || query.isEmpty ? '' : '?${u.query}'), body: b ?? '', label: queueLabel!, key: queueKey!);
+      return http.Response(jsonEncode({'queued': true, 'offline': true, 'request_id': reqId}), 202, headers: {'content-type': 'application/json; charset=utf-8'});
+    }
+
     http.Response res;
-    switch (method.toUpperCase()) {
-      case 'POST':
-        res = await http.post(u, headers: h, body: b ?? '{}').timeout(limit);
-        break;
-      case 'PUT':
-        res = await http.put(u, headers: h, body: b ?? '{}').timeout(limit);
-        break;
-      case 'PATCH':
-        res = await http.patch(u, headers: h, body: b ?? '{}').timeout(limit);
-        break;
-      case 'DELETE':
-        res = await http.delete(u, headers: h, body: b).timeout(limit);
-        break;
-      default:
-        res = await http.get(u, headers: h).timeout(limit);
+    try {
+      switch (m) {
+        case 'POST':
+          res = await http.post(u, headers: h, body: b ?? '{}').timeout(limit);
+          break;
+        case 'PUT':
+          res = await http.put(u, headers: h, body: b ?? '{}').timeout(limit);
+          break;
+        case 'PATCH':
+          res = await http.patch(u, headers: h, body: b ?? '{}').timeout(limit);
+          break;
+        case 'DELETE':
+          res = await http.delete(u, headers: h, body: b).timeout(limit);
+          break;
+        default:
+          res = await http.get(u, headers: h).timeout(limit);
+      }
+    } catch (e) {
+      if (Offline.isNetworkError(e)) {
+        if (queued) return keep();
+        if (readKey != null) {
+          final saved = await Offline.savedAnswer(readKey);
+          if (saved != null) {
+            Offline.showingSaved.value = true;
+            return saved;
+          }
+        }
+      }
+      rethrow;
+    }
+    if (Offline.isUnreachableStatus(res.statusCode)) {
+      if (queued) return keep();
+      if (readKey != null) {
+        final saved = await Offline.savedAnswer(readKey);
+        if (saved != null) {
+          Offline.showingSaved.value = true;
+          return saved;
+        }
+      }
+    }
+    if (readKey != null && res.statusCode >= 200 && res.statusCode < 300) {
+      Offline.showingSaved.value = false;
+      Offline.saveAnswer(readKey, res.body); // fire and forget
+    }
+    if (queued && res.statusCode >= 200 && res.statusCode < 300) {
+      // Saved online: an older copy of the same entry waiting on the phone
+      // is now out of date and must not be sent after this one.
+      try {
+        await Offline.dropKey(queueKey!);
+      } catch (_) {}
     }
     if (auth) await _checkExpired(res);
+    // The server answered, so there is signal: send anything that is waiting.
+    if (auth && res.statusCode < 500 && Offline.pendingCount.value > 0) {
+      Offline.flush();
+    }
     return res;
   }
 
   static Future<http.Response> get(String path, {Map<String, String>? headers, Map<String, dynamic>? query, Duration? timeout, bool auth = true}) =>
       send('GET', path, headers: headers, query: query, timeout: timeout, auth: auth);
-  static Future<http.Response> post(String path, {Object? body, Map<String, String>? headers, Duration? timeout, bool auth = true}) =>
-      send('POST', path, body: body, headers: headers, timeout: timeout, auth: auth);
-  static Future<http.Response> put(String path, {Object? body, Map<String, String>? headers, Duration? timeout}) =>
-      send('PUT', path, body: body, headers: headers, timeout: timeout);
-  static Future<http.Response> patch(String path, {Object? body, Map<String, String>? headers, Duration? timeout}) =>
-      send('PATCH', path, body: body, headers: headers, timeout: timeout);
-  static Future<http.Response> delete(String path, {Object? body, Map<String, String>? headers, Duration? timeout}) =>
-      send('DELETE', path, body: body, headers: headers, timeout: timeout);
+  static Future<http.Response> post(String path, {Object? body, Map<String, String>? headers, Duration? timeout, bool auth = true, String? queueLabel, String? queueKey}) =>
+      send('POST', path, body: body, headers: headers, timeout: timeout, auth: auth, queueLabel: queueLabel, queueKey: queueKey);
+  static Future<http.Response> put(String path, {Object? body, Map<String, String>? headers, Duration? timeout, String? queueLabel, String? queueKey}) =>
+      send('PUT', path, body: body, headers: headers, timeout: timeout, queueLabel: queueLabel, queueKey: queueKey);
+  static Future<http.Response> patch(String path, {Object? body, Map<String, String>? headers, Duration? timeout, String? queueLabel, String? queueKey}) =>
+      send('PATCH', path, body: body, headers: headers, timeout: timeout, queueLabel: queueLabel, queueKey: queueKey);
+  static Future<http.Response> delete(String path, {Object? body, Map<String, String>? headers, Duration? timeout, String? queueLabel, String? queueKey}) =>
+      send('DELETE', path, body: body, headers: headers, timeout: timeout, queueLabel: queueLabel, queueKey: queueKey);
+
+  /// True when a save came back as "kept on this phone" (status 202).
+  static bool wasQueued(http.Response res) => res.statusCode == 202 && res.headers['content-type'] != null && decode(res) is Map && (decode(res) as Map)['queued'] == true;
 
   /// For file uploads: build the http.MultipartRequest as before, then send
   /// it here. The sign-in header is added; other headers you set are kept.
-  static Future<http.Response> sendMultipart(http.MultipartRequest req, {Duration timeout = const Duration(seconds: 120), bool auth = true}) async {
+  ///
+  /// Offline entry: pass [queueLabel] + [queueKey] (and the photo bytes in
+  /// [queueFiles], because a MultipartFile cannot be read back after it has
+  /// been sent) to keep the save on the phone when the server cannot be
+  /// reached. The call then returns status 202 ({"queued":true}).
+  static Future<http.Response> sendMultipart(
+    http.MultipartRequest req, {
+    Duration timeout = const Duration(seconds: 120),
+    bool auth = true,
+    String? queueLabel,
+    String? queueKey,
+    List<QueuedFile> queueFiles = const [],
+  }) async {
+    final queued = queueLabel != null && queueKey != null;
+    final reqId = queued ? Offline.newRequestId() : null;
     final h = await Api.headers(json: false, auth: auth);
     h.forEach((k, v) => req.headers.putIfAbsent(k, () => v));
-    final streamed = await req.send().timeout(timeout);
-    final res = await http.Response.fromStream(streamed);
+    if (reqId != null) req.headers['X-Request-Id'] = reqId;
+
+    Future<http.Response> keep() async {
+      final u = req.url;
+      await Offline.enqueue(
+        id: reqId!,
+        method: req.method,
+        path: u.path.startsWith('/api/') && AppConfig.apiBaseUrl.endsWith('/api') ? u.path.substring(4) + (u.hasQuery ? '?${u.query}' : '') : u.toString(),
+        body: '',
+        label: queueLabel!,
+        key: queueKey!,
+        fields: Map<String, String>.from(req.fields),
+        files: queueFiles,
+      );
+      return http.Response(jsonEncode({'queued': true, 'offline': true, 'request_id': reqId}), 202, headers: {'content-type': 'application/json; charset=utf-8'});
+    }
+
+    http.Response res;
+    try {
+      // a save that may be kept for later should not make a person wait a
+      // long time with no signal
+      final limit = queued ? const Duration(seconds: 40) : timeout;
+      final streamed = await req.send().timeout(limit);
+      res = await http.Response.fromStream(streamed);
+    } catch (e) {
+      if (queued && Offline.isNetworkError(e)) return keep();
+      rethrow;
+    }
+    if (queued && Offline.isUnreachableStatus(res.statusCode)) return keep();
+    if (queued && res.statusCode >= 200 && res.statusCode < 300) await Offline.dropKey(queueKey!);
     if (auth) await _checkExpired(res);
+    if (auth && res.statusCode < 500 && Offline.pendingCount.value > 0) Offline.flush();
     return res;
   }
 
@@ -229,6 +338,10 @@ class Api {
     final p = await SharedPreferences.getInstance();
     final host = p.getString('server_host');
     await p.clear();
+    // Saved answers belong to the person who signed out. Entries waiting to
+    // be sent are kept (they live in their own file) and go out when that
+    // same person signs in again.
+    await Offline.clearSavedAnswers();
     if (host != null && host.isNotEmpty) await p.setString('server_host', host);
   }
 

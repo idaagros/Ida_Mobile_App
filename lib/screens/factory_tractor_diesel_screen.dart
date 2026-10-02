@@ -17,6 +17,10 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
+import '../services/offline_queue.dart';
+import '../widgets/offline_notice.dart';
+import '../widgets/offline_status_bar.dart';
+import '../localization/app_localizations.dart';
 import 'admin/admin_common.dart';
 import 'reports/reports_common.dart' show ReportApi;
 
@@ -92,10 +96,25 @@ class _FactoryTractorDieselScreenState extends State<FactoryTractorDieselScreen>
       if (!mounted) return;
       setState(() => _data = d is Map ? Map<String, dynamic>.from(d) : null);
     } catch (e) {
-      if (mounted) setState(() => _error = errText(e));
+      if (mounted) {
+        // status 0 = no signal and nothing saved on this phone yet
+        setState(() => _error = (e is AdminApiError && e.status == 0 && _data == null) ? AppLocalizations.of(context)!.offNoSaved : errText(e));
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  // "Waiting to send" / "Not sent" notices for fill-ups kept on the phone.
+  Widget _waitingNotices() {
+    return ListenableBuilder(
+      listenable: Listenable.merge([Offline.sentTick, Offline.pendingCount, Offline.failedCount]),
+      builder: (context, _) {
+        final keys = Offline.mine().map((e) => e.key).where((k) => k.startsWith('diesel:factory:')).toList();
+        if (keys.isEmpty) return const SizedBox.shrink();
+        return Column(children: [for (final k in keys) OfflineNotice(queueKey: k)]);
+      },
+    );
   }
 
   List<Map<String, dynamic>> get _fills =>
@@ -137,13 +156,16 @@ class _FactoryTractorDieselScreenState extends State<FactoryTractorDieselScreen>
   }
 
   Future<void> _form([Map<String, dynamic>? edit]) async {
-    final saved = await showModalBottomSheet<bool>(
+    final saved = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => _FillSheet(edit: edit, meterNow: _data?['meter_now'], since: _data?['hours_since_last_fill']),
     );
-    if (saved == true) {
+    if (saved == 'queued') {
+      // No signal: kept on this phone; the list below is from before.
+      if (mounted) OfflineNotice.savedSnack(context);
+    } else if (saved == 'saved') {
       await _load();
       if (mounted) showOk(context, edit == null ? 'Fill-up saved. It waits for approval.' : 'Corrected. It waits for approval again.');
     }
@@ -176,6 +198,8 @@ class _FactoryTractorDieselScreenState extends State<FactoryTractorDieselScreen>
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(padding: const EdgeInsets.fromLTRB(14, 12, 14, 90), children: [
+          const OfflineStatusBar(),
+          _waitingNotices(),
           AFilterChips<String>(
             value: _period,
             onChanged: (v) {
@@ -385,11 +409,15 @@ class _FillSheetState extends State<_FillSheet> {
     });
     try {
       if (widget.edit == null) {
-        await AdminApi.post('/tractor/diesel-logs', body);
+        final r = await AdminApi.postQueued('/tractor/diesel-logs', body,
+            queueLabel: 'Diesel log ${DateFormat('dd MMM').format(_date)}',
+            queueKey: 'diesel:factory:${_ymd(_date)}:$l:${c ?? ''}');
+        if (mounted) Navigator.pop(context, AdminApi.wasQueued(r) ? 'queued' : 'saved');
+        return;
       } else {
         await AdminApi.put('/tractor/diesel-logs/${widget.edit!['id']}', body);
       }
-      if (mounted) Navigator.pop(context, true);
+      if (mounted) Navigator.pop(context, 'saved');
     } catch (e) {
       if (mounted) setState(() => _error = errText(e));
     } finally {

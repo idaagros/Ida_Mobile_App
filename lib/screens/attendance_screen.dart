@@ -15,6 +15,8 @@ import 'package:intl/intl.dart';
 import '../services/responsive.dart';
 import '../services/api_service.dart';
 import '../services/api_client.dart';
+import '../services/offline_queue.dart';
+import '../widgets/offline_status_bar.dart';
 import 'attendance_report_screen.dart';
 import 'reports/report_builder_screen.dart';
 import 'work_allocation_screen.dart';
@@ -69,9 +71,34 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   // non-admin can be granted specifically this without full admin.
   bool canApproveStageA = false;
 
+  // ── Offline entry ──
+  // The entry waiting on this phone for the chosen date has this key.
+  String get _offlineKey => 'present:$_dateStr';
+  // Was something waiting for the shown date at the last check? Used to
+  // notice that it has been sent (or discarded) so the day is re-read.
+  bool _hadWaiting = false;
+  String? mastersError;
+  late final Listenable _offlineChanges = Listenable.merge(
+      [Offline.sentTick, Offline.pendingCount, Offline.failedCount]);
+
+  void _onOfflineChange() {
+    if (!mounted) return;
+    final had = _hadWaiting;
+    final now = Offline.waitingFor(_offlineKey);
+    _hadWaiting = now != null;
+    if (had && now == null && !savingPresent) {
+      // sent (or discarded): show what the server has now
+      _loadDay();
+    } else {
+      setState(() {});
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    _hadWaiting = Offline.waitingFor(_offlineKey) != null;
+    _offlineChanges.addListener(_onOfflineChange);
     // Marking attendance = add or update on the 'attendance' section.
     ApiService.canWriteSection('farm_attendance', 'attendance').then((v) {
       if (mounted) setState(() => canUpdateStageA = v);
@@ -84,6 +111,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   @override
   void dispose() {
+    _offlineChanges.removeListener(_onOfflineChange);
     for (final c in presentWageCtrls.values) c.dispose();
     super.dispose();
   }
@@ -97,7 +125,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   String get _dateStr => DateFormat('yyyy-MM-dd').format(selectedDate);
 
   Future<void> _loadMasters() async {
-    setState(() => loadingMasters = true);
+    setState(() {
+      loadingMasters = true;
+      mastersError = null;
+    });
     try {
       final res = await Api.get('/farm-workers');
       if (res.statusCode == 200) {
@@ -109,6 +140,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       }
     } catch (e) {
       debugPrint('Load masters error: $e');
+      // no signal and no saved list of workers on this phone yet
+      if (mounted && workers.isEmpty && Offline.isNetworkError(e)) {
+        mastersError = AppLocalizations.of(context)!.offNoSaved;
+      }
     } finally {
       if (mounted) setState(() => loadingMasters = false);
     }
@@ -150,9 +185,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         });
       }
     } catch (e) {
-      setState(() => error = 'Could not reach server: ${Api.errorText(e)}');
+      if (mounted) {
+        setState(() => error = Offline.isNetworkError(e)
+            ? AppLocalizations.of(context)!.offNoSaved
+            : 'Could not reach server: ${Api.errorText(e)}');
+      }
     } finally {
-      if (mounted) setState(() => loadingDay = false);
+      if (mounted) {
+        _hadWaiting = Offline.waitingFor(_offlineKey) != null;
+        setState(() => loadingDay = false);
+      }
     }
   }
 
@@ -174,6 +216,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         for (final c in presentWageCtrls.values) c.dispose();
         presentWageCtrls.clear();
       });
+      _hadWaiting = Offline.waitingFor(_offlineKey) != null;
       await _loadDay();
     }
   }
@@ -472,6 +515,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     try {
       final res = await Api.post(
         '/attendance/day/$_dateStr/present',
+        queueLabel:
+            'Attendance ${DateFormat('dd MMM yyyy').format(selectedDate)}',
+        queueKey: _offlineKey,
         body: {
           'workers': selectedWorkerIds
               .map((id) => {
@@ -482,7 +528,25 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               .toList(),
         },
       );
-      if (res.statusCode == 200) {
+      if (Api.wasQueued(res)) {
+        // No signal: kept on this phone. The selection stays on screen
+        // (no reload) and can still be corrected and submitted again.
+        if (mounted) {
+          final loc = AppLocalizations.of(context)!;
+          setState(() => _hadWaiting = true);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(loc.offSavedSnack),
+            backgroundColor: const Color(0xFFB45309),
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            margin: const EdgeInsets.all(16),
+          ));
+        }
+      } else if (res.statusCode == 200) {
+        // An older saved-offline copy for this date is now out of date.
+        final old = Offline.waitingFor(_offlineKey);
+        if (old != null) await Offline.discard(old.id);
         await _loadDay();
         if (mounted) {
           final loc = AppLocalizations.of(context)!;
@@ -716,6 +780,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   ListView(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                     children: [
+                      const OfflineStatusBar(),
+                      _offlineNotice(loc),
                       GestureDetector(
                         onTap: _pickDate,
                         child: Container(
@@ -762,9 +828,61 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                             style: const TextStyle(
                                 color: Colors.red, fontSize: 12.5)),
                       ],
+                      if (mastersError != null && mastersError != error) ...[
+                        const SizedBox(height: 10),
+                        Text(mastersError!,
+                            style: const TextStyle(
+                                color: Colors.red, fontSize: 12.5)),
+                      ],
                     ],
                   )),
             ),
+    );
+  }
+
+  // Offline entry waiting on this phone for the chosen date (or refused by
+  // the server). Correcting the selection and submitting again replaces it.
+  Widget _offlineNotice(AppLocalizations loc) {
+    final e = Offline.waitingFor(_offlineKey);
+    if (e == null) return const SizedBox.shrink();
+    final failed = e.status == 'failed';
+    final fg = failed ? const Color(0xFFC0392B) : const Color(0xFF92600A);
+    final bg = failed ? const Color(0xFFFDE8E8) : const Color(0xFFFEF3DC);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(failed ? Icons.error_outline : Icons.cloud_upload_outlined,
+              color: fg, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+                failed
+                    ? loc.offNoticeFailed(e.error)
+                    : loc.offNoticeWaiting,
+                style: TextStyle(
+                    color: fg, fontWeight: FontWeight.w600, fontSize: 13)),
+          ),
+        ]),
+        if (failed) ...[
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: () => Navigator.pushNamed(context, '/offline'),
+              style: TextButton.styleFrom(
+                  foregroundColor: fg,
+                  padding: const EdgeInsets.symmetric(horizontal: 8)),
+              child: Text(loc.offOpenList,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+            ),
+          ),
+        ],
+      ]),
     );
   }
 

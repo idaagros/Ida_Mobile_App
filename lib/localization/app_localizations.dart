@@ -529,6 +529,38 @@ class AppLocalizations {
   String get sectorAgricultureDesc => _t('sector_agriculture_desc');
   String get sectorSwitchTitle => _t('sector_switch_title');
 
+  // ── Offline entry (off_ keys) ─────────────────────────────────
+  String get offStatusSaved => _t('off_status_saved');
+  String offWaiting(int n) =>
+      n == 1 ? _t('off_n_waiting_one') : _t('off_n_waiting').replaceAll('{n}', '$n');
+  String get offSendNow => _t('off_send_now');
+  String offFailed(int n) => _t('off_n_failed').replaceAll('{n}', '$n');
+  String get offQueueTitle => _t('off_queue_title');
+  String get offInfo => _t('off_info');
+  String get offEmpty => _t('off_empty');
+  String offSavedAt(String when) => _t('off_saved_at').replaceAll('{when}', when);
+  String get offChipWaiting => _t('off_chip_waiting');
+  String get offChipFailed => _t('off_chip_failed');
+  String get offTryAgain => _t('off_try_again');
+  String get offDiscard => _t('off_discard');
+  String get offDiscardTitle => _t('off_discard_title');
+  String get offDiscardBody => _t('off_discard_body');
+  String offWelcomeContinue(String name) =>
+      _t('off_welcome_continue').replaceAll('{name}', name);
+  String get offWelcomeOther => _t('off_welcome_other');
+  String get offSignOutTitle => _t('off_signout_title');
+  String offSignOutWarn(int n) => n == 1
+      ? _t('off_signout_warn_one')
+      : _t('off_signout_warn').replaceAll('{n}', '$n');
+  String get offSignOutBtn => _t('off_signout_btn');
+  String get offSavedSnack => _t('off_saved_snack');
+  String get offNoticeWaiting => _t('off_notice_waiting');
+  String offNoticeFailed(String reason) =>
+      _t('off_notice_failed').replaceAll('{reason}', reason);
+  String get offOpenList => _t('off_open_list');
+  String get offNoSaved => _t('off_no_saved');
+  String get offAllocSaved => _t('off_alloc_saved');
+
   static const Map<String, Map<String, String>> _localizedValues = {
     'en': {
       'save': 'Save',
@@ -1033,6 +1065,33 @@ class AppLocalizations {
       'sector_agriculture_desc':
           'Farm attendance, tractor, crop planning and reports',
       'sector_switch_title': 'Switch sector',
+      'off_status_saved': 'Offline - showing saved data',
+      'off_n_waiting': '{n} waiting to send',
+      'off_n_waiting_one': '1 waiting to send',
+      'off_send_now': 'Send now',
+      'off_n_failed': '{n} not sent - tap to review',
+      'off_queue_title': 'Waiting to send / Not sent',
+      'off_info': 'Entries saved without signal are sent automatically when the server can be reached. Entries the server refused stay here until you discard them or fix and save again.',
+      'off_empty': 'Nothing waiting',
+      'off_saved_at': 'Saved {when}',
+      'off_chip_waiting': 'Waiting',
+      'off_chip_failed': 'Not sent',
+      'off_try_again': 'Try again',
+      'off_discard': 'Discard',
+      'off_discard_title': 'Discard this entry?',
+      'off_discard_body': 'It will be removed from this phone and will not be sent.',
+      'off_welcome_continue': 'Continue as {name}',
+      'off_welcome_other': 'Sign in as someone else',
+      'off_signout_title': 'Sign out',
+      'off_signout_warn': '{n} entries are saved on this phone and not sent yet. They stay here and are sent when you sign in again. Sign out now?',
+      'off_signout_warn_one': '1 entry is saved on this phone and not sent yet. It stays here and is sent when you sign in again. Sign out now?',
+      'off_signout_btn': 'Sign out',
+      'off_saved_snack': 'Saved on this phone. It will be sent when the server can be reached.',
+      'off_notice_waiting': 'Waiting to send (saved offline)',
+      'off_notice_failed': 'Not sent: {reason}',
+      'off_open_list': 'Open list',
+      'off_no_saved': 'No saved data yet. Open this screen once with signal first.',
+      'off_alloc_saved': 'Your allocation is saved on this phone and will be sent automatically.',
     },
     'mr': {
       'save': 'जतन करा',
@@ -1533,6 +1592,33 @@ class AppLocalizations {
       'sector_agriculture_label': 'शेती',
       'sector_agriculture_desc': 'शेत हजेरी, ट्रॅक्टर, पीक नियोजन आणि अहवाल',
       'sector_switch_title': 'विभाग बदला',
+      'off_status_saved': 'ऑफलाइन - जतन केलेली माहिती दाखवत आहे',
+      'off_n_waiting': '{n} पाठवायच्या बाकी',
+      'off_n_waiting_one': '1 पाठवायची बाकी',
+      'off_send_now': 'आत्ता पाठवा',
+      'off_n_failed': '{n} पाठवल्या गेल्या नाहीत - पाहण्यासाठी दाबा',
+      'off_queue_title': 'पाठवायच्या बाकी / पाठवल्या नाहीत',
+      'off_info': 'नेटवर्क नसताना जतन केलेल्या नोंदी सर्व्हर मिळताच आपोआप पाठवल्या जातात. सर्व्हरने नाकारलेल्या नोंदी तुम्ही काढून टाकेपर्यंत किंवा दुरुस्त करून पुन्हा जतन करेपर्यंत येथेच राहतात.',
+      'off_empty': 'काहीही बाकी नाही',
+      'off_saved_at': 'जतन केले {when}',
+      'off_chip_waiting': 'पाठवायची बाकी',
+      'off_chip_failed': 'पाठवली नाही',
+      'off_try_again': 'पुन्हा प्रयत्न करा',
+      'off_discard': 'काढून टाका',
+      'off_discard_title': 'ही नोंद काढून टाकायची?',
+      'off_discard_body': 'ही नोंद या फोनमधून काढली जाईल आणि पाठवली जाणार नाही.',
+      'off_welcome_continue': '{name} म्हणून पुढे चला',
+      'off_welcome_other': 'दुसऱ्या व्यक्तीने साइन इन करा',
+      'off_signout_title': 'साइन आउट',
+      'off_signout_warn': '{n} नोंदी या फोनमध्ये जतन आहेत आणि अजून पाठवल्या नाहीत. त्या येथेच राहतील आणि तुम्ही पुन्हा साइन इन केल्यावर पाठवल्या जातील. आता साइन आउट करायचे?',
+      'off_signout_warn_one': '1 नोंद या फोनमध्ये जतन आहे आणि अजून पाठवली नाही. ती येथेच राहील आणि तुम्ही पुन्हा साइन इन केल्यावर पाठवली जाईल. आता साइन आउट करायचे?',
+      'off_signout_btn': 'साइन आउट',
+      'off_saved_snack': 'या फोनमध्ये जतन केले. सर्व्हर मिळताच पाठवले जाईल.',
+      'off_notice_waiting': 'पाठवायचे बाकी (ऑफलाइन जतन)',
+      'off_notice_failed': 'पाठवले नाही: {reason}',
+      'off_open_list': 'यादी उघडा',
+      'off_no_saved': 'अजून जतन केलेली माहिती नाही. आधी एकदा नेटवर्क असताना ही स्क्रीन उघडा.',
+      'off_alloc_saved': 'तुमचे काम वाटप या फोनमध्ये जतन झाले आहे आणि आपोआप पाठवले जाईल.',
     },
   };
 

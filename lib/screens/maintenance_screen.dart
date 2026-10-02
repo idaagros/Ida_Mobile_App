@@ -5,6 +5,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/api_service.dart';
 import '../services/api_client.dart';
+import '../services/offline_queue.dart';
+import '../widgets/offline_notice.dart';
+import '../widgets/offline_status_bar.dart';
+import '../localization/app_localizations.dart';
 class MaintenanceScreen extends StatefulWidget {
   final int? initialTabIndex;
   const MaintenanceScreen({super.key, this.initialTabIndex});
@@ -32,6 +36,8 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
   bool mayAdd = false;
   bool mayApprove = false;
   bool mayUpdate = false;
+  // No signal and nothing saved on this phone yet.
+  String? loadError;
 
   @override
   void initState() {
@@ -67,7 +73,10 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
   }
 
   Future<void> _loadAll() async {
-    setState(() => loading = true);
+    setState(() {
+      loading = true;
+      loadError = null;
+    });
     try {
       await _loadRole();
       final results = await Future.wait([
@@ -88,8 +97,11 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
         setState(() => log = jsonDecode(results[2].body));
     } catch (e) {
       debugPrint('Load error: $e');
+      if (mounted && Offline.isNetworkError(e)) {
+        loadError = AppLocalizations.of(context)!.offNoSaved;
+      }
     } finally {
-      setState(() => loading = false);
+      if (mounted) setState(() => loading = false);
     }
   }
 
@@ -147,14 +159,22 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
     if (confirmed != true) return;
 
     try {
+      final doneDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
       final res = await Api.post(
         '/maintenance/log',
+        queueLabel: 'Maintenance done: ${activity['name'] ?? ''}',
+        queueKey: 'maint:tractor:${activity['id']}:$doneDate',
         body: jsonEncode({
           'activity_id': activity['id'],
           'notes': notesCtrl.text.trim(),
-          'done_date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
+          'done_date': doneDate,
         }),
       );
+      if (Api.wasQueued(res)) {
+        // No signal: kept on this phone and sent later.
+        if (mounted) OfflineNotice.savedSnack(context);
+        return;
+      }
       final data = jsonDecode(res.body);
       if (res.statusCode == 200) {
         _loadAll();
@@ -307,13 +327,43 @@ class _MaintenanceScreenState extends State<MaintenanceScreen>
           ],
         ),
       ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator(color: idaGreen))
-          : TabBarView(controller: _tabs, children: [
-              _activitiesTab(),
-              _alertsTab(),
-              _historyTab(),
-            ]),
+      body: Column(children: [
+        const OfflineStatusBar(),
+        ListenableBuilder(
+          listenable: Listenable.merge(
+              [Offline.sentTick, Offline.pendingCount, Offline.failedCount]),
+          builder: (context, _) {
+            final keys = Offline.mine()
+                .map((e) => e.key)
+                .where((k) => k.startsWith('maint:tractor:'))
+                .toList();
+            if (keys.isEmpty) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Column(
+                  children: [for (final k in keys) OfflineNotice(queueKey: k)]),
+            );
+          },
+        ),
+        if (loadError != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Text(loadError!,
+                style: const TextStyle(
+                    color: Color(0xFFC0392B),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600)),
+          ),
+        Expanded(
+          child: loading
+              ? const Center(child: CircularProgressIndicator(color: idaGreen))
+              : TabBarView(controller: _tabs, children: [
+                  _activitiesTab(),
+                  _alertsTab(),
+                  _historyTab(),
+                ]),
+        ),
+      ]),
     );
   }
 

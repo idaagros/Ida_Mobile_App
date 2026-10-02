@@ -3,6 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/responsive.dart';
 import '../services/api_client.dart';
+import '../services/offline_queue.dart';
+import '../widgets/offline_notice.dart';
+import '../widgets/offline_status_bar.dart';
+import '../localization/app_localizations.dart';
 // ── Downtime reason options ───────────────────────────────
 const _reasonOptions = [
   {'value': 'lunch', 'label': 'Lunch break', 'icon': '🍱'},
@@ -37,6 +41,8 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
   bool loading = true;
   // "Plant closed" mark for the chosen day (Sep 2026). Null = not closed.
   Map? closedDay;
+  // No signal and nothing saved on this phone for the chosen day.
+  String? loadError;
 
   @override
   void initState() {
@@ -47,7 +53,10 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
   String get _dateStr => DateFormat('yyyy-MM-dd').format(selectedDate);
 
   Future<void> _loadData() async {
-    setState(() => loading = true);
+    setState(() {
+      loading = true;
+      loadError = null;
+    });
     try {
       final results = await Future.wait([
         Api.get('/factory?date=$_dateStr'),
@@ -69,8 +78,11 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
       }
     } catch (e) {
       debugPrint('Load error: $e');
+      if (mounted && Offline.isNetworkError(e)) {
+        setState(() => loadError = AppLocalizations.of(context)!.offNoSaved);
+      }
     } finally {
-      setState(() => loading = false);
+      if (mounted) setState(() => loading = false);
     }
   }
 
@@ -141,12 +153,20 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
 
   Future<void> _sendClosed(bool close, [String reason = '']) async {
     try {
+      final short = DateFormat('dd MMM').format(selectedDate);
       final res = close
           ? await Api.post('/factory/closed-days',
-              body: jsonEncode({'date': _dateStr, 'reason': reason}))
-          : await Api.delete('/factory/closed-days/$_dateStr');
+              body: jsonEncode({'date': _dateStr, 'reason': reason}),
+              queueLabel: 'Plant closed $short',
+              queueKey: 'factory:closed:$_dateStr')
+          : await Api.delete('/factory/closed-days/$_dateStr',
+              queueLabel: 'Plant closed mark removed $short',
+              queueKey: 'factory:closed:$_dateStr');
       if (!mounted) return;
-      if (res.statusCode == 200) {
+      if (Api.wasQueued(res)) {
+        // No signal: kept on this phone and sent later.
+        OfflineNotice.savedSnack(context);
+      } else if (res.statusCode == 200) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(close
               ? 'Marked as plant closed'
@@ -165,6 +185,26 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
       }
     }
     await _loadData();
+  }
+
+  // "Waiting to send" / "Not sent" notices for this day's saves.
+  Widget _waitingNotices() {
+    return ListenableBuilder(
+      listenable: Listenable.merge(
+          [Offline.sentTick, Offline.pendingCount, Offline.failedCount]),
+      builder: (context, _) {
+        final keys = Offline.mine()
+            .map((e) => e.key)
+            .where((k) =>
+                k == 'factory:closed:$_dateStr' ||
+                k.startsWith('factory:run:$_dateStr:'))
+            .toList();
+        if (keys.isEmpty) return const SizedBox.shrink();
+        return Column(children: [
+          for (final k in keys) OfflineNotice(queueKey: k),
+        ]);
+      },
+    );
   }
 
   Widget _closedCard() => Container(
@@ -252,6 +292,22 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
                     child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          const OfflineStatusBar(),
+                          if (loadError != null)
+                            Container(
+                              width: double.infinity,
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                  color: const Color(0xFFFDE8E8),
+                                  borderRadius: BorderRadius.circular(12)),
+                              child: Text(loadError!,
+                                  style: const TextStyle(
+                                      color: Color(0xFFC0392B),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600)),
+                            ),
+                          _waitingNotices(),
                           // Date picker
                           GestureDetector(
                             onTap: _pickDate,
@@ -698,7 +754,25 @@ class _FactoryEntryFormState extends State<_FactoryEntryForm> {
             .toList(),
       });
 
-      final res = await Api.post('/factory', body: body);
+      final timeKey =
+          '${_tod24(machineStart!)}-${_tod24(machineEnd!)}';
+      final res = await Api.post('/factory',
+          body: body,
+          queueLabel:
+              'Factory run ${DateFormat('dd MMM').format(entryDate)}',
+          queueKey: 'factory:run:$dateStr:$timeKey');
+
+      if (Api.wasQueued(res)) {
+        // No signal: kept on this phone and sent later. The list on the
+        // screen is from before, so it does not show this run yet; the
+        // "waiting to send" notice on the screen stands for it.
+        if (mounted) {
+          Navigator.pop(context);
+          widget.onSaved();
+          OfflineNotice.savedSnack(context);
+        }
+        return;
+      }
 
       debugPrint('FACTORY STATUS: ${res.statusCode}');
       debugPrint('FACTORY BODY: ${res.body}');

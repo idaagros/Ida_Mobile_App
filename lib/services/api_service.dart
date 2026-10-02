@@ -6,6 +6,7 @@ import '../config/app_config.dart';
 import '../localization/app_locale.dart';
 import '../models/user_model.dart';
 import 'api_client.dart';
+import 'offline_queue.dart';
 
 class ApiService {
   static String get baseUrl => AppConfig.apiHost; // from lib/config/app_config.dart
@@ -28,6 +29,8 @@ class ApiService {
     // even on a brand new device, so "log in as user2, see Marathi"
     // works regardless of what this device last showed.
     await AppLocale.apply(user['preferred_language'] ?? 'en');
+    // entries this person saved without signal are sent now
+    await Offline.onSignedIn();
   }
 
   static Future<String?> getToken() async {

@@ -5,9 +5,11 @@ import 'screens/login_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/admin/users_screen.dart';
 import 'screens/review/review_queue_screen.dart';
+import 'screens/offline_queue_screen.dart';
 import 'localization/app_locale.dart';
 import 'localization/app_localizations.dart';
 import 'services/push_service.dart';
+import 'services/offline_queue.dart';
 import 'config/app_config.dart';
 
 Future<void> main() async {
@@ -23,11 +25,37 @@ Future<void> main() async {
   // Notifications: the app checks the server itself (no outside push
   // service). Safe if anything fails - the app runs normally without them.
   await PushService.init();
+  // Offline entry: load entries waiting to be sent and start trying.
+  await Offline.init();
   runApp(const IdaAgriCoApp());
 }
 
-class IdaAgriCoApp extends StatelessWidget {
+class IdaAgriCoApp extends StatefulWidget {
   const IdaAgriCoApp({super.key});
+
+  @override
+  State<IdaAgriCoApp> createState() => _IdaAgriCoAppState();
+}
+
+class _IdaAgriCoAppState extends State<IdaAgriCoApp>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // Back in front: try to send anything saved without signal.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) Offline.onResume();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -59,6 +87,7 @@ class IdaAgriCoApp extends StatelessWidget {
             '/dashboard': (_) => const DashboardScreen(),
             '/admin/users': (_) => const UsersScreen(),
             '/admin/review': (_) => const ReviewQueueScreen(),
+            '/offline': (_) => const OfflineQueueScreen(),
           },
         );
       },

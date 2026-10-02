@@ -8,6 +8,10 @@ import '../services/colored_date_picker.dart';
 import '../services/responsive.dart';
 import 'package:intl/intl.dart';
 import '../services/api_client.dart';
+import '../services/offline_queue.dart';
+import '../widgets/offline_notice.dart';
+import '../widgets/offline_status_bar.dart';
+import '../localization/app_localizations.dart';
 
 import '../config/app_config.dart';
 class MachinePfScreen extends StatefulWidget {
@@ -64,9 +68,35 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
 
   Map<String, dynamic>? _returnedRecord;
 
+  // ── Offline entry ──
+  // The entry waiting on this phone for the chosen date has this key.
+  String get _offlineKey => widget.returnedRecordId != null
+      ? 'machine-pf:fix:${widget.returnedRecordId}'
+      : 'machine-pf:${DateFormat('yyyy-MM-dd').format(selectedDate)}';
+  bool _hadWaiting = false;
+  // Shown when there is no signal and nothing saved on the phone yet.
+  String? _noSavedMsg;
+  late final Listenable _offlineChanges = Listenable.merge(
+      [Offline.sentTick, Offline.pendingCount, Offline.failedCount]);
+
+  void _onOfflineChange() {
+    if (!mounted) return;
+    final had = _hadWaiting;
+    final now = Offline.waitingFor(_offlineKey);
+    _hadWaiting = now != null;
+    if (had && now == null && !submitting && !loading) {
+      // sent (or discarded): show what the server has now
+      _loadPreviousReading();
+    } else {
+      setState(() {});
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    _hadWaiting = Offline.waitingFor(_offlineKey) != null;
+    _offlineChanges.addListener(_onOfflineChange);
     pfCtrl.addListener(_onPfChanged);
     if (widget.returnedRecordId != null) {
       _fetchReturnedRecord();
@@ -98,6 +128,9 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
       }
     } catch (e) {
       debugPrint('Fetch returned record error: $e');
+      if (mounted && Offline.isNetworkError(e)) {
+        _noSavedMsg = AppLocalizations.of(context)!.offNoSaved;
+      }
     } finally {
       setState(() => loading = false);
     }
@@ -105,6 +138,7 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
 
   @override
   void dispose() {
+    _offlineChanges.removeListener(_onOfflineChange);
     pfCtrl.removeListener(_onPfChanged);
     pfCtrl.dispose();
     notesCtrl.dispose();
@@ -141,7 +175,10 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
   // cumulative), so this is shown purely as context — same date-aware
   // pattern used across every other reading module.
   Future<void> _loadPreviousReading() async {
-    setState(() => loading = true);
+    setState(() {
+      loading = true;
+      _noSavedMsg = null;
+    });
     try {
       final dateStr = DateFormat('yyyy-MM-dd').format(selectedDate);
       final res = await Api.get('/machine-pf/previous?date=$dateStr');
@@ -167,6 +204,10 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
       }
     } catch (e) {
       debugPrint('Previous PF fetch error: $e');
+      // no signal and nothing saved on this phone yet
+      if (mounted && Offline.isNetworkError(e) && previousPf == null) {
+        _noSavedMsg = AppLocalizations.of(context)!.offNoSaved;
+      }
     } finally {
       setState(() => loading = false);
     }
@@ -324,7 +365,40 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
             filename: photoName, contentType: MediaType('image', 'jpeg')));
       }
 
-      final res = await Api.sendMultipart(request);
+      final res = await Api.sendMultipart(
+        request,
+        queueLabel: 'Power factor reading $dateStr',
+        queueKey: _offlineKey,
+        queueFiles: (photoBytes != null && photoName != null)
+            ? [
+                QueuedFile(
+                    field: 'photo',
+                    filename: photoName!,
+                    bytes: photoBytes!,
+                    contentType: 'image/jpeg')
+              ]
+            : const [],
+      );
+
+      if (Api.wasQueued(res)) {
+        // No signal: kept on this phone and sent later.
+        if (mounted) OfflineNotice.savedSnack(context);
+        setState(() {
+          _hadWaiting = true;
+          successMessage = null;
+          errorMessage = null;
+          previousPf = double.tryParse(pfCtrl.text);
+          previousDate = dateStr;
+          previousTime = timeStr;
+          pfCtrl.clear();
+          notesCtrl.clear();
+          photoBytes = null;
+          photoName = null;
+          selectedDate = DateTime.now().subtract(const Duration(days: 1));
+          selectedTime = TimeOfDay.now();
+        });
+        return;
+      }
       final data = jsonDecode(res.body);
 
       if (res.statusCode == 200 || res.statusCode == 201) {
@@ -427,6 +501,17 @@ class _MachinePfScreenState extends State<MachinePfScreen> {
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      const OfflineStatusBar(),
+                      OfflineNotice(queueKey: _offlineKey),
+                      if (_noSavedMsg != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Text(_noSavedMsg!,
+                              style: const TextStyle(
+                                  color: Color(0xFF92600A),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13)),
+                        ),
                       // Correction banner (shown when opened from returned record)
                       if (widget.returnedRecordId != null) ...[
                         Container(

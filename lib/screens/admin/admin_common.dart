@@ -41,11 +41,11 @@ class AdminApiError implements Exception {
 }
 
 class AdminApi {
-  static Future<dynamic> send(String method, String path, {Object? body, Map<String, String>? headers}) async {
+  static Future<dynamic> send(String method, String path, {Object? body, Map<String, String>? headers, String? queueLabel, String? queueKey}) async {
     final b = body == null ? null : jsonEncode(body);
     http.Response res;
     try {
-      res = await Api.send(method, path, body: b, headers: headers, timeout: const Duration(seconds: 60));
+      res = await Api.send(method, path, body: b, headers: headers, timeout: const Duration(seconds: 60), queueLabel: queueLabel, queueKey: queueKey);
     } catch (e) {
       throw AdminApiError(Api.errorText(e), 0, <String, dynamic>{});
     }
@@ -60,6 +60,14 @@ class AdminApi {
   static Future<dynamic> get(String path, {Map<String, String>? headers}) => send('GET', path, headers: headers);
   static Future<dynamic> post(String path, [Object? body, Map<String, String>? headers]) => send('POST', path, body: body, headers: headers);
   static Future<dynamic> put(String path, [Object? body]) => send('PUT', path, body: body);
+  // Offline entry (phone): same as post/put, but with no signal the entry is
+  // kept on the phone and sent later. Check the answer with [wasQueued].
+  static Future<dynamic> postQueued(String path, Object? body, {required String queueLabel, required String queueKey}) =>
+      send('POST', path, body: body, queueLabel: queueLabel, queueKey: queueKey);
+  static Future<dynamic> putQueued(String path, Object? body, {required String queueLabel, required String queueKey}) =>
+      send('PUT', path, body: body, queueLabel: queueLabel, queueKey: queueKey);
+  /// True when the answer of a queued call means "kept on this phone".
+  static bool wasQueued(dynamic data) => data is Map && data['queued'] == true;
   static Future<dynamic> patch(String path, [Object? body]) => send('PATCH', path, body: body);
   static Future<dynamic> delete(String path) => send('DELETE', path);
 }

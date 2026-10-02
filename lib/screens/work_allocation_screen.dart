@@ -22,6 +22,8 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import '../services/api_client.dart';
+import '../services/offline_queue.dart';
+import '../widgets/offline_status_bar.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
@@ -213,14 +215,53 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
 
   String get _dateStr => DateFormat('yyyy-MM-dd').format(widget.attendanceDate);
 
+  // ── Offline entry ──
+  // The allocation waiting on this phone for this date has this key.
+  String get _offlineKey => 'allocation:$_dateStr';
+  bool _hadWaiting = false; // something was waiting at the last check
+  bool _mastersNetFail = false; // farms / work types could not be read
+  late final Listenable _offlineChanges = Listenable.merge(
+      [Offline.sentTick, Offline.pendingCount, Offline.failedCount]);
+
+  void _onOfflineChange() {
+    if (!mounted) return;
+    final had = _hadWaiting;
+    final now = Offline.waitingFor(_offlineKey);
+    _hadWaiting = now != null;
+    if (had && now == null && !saving) {
+      _reloadAfterSend();
+    } else {
+      setState(() {});
+    }
+  }
+
+  // The waiting allocation was sent (or discarded): read the day again.
+  // Only when the server now holds the allocation (pending / approved) are
+  // the groups on screen and the local draft dropped; after a discard the
+  // person's groups stay.
+  Future<void> _reloadAfterSend() async {
+    await _loadDay();
+    if (!mounted) return;
+    if (allocationStatus == 'pending' || allocationStatus == 'approved') {
+      setState(() {
+        for (final g in groups) g.dispose();
+        groups.clear();
+      });
+      await _clearDraft();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    _hadWaiting = Offline.waitingFor(_offlineKey) != null;
+    _offlineChanges.addListener(_onOfflineChange);
     _init();
   }
 
   @override
   void dispose() {
+    _offlineChanges.removeListener(_onOfflineChange);
     for (final g in groups) g.dispose();
     super.dispose();
   }
@@ -234,6 +275,12 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
     canReopenDay = await ApiService.canReopen('farm_attendance');
     await _loadMasters();
     await _loadDay();
+    if (mounted &&
+        _mastersNetFail &&
+        (farms.isEmpty || workTypes.isEmpty) &&
+        error == null) {
+      setState(() => error = AppLocalizations.of(context)!.offNoSaved);
+    }
   }
 
   Future<void> _loadMasters() async {
@@ -246,6 +293,7 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
       if (results[1].statusCode == 200) workTypes = jsonDecode(results[1].body);
     } catch (e) {
       debugPrint('Load masters error: $e');
+      if (Offline.isNetworkError(e)) _mastersNetFail = true;
     }
   }
 
@@ -285,11 +333,25 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
           // so only the wrong parts need changing.
           if (groups.isEmpty) _prefillFromSaved();
         }
+        // The server already holds this day's allocation and nothing is
+        // waiting on the phone: an old local draft would be wrong to keep
+        // (it could come back later over a returned allocation).
+        if ((allocationStatus == 'pending' || allocationStatus == 'approved') &&
+            Offline.waitingFor(_offlineKey) == null) {
+          await _clearDraft();
+        }
       }
     } catch (e) {
-      setState(() => error = 'Could not reach server: ${Api.errorText(e)}');
+      if (mounted) {
+        setState(() => error = Offline.isNetworkError(e)
+            ? AppLocalizations.of(context)!.offNoSaved
+            : 'Could not reach server: ${Api.errorText(e)}');
+      }
     } finally {
-      if (mounted) setState(() => loading = false);
+      if (mounted) {
+        _hadWaiting = Offline.waitingFor(_offlineKey) != null;
+        setState(() => loading = false);
+      }
     }
   }
 
@@ -689,9 +751,30 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
           .toList();
       final res = await Api.post(
         '/attendance/day/$_dateStr/allocation',
+        queueLabel:
+            'Work allocation ${DateFormat('dd MMM yyyy').format(widget.attendanceDate)}',
+        queueKey: _offlineKey,
         body: {'allocations': payload},
       );
-      if (res.statusCode == 200) {
+      if (Api.wasQueued(res)) {
+        // No signal: kept on this phone. The groups and the draft stay on
+        // screen (the day still reads "not submitted"), and the notice
+        // below explains. Saving again replaces the waiting entry.
+        if (mounted) {
+          setState(() => _hadWaiting = true);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(loc.offSavedSnack),
+            backgroundColor: const Color(0xFFB45309),
+            behavior: SnackBarBehavior.floating,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            margin: const EdgeInsets.all(16),
+          ));
+        }
+      } else if (res.statusCode == 200) {
+        // An older saved-offline copy for this date is now out of date.
+        final old = Offline.waitingFor(_offlineKey);
+        if (old != null) await Offline.discard(old.id);
         setState(() {
           for (final g in groups) g.dispose();
           groups.clear();
@@ -920,10 +1003,18 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
-                    child: Text(loc.faWaMustApproveFirst,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            color: Colors.grey.shade600, fontSize: 14)),
+                    child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const OfflineStatusBar(),
+                          Text(error ?? loc.faWaMustApproveFirst,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  color: error != null
+                                      ? Colors.red
+                                      : Colors.grey.shade600,
+                                  fontSize: 14)),
+                        ]),
                   ),
                 )
               : RefreshIndicator(
@@ -934,6 +1025,8 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
                       ListView(
                         padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
                         children: [
+                          const OfflineStatusBar(),
+                          _offlineNotice(loc),
                           _statusBanner(loc),
                           const SizedBox(height: 16),
                           if (_canBuild) ..._buildSection(loc),
@@ -951,6 +1044,50 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
                         ],
                       )),
                 ),
+    );
+  }
+
+  // The allocation saved on this phone for this date: waiting to be sent,
+  // or refused by the server (with its words).
+  Widget _offlineNotice(AppLocalizations loc) {
+    final e = Offline.waitingFor(_offlineKey);
+    if (e == null) return const SizedBox.shrink();
+    final failed = e.status == 'failed';
+    final fg = failed ? const Color(0xFFC0392B) : const Color(0xFF92600A);
+    final bg = failed ? const Color(0xFFFDE8E8) : const Color(0xFFFEF3DC);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(failed ? Icons.error_outline : Icons.cloud_upload_outlined,
+              color: fg, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+                failed ? loc.offNoticeFailed(e.error) : loc.offAllocSaved,
+                style: TextStyle(
+                    color: fg, fontWeight: FontWeight.w600, fontSize: 13)),
+          ),
+        ]),
+        if (failed) ...[
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: () => Navigator.pushNamed(context, '/offline'),
+              style: TextButton.styleFrom(
+                  foregroundColor: fg,
+                  padding: const EdgeInsets.symmetric(horizontal: 8)),
+              child: Text(loc.offOpenList,
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+            ),
+          ),
+        ],
+      ]),
     );
   }
 

@@ -14,6 +14,9 @@ import '../localization/transliterate.dart';
 import '../services/responsive.dart';
 
 import '../services/api_client.dart';
+import '../services/offline_queue.dart';
+import '../widgets/offline_notice.dart';
+import '../widgets/offline_status_bar.dart';
 class FarmTractorDieselScreen extends StatefulWidget {
   const FarmTractorDieselScreen({super.key});
   @override
@@ -31,6 +34,7 @@ class _FarmTractorDieselScreenState extends State<FarmTractorDieselScreen> {
   Map? average;
   Map? summary; // estimated tank level, learnt figure, checks (Sep 2026)
   bool loading = true;
+  String? loadError; // no signal and nothing saved on this phone
 
   @override
   void initState() {
@@ -39,7 +43,10 @@ class _FarmTractorDieselScreenState extends State<FarmTractorDieselScreen> {
   }
 
   Future<void> _loadTractors() async {
-    setState(() => loading = true);
+    setState(() {
+      loading = true;
+      loadError = null;
+    });
     try {
       final res = await Api.get('/farm-tractor/tractors');
       if (res.statusCode == 200) {
@@ -51,6 +58,9 @@ class _FarmTractorDieselScreenState extends State<FarmTractorDieselScreen> {
       }
     } catch (e) {
       debugPrint('Load tractors error: $e');
+      if (mounted && tractors.isEmpty && Offline.isNetworkError(e)) {
+        loadError = AppLocalizations.of(context)!.offNoSaved;
+      }
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -168,6 +178,9 @@ class _FarmTractorDieselScreenState extends State<FarmTractorDieselScreen> {
                 if (litersCtrl.text.trim().isEmpty) return;
                 final res = await Api.post(
                   '/farm-tractor/diesel-logs',
+                  queueLabel: 'Diesel log ${DateFormat('dd MMM').format(logDate)}',
+                  queueKey:
+                      'diesel:farm:$selectedTractorId:${DateFormat('yyyy-MM-dd').format(logDate)}:${double.tryParse(litersCtrl.text.trim()) ?? litersCtrl.text.trim()}:${costCtrl.text.trim()}:${hourMeterCtrl.text.trim()}',
                   body: jsonEncode({
                     'tractor_id': selectedTractorId,
                     'log_date': DateFormat('yyyy-MM-dd').format(logDate),
@@ -179,7 +192,10 @@ class _FarmTractorDieselScreenState extends State<FarmTractorDieselScreen> {
                   }),
                 );
                 if (ctx.mounted) Navigator.pop(ctx);
-                if (res.statusCode == 201) {
+                if (Api.wasQueued(res)) {
+                  // No signal: kept on this phone and sent later.
+                  if (mounted) OfflineNotice.savedSnack(context);
+                } else if (res.statusCode == 201) {
                   _loadLogsAndAverage();
                 } else if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -289,9 +305,26 @@ class _FarmTractorDieselScreenState extends State<FarmTractorDieselScreen> {
           ? Center(
               child: Padding(
                   padding: const EdgeInsets.all(24),
-                  child: Text(loc.ftNoTractorsSetupFirst,
+                  child: Text(loadError ?? loc.ftNoTractorsSetupFirst,
                       textAlign: TextAlign.center)))
           : Column(children: [
+              const OfflineStatusBar(),
+              ListenableBuilder(
+                listenable: Listenable.merge(
+                    [Offline.sentTick, Offline.pendingCount, Offline.failedCount]),
+                builder: (context, _) {
+                  final keys = Offline.mine()
+                      .map((e) => e.key)
+                      .where((k) => k.startsWith('diesel:farm:'))
+                      .toList();
+                  if (keys.isEmpty) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: Column(
+                        children: [for (final k in keys) OfflineNotice(queueKey: k)]),
+                  );
+                },
+              ),
               Container(
                 color: Colors.white,
                 padding: const EdgeInsets.all(16),
