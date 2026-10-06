@@ -12,6 +12,7 @@ import '../services/responsive.dart';
 
 import '../services/api_client.dart';
 import 'reports/reports_common.dart' show ReportApi;
+
 class ElectricityBillProjectionScreen extends StatefulWidget {
   const ElectricityBillProjectionScreen({super.key});
   @override
@@ -76,10 +77,14 @@ class _ElectricityBillProjectionScreenState
             onSelected: (kind) async {
               final month = DateTime.now().toIso8601String().substring(0, 7);
               try {
-                await ReportApi.download(context, '/electricity-bill/projection?format=$kind', 'electricity-bill-projection_$month.$kind');
+                await ReportApi.download(
+                    context,
+                    '/electricity-bill/projection?format=$kind',
+                    'electricity-bill-projection_$month.$kind');
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(Api.errorText(e))));
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text(Api.errorText(e))));
                 }
               }
             },
@@ -165,6 +170,8 @@ class _ElectricityBillProjectionScreenState
   }
 
   Widget _totalCard(Map d) {
+    final mf = num.tryParse('${d['multiplying_factor']}') ?? 1;
+    final mfText = mf > 1 ? ' · meter × $mf' : '';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -185,7 +192,7 @@ class _ElectricityBillProjectionScreenState
                 color: Colors.white)),
         const SizedBox(height: 6),
         Text(
-            'Based on ${d['day_of_month']} of ${d['days_in_month']} days · ${d['reading_count']} reading(s) so far',
+            'Based on ${d['day_of_month']} of ${d['days_in_month']} days · ${d['reading_count']} reading(s) so far$mfText',
             style:
                 TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.6))),
       ]),
@@ -275,6 +282,14 @@ class _ElectricityBillProjectionScreenState
         Text(
             'Projected: ${d['projected_kwh']} kWh → ${d['projected_kvah']} kVAh (billed unit)',
             style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+        if (d['kvah_source'] == 'meter' || d['kvah_source'] == 'pf') ...[
+          const SizedBox(height: 4),
+          Text(
+              d['kvah_source'] == 'meter'
+                  ? 'kVAh comes from the meter\'s own kVAh reading.'
+                  : 'kVAh is an estimate: kWh ÷ power factor. Enter the meter\'s kVAh reading daily for a closer figure.',
+              style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+        ],
         if (d['pf_note'] != null) ...[
           const SizedBox(height: 4),
           Text(d['pf_note'],
@@ -308,6 +323,7 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
   final demandRateCtrl = TextEditingController();
   final contractDemandCtrl = TextEditingController();
   final dutyCtrl = TextEditingController();
+  final multiplierCtrl = TextEditingController();
   String readingType = 'kwh';
 
   @override
@@ -331,6 +347,7 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
         demandRateCtrl.text = s['demand_rate_per_kva'].toString();
         contractDemandCtrl.text = s['contract_demand_kva'].toString();
         dutyCtrl.text = s['electricity_duty_pct'].toString();
+        multiplierCtrl.text = (s['multiplying_factor'] ?? 1).toString();
         readingType = s['daily_reading_type'] ?? 'kwh';
       } else {
         setState(() => error = Api.responseError(res));
@@ -342,7 +359,25 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    energyCtrl.dispose();
+    wheelingCtrl.dispose();
+    facCtrl.dispose();
+    demandRateCtrl.dispose();
+    contractDemandCtrl.dispose();
+    dutyCtrl.dispose();
+    multiplierCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _save() async {
+    final mf = double.tryParse(multiplierCtrl.text.trim());
+    if (mf == null || mf <= 0) {
+      setState(() => error =
+          'Multiplying factor must be a number above 0 (for example 1 or 5).');
+      return;
+    }
     setState(() {
       saving = true;
       error = null;
@@ -359,6 +394,7 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
               double.tryParse(contractDemandCtrl.text.trim()),
           'electricity_duty_pct': double.tryParse(dutyCtrl.text.trim()),
           'daily_reading_type': readingType,
+          'multiplying_factor': mf,
         }),
       );
       if (res.statusCode == 200) {
@@ -434,6 +470,15 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
                   _rateField('Contract demand', contractDemandCtrl,
                       suffix: 'KVA'),
                   _rateField('Electricity duty', dutyCtrl, suffix: '%'),
+                  _rateField('Multiplying factor', multiplierCtrl,
+                      suffix: '× meter reading'),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: Text(
+                        'Printed on your bill as "Multiplying Factor" (5 on the Sept 2026 bill). The meter dial reading × this = the units MSEDCL bills.',
+                        style: TextStyle(
+                            fontSize: 11.5, color: Colors.grey.shade600)),
+                  ),
                   const SizedBox(height: 6),
                   Text('DAILY READING TYPE',
                       style: TextStyle(
