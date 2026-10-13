@@ -44,7 +44,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'farm_attendance',
-    'levels': 'view,add,update,delete,approve,reopen',
+    'levels': 'view,add,update,delete,approve,correct,reopen',
     'label': 'Farm Attendance',
     'description': 'Record daily attendance and wages for farm field workers',
     'route': '/farm-attendance',
@@ -52,7 +52,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'farm_masters',
-    'levels': 'view,add,update',
+    'levels': 'view,add,update,delete',
     'label': 'Farm Masters',
     'description':
         'Manage the farm and farm-worker master lists, and precision agriculture (boundary drawing, satellite/soil analysis) - separate from marking daily attendance. "view" = read-only, "add"/"update" = can also draw/edit boundaries and refresh analysis',
@@ -61,7 +61,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'farm_tractor',
-    'levels': 'view,add,update',
+    'levels': 'view,add,update,delete',
     'label': 'Farm Tractor',
     'description':
         'Assign tractor field work and log hours, diesel and billing',
@@ -112,7 +112,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'destinations',
-    'levels': 'view,add,update',
+    'levels': 'view,add,update,delete',
     'label': 'Destinations',
     'description':
         'Master list of dispatch destinations - kept separate from Outward Register so adding new ones needs a specifically-authorized person',
@@ -121,7 +121,7 @@ const List<Map<String, String>> kModuleDefinitions = [
   },
   {
     'key': 'parties',
-    'levels': 'view,add,update',
+    'levels': 'view,add,update,delete',
     'label': 'Parties',
     'description':
         'Master list of dispatch buyers - kept separate from Outward Register so adding new ones needs a specifically-authorized person',
@@ -301,7 +301,7 @@ const List<String> kAgricultureModuleKeys = [
 class PermissionEntry {
   final String module;
   final String
-      level; // 'view' | 'add' | 'update' | 'delete' | 'approve' | 'reopen' | (legacy) 'edit'
+      level; // 'view' | 'add' | 'update' | 'delete' | 'approve' | 'correct' | 'reopen' | (legacy) 'edit'
   // Optional - restricts this grant to one section/stage of the module
   // (e.g. 'bhada' for outward_register). Null means "applies to every
   // section" - see kSectionedModules for which modules have sections.
@@ -368,6 +368,14 @@ bool hasApproveAccess(List<PermissionEntry> perms, String moduleKey) =>
 bool hasReopenAccess(List<PermissionEntry> perms, String moduleKey) =>
     perms.any((p) =>
         p.module == moduleKey && (p.level == 'reopen' || p.level == 'edit'));
+
+// 'correct' (Oct 2026): change an approved attendance day (half day, left early,
+// remove / add workers, change work) - the changes go back to the approver.
+// Reopen implies it. Legacy 'edit' covers it too.
+bool hasCorrectAccess(List<PermissionEntry> perms, String moduleKey) =>
+    perms.any((p) =>
+        p.module == moduleKey &&
+        (p.level == 'correct' || p.level == 'reopen' || p.level == 'edit'));
 
 // Section-aware check: an unscoped grant covers every section, a scoped
 // one only its own. Matches the backend's _hasScopedLevel.
@@ -441,6 +449,9 @@ class AppUser {
 
   bool canReopen(String moduleKey) =>
       isAdmin || hasReopenAccess(permissions, moduleKey);
+
+  bool canCorrect(String moduleKey) =>
+      isAdmin || hasCorrectAccess(permissions, moduleKey);
 
   AppUser copyWith({
     String? username,

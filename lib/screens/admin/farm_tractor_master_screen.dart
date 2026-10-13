@@ -18,6 +18,7 @@ import '../../localization/app_localizations.dart';
 import '../../localization/transliterate.dart';
 import '../../services/responsive.dart';
 import '../../services/api_client.dart';
+import 'admin_common.dart' show AChip, MasterLifecycle, MasterStatusToggle, isRowActive, usedCountOf;
 
 enum _Tab { tractors, rateCard, loads }
 
@@ -38,6 +39,8 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
   List rateCard = [];
   List loads = []; // work types with load level (Heavy / Medium / Light)
   bool loading = true;
+  // Active / Inactive switch above the tractor list (default Active)
+  bool showInactive = false;
 
   static const billingUnits = ['hour', 'acre', 'bag', 'trip', 'day'];
 
@@ -141,6 +144,19 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10))),
           ),
+          if (tractor != null)
+            MasterLifecycle(
+              path: '/farm-tractor/tractors/${tractor['id']}',
+              module: 'farm_tractor',
+              itemName: '${tractor['name'] ?? ''}',
+              isActive: isRowActive(tractor),
+              usedCount: usedCountOf(tractor),
+              onDone: (msg) {
+                Navigator.pop(ctx);
+                _showSnack(msg);
+                _loadAll();
+              },
+            ),
         ])),
         actions: [
           TextButton(
@@ -178,7 +194,9 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
 
   void _showRateDialog() {
     final loc = AppLocalizations.of(context)!;
-    int? tractorId = tractors.isNotEmpty ? tractors.first['id'] : null;
+    // New rates: active tractors only
+    final activeTractors = tractors.where(isRowActive).toList();
+    int? tractorId = activeTractors.isNotEmpty ? activeTractors.first['id'] : null;
     int? workTypeId = workTypes.isNotEmpty ? workTypes.first['id'] : null;
     String billingUnit = billingUnits.first;
     final rateCtrl = TextEditingController();
@@ -199,7 +217,7 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
                     labelText: loc.ftTractorLabel,
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10))),
-                items: tractors
+                items: activeTractors
                     .map<DropdownMenuItem<int>>((t) => DropdownMenuItem(
                         value: t['id'], child: Text(tl(context, t['name']))))
                     .toList(),
@@ -341,13 +359,26 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
           color: idaDark,
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
           child: Row(children: [
-            _segment(loc.ftTractorsTab, _Tab.tractors, tractors.length),
+            _segment(loc.ftTractorsTab, _Tab.tractors, tractors.where(isRowActive).length),
             const SizedBox(width: 8),
             _segment(loc.ftRatesTab, _Tab.rateCard, rateCard.length),
             const SizedBox(width: 8),
             _segment('How hard', _Tab.loads, loads.length),
           ]),
         ),
+        if (_tab == _Tab.tractors)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: MasterStatusToggle(
+                showInactive: showInactive,
+                activeCount: tractors.where(isRowActive).length,
+                inactiveCount: tractors.where((r) => !isRowActive(r)).length,
+                onChanged: (v) => setState(() => showInactive = v),
+              ),
+            ),
+          ),
         Expanded(
             child: Responsive.constrainedContent(
                 context,
@@ -384,15 +415,20 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
   Widget _buildList(AppLocalizations loc) {
     switch (_tab) {
       case _Tab.tractors:
-        return tractors.isEmpty
-            ? _empty(loc.ftNoTractorsYet)
+        final shownTractors =
+            tractors.where((t) => isRowActive(t) != showInactive).toList();
+        return shownTractors.isEmpty
+            ? _empty(tractors.isEmpty
+                ? loc.ftNoTractorsYet
+                : (showInactive ? loc.miNoneInactive : loc.miNoneActive))
             : ListView.separated(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                itemCount: tractors.length,
+                itemCount: shownTractors.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (_, i) {
-                  final t = tractors[i];
+                  final t = shownTractors[i];
                   return _row(
+                    active: isRowActive(t),
                     title: tl(context, t['name'] ?? ''),
                     subtitle: [
                       if (t['model'] != null) t['model'],
@@ -461,7 +497,11 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
     }
   }
 
-  Widget _row({required String title, String? subtitle, VoidCallback? onTap}) {
+  Widget _row(
+      {required String title,
+      String? subtitle,
+      VoidCallback? onTap,
+      bool active = true}) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -476,8 +516,10 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(title,
-                  style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: active ? Colors.black87 : Colors.grey),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1),
               if (subtitle != null && subtitle.isNotEmpty) ...[
@@ -489,6 +531,10 @@ class _FarmTractorMasterScreenState extends State<FarmTractorMasterScreen> {
               ],
             ]),
           ),
+          if (!active) ...[
+            AChip(AppLocalizations.of(context)!.miInactive),
+            const SizedBox(width: 6),
+          ],
           if (onTap != null)
             const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
         ]),

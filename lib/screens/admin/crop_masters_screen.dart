@@ -11,6 +11,7 @@ import '../../localization/transliterate.dart';
 import '../../services/api_service.dart';
 import '../../services/api_client.dart';
 import '../../services/responsive.dart';
+import 'admin_common.dart' show AChip, MasterLifecycle, MasterStatusToggle, isRowActive, usedCountOf;
 
 enum _Tab { crops, varieties }
 
@@ -29,6 +30,8 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
   List varieties = [];
   bool loading = true;
   bool _canAddAgri = false;
+  // Active / Inactive switch above the lists (default Active)
+  bool showInactive = false;
 
   @override
   void initState() {
@@ -43,8 +46,8 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
     setState(() => loading = true);
     try {
       final results = await Future.wait([
-        Api.get('/agri/crops'),
-        Api.get('/agri/crop-varieties'),
+        Api.get('/agri/crops?all=1'),
+        Api.get('/agri/crop-varieties?all=1'),
       ]);
       if (results[0].statusCode == 200) crops = jsonDecode(results[0].body);
       if (results[1].statusCode == 200) varieties = jsonDecode(results[1].body);
@@ -80,7 +83,7 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Text(crop == null ? loc.agriAddCrop : loc.agriEditCrop,
               style: const TextStyle(fontWeight: FontWeight.w700)),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
+          content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
             TextField(
               controller: nameCtrl,
               autofocus: true,
@@ -112,7 +115,20 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
               ],
               onChanged: (v) => setDialogState(() => cropType = v!),
             ),
-          ]),
+            if (crop != null)
+              MasterLifecycle(
+                path: '/agri/crops/${crop['id']}',
+                module: 'agri',
+                itemName: '${crop['name'] ?? ''}',
+                isActive: isRowActive(crop),
+                usedCount: usedCountOf(crop),
+                onDone: (msg) {
+                  Navigator.pop(ctx);
+                  _showSnack(msg);
+                  _loadAll();
+                },
+              ),
+          ])),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
@@ -154,10 +170,16 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
     );
   }
 
+  // Crops that can be picked for a new variety
+  List _activeCrops() => crops.where(isRowActive).toList();
+
+  // Rows of [all] for the chosen Active / Inactive view
+  List _shown(List all) => all.where((r) => isRowActive(r) != showInactive).toList();
+
   void _showVarietyDialog({Map? variety}) {
     final loc = AppLocalizations.of(context)!;
     int? cropId =
-        variety?['crop_id'] ?? (crops.isNotEmpty ? crops.first['id'] : null);
+        variety?['crop_id'] ?? (_activeCrops().isNotEmpty ? _activeCrops().first['id'] : null);
     final nameCtrl = TextEditingController(text: variety?['name'] ?? '');
     final notesCtrl =
         TextEditingController(text: variety?['source_notes'] ?? '');
@@ -180,12 +202,14 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               DropdownButtonFormField<int>(
-                value: cropId,
+                value: crops.any((c) => c['id'] == cropId) ? cropId : null,
                 decoration: InputDecoration(
                     labelText: loc.agriCropNameLabel,
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10))),
+                // new variety: active crops only; editing: the crop is fixed
                 items: crops
+                    .where((c) => isRowActive(c) || c['id'] == cropId)
                     .map<DropdownMenuItem<int>>((c) => DropdownMenuItem(
                         value: c['id'], child: Text(tl(context, c['name']))))
                     .toList(),
@@ -236,6 +260,19 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
                     labelText: loc.agriYieldUnitLabel,
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10))),
+              ),
+              if (variety != null)
+                MasterLifecycle(
+                path: '/agri/crop-varieties/${variety['id']}',
+                module: 'agri',
+                itemName: '${variety['name'] ?? ''}',
+                isActive: isRowActive(variety),
+                usedCount: usedCountOf(variety),
+                onDone: (msg) {
+                  Navigator.pop(ctx);
+                  _showSnack(msg);
+                  _loadAll();
+                },
               ),
             ]),
           ),
@@ -306,7 +343,7 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
                 if (_tab == _Tab.crops) {
                   _showCropDialog();
                 } else {
-                  if (crops.isEmpty) {
+                  if (_activeCrops().isEmpty) {
                     _showSnack('Add a crop first', isError: true);
                     return;
                   }
@@ -320,10 +357,22 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
           color: idaDark,
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
           child: Row(children: [
-            _segment(loc.agriCropsTab, _Tab.crops, crops.length),
+            _segment(loc.agriCropsTab, _Tab.crops, _shown(crops).length),
             const SizedBox(width: 8),
-            _segment(loc.agriVarietiesTab, _Tab.varieties, varieties.length),
+            _segment(loc.agriVarietiesTab, _Tab.varieties, _shown(varieties).length),
           ]),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: MasterStatusToggle(
+              showInactive: showInactive,
+              activeCount: (_tab == _Tab.crops ? crops : varieties).where(isRowActive).length,
+              inactiveCount: (_tab == _Tab.crops ? crops : varieties).where((r) => !isRowActive(r)).length,
+              onChanged: (v) => setState(() => showInactive = v),
+            ),
+          ),
         ),
         Expanded(
             child: Responsive.constrainedContent(
@@ -361,15 +410,17 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
   Widget _buildList(AppLocalizations loc) {
     switch (_tab) {
       case _Tab.crops:
-        return crops.isEmpty
-            ? _empty(loc.agriNoCropsYet)
+        final shownCrops = _shown(crops);
+        return shownCrops.isEmpty
+            ? _empty(crops.isEmpty ? loc.agriNoCropsYet : (showInactive ? loc.miNoneInactive : loc.miNoneActive))
             : ListView.separated(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                itemCount: crops.length,
+                itemCount: shownCrops.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (_, i) {
-                  final c = crops[i];
+                  final c = shownCrops[i];
                   return _row(
+                    active: isRowActive(c),
                     title: tl(context, c['name'] ?? ''),
                     subtitle:
                         '${c['crop_type'] == 'seasonal' ? loc.agriSeasonal : loc.agriPerennial}${c['category'] != null ? ' · ${c['category']}' : ''}',
@@ -378,15 +429,18 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
                 },
               );
       case _Tab.varieties:
-        return varieties.isEmpty
-            ? _empty(loc.agriNoVarietiesYet)
+        final shownVarieties = _shown(varieties);
+        return shownVarieties.isEmpty
+            ? _empty(varieties.isEmpty ? loc.agriNoVarietiesYet : (showInactive ? loc.miNoneInactive : loc.miNoneActive))
             : ListView.separated(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                itemCount: varieties.length,
+                itemCount: shownVarieties.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (_, i) {
-                  final v = varieties[i];
+                  final v = shownVarieties[i];
                   return _row(
+                    active: isRowActive(v),
+                    cropInactive: v['crop_is_active'] == 0 || v['crop_is_active'] == false,
                     title: tl(context, v['name'] ?? ''),
                     subtitle:
                         '${tl(context, v['crop_name'])}${v['maturity_days'] != null ? ' · ${v['maturity_days']}d' : ''}',
@@ -397,7 +451,13 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
     }
   }
 
-  Widget _row({required String title, String? subtitle, VoidCallback? onTap}) {
+  Widget _row(
+      {required String title,
+      String? subtitle,
+      VoidCallback? onTap,
+      bool active = true,
+      bool cropInactive = false}) {
+    final loc = AppLocalizations.of(context)!;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -412,8 +472,10 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(title,
-                  style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: active ? Colors.black87 : Colors.grey),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1),
               if (subtitle != null && subtitle.isNotEmpty) ...[
@@ -425,6 +487,14 @@ class _CropMastersScreenState extends State<CropMastersScreen> {
               ],
             ]),
           ),
+          if (cropInactive && active) ...[
+            AChip.wait(loc.miCropInactive),
+            const SizedBox(width: 6),
+          ],
+          if (!active) ...[
+            AChip(loc.miInactive),
+            const SizedBox(width: 6),
+          ],
           if (onTap != null)
             const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
         ]),

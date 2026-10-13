@@ -7,7 +7,9 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../services/responsive.dart';
+import '../../localization/app_localizations.dart';
 import '../../services/api_client.dart';
+import 'admin_common.dart' show AChip, MasterLifecycle, MasterStatusToggle, isRowActive, usedCountOf;
 
 class DestinationsScreen extends StatefulWidget {
   const DestinationsScreen({super.key});
@@ -21,6 +23,8 @@ class _DestinationsScreenState extends State<DestinationsScreen> {
 
   List destinations = [];
   bool loading = true;
+  // Active / Inactive switch above the list (default Active)
+  bool showInactive = false;
 
   @override
   void initState() {
@@ -32,12 +36,12 @@ class _DestinationsScreenState extends State<DestinationsScreen> {
     setState(() => loading = true);
     try {
       final res = await Api.get('/destinations?all=1');
-      if (res.statusCode == 200)
+      if (res.statusCode == 200 && mounted)
         setState(() => destinations = jsonDecode(res.body));
     } catch (e) {
       debugPrint('Load error: $e');
     } finally {
-      setState(() => loading = false);
+      if (mounted) setState(() => loading = false);
     }
   }
 
@@ -61,12 +65,76 @@ class _DestinationsScreenState extends State<DestinationsScreen> {
     try {
       await Api.patch(
         '/destinations/${destination['id']}',
-        body: {'is_active': destination['is_active'] == 1 ? false : true},
+        body: {'is_active': !isRowActive(destination)},
       );
       _load();
     } catch (e) {
       debugPrint('Toggle error: $e');
     }
+  }
+
+  Future<void> _rename(Map row, String name) async {
+    try {
+      final res = await Api.patch('/destinations/${row['id']}', body: {'name': name});
+      if (res.statusCode == 200) {
+        _load();
+      } else {
+        _showSnack(Api.responseError(res), isError: true);
+      }
+    } catch (e) {
+      _showSnack('Error: ${Api.errorText(e)}', isError: true);
+    }
+  }
+
+  void _showEditDialog(Map row) {
+    final loc = AppLocalizations.of(context)!;
+    final ctrl = TextEditingController(text: '${row['name'] ?? ''}');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(loc.miEditDestination,
+            style: const TextStyle(fontWeight: FontWeight.w700)),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(
+              controller: ctrl,
+              decoration: InputDecoration(
+                hintText: 'Destination name',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+            MasterLifecycle(
+              path: '/destinations/${row['id']}',
+              module: 'destinations',
+              itemName: '${row['name'] ?? ''}',
+              isActive: isRowActive(row),
+              usedCount: usedCountOf(row),
+              onDone: (msg) {
+                Navigator.pop(ctx);
+                _showSnack(msg);
+                _load();
+              },
+            ),
+          ]),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(loc.cancel, style: const TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
+            onPressed: () {
+              final name = ctrl.text.trim();
+              if (name.isEmpty) return;
+              Navigator.pop(ctx);
+              if (name != '${row['name'] ?? ''}') _rename(row, name);
+            },
+            child: Text(loc.save, style: const TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showSnack(String message, {bool isError = false}) {
@@ -117,6 +185,8 @@ class _DestinationsScreenState extends State<DestinationsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context)!;
+    final shown = destinations.where((r) => isRowActive(r) != showInactive).toList();
     return Scaffold(
       backgroundColor: const Color(0xFFF4F7F2),
       appBar: AppBar(
@@ -131,21 +201,38 @@ class _DestinationsScreenState extends State<DestinationsScreen> {
         onPressed: _showAddDialog,
         child: const Icon(Icons.add, color: Colors.white),
       ),
-      body: Responsive.constrainedContent(
+      body: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: MasterStatusToggle(
+              showInactive: showInactive,
+              activeCount: destinations.where(isRowActive).length,
+              inactiveCount: destinations.where((r) => !isRowActive(r)).length,
+              onChanged: (v) => setState(() => showInactive = v),
+            ),
+          ),
+        ),
+        Expanded(
+            child: Responsive.constrainedContent(
           context,
           loading
               ? const Center(child: CircularProgressIndicator(color: idaGreen))
-              : destinations.isEmpty
-                  ? const Center(
-                      child: Text('No destinations yet — tap + to add one',
-                          style: TextStyle(color: Colors.black54)))
+              : shown.isEmpty
+                  ? Center(
+                      child: Text(
+                          destinations.isEmpty
+                              ? 'No destinations yet — tap + to add one'
+                              : (showInactive ? loc.miNoneInactive : loc.miNoneActive),
+                          style: const TextStyle(color: Colors.black54)))
                   : ListView.separated(
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                      itemCount: destinations.length,
+                      itemCount: shown.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 8),
                       itemBuilder: (_, i) {
-                        final p = destinations[i];
-                        final active = p['is_active'] == 1;
+                        final p = shown[i];
+                        final active = isRowActive(p);
                         return Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 14, vertical: 4),
@@ -156,6 +243,7 @@ class _DestinationsScreenState extends State<DestinationsScreen> {
                           ),
                           child: ListTile(
                             contentPadding: EdgeInsets.zero,
+                            onTap: () => _showEditDialog(p),
                             title: Text(p['name'] ?? '',
                                 style: TextStyle(
                                     fontSize: 14,
@@ -165,15 +253,21 @@ class _DestinationsScreenState extends State<DestinationsScreen> {
                                     decoration: active
                                         ? null
                                         : TextDecoration.lineThrough)),
-                            trailing: Switch(
-                              value: active,
-                              activeColor: idaGreen,
-                              onChanged: (_) => _toggleActive(p),
-                            ),
+                            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                              if (!active) AChip(loc.miInactive),
+                              const SizedBox(width: 6),
+                              Switch(
+                                value: active,
+                                activeColor: idaGreen,
+                                onChanged: (_) => _toggleActive(p),
+                              ),
+                            ]),
                           ),
                         );
                       },
                     )),
+        ),
+      ]),
     );
   }
 }

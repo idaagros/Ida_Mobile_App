@@ -1,13 +1,20 @@
 // lib/screens/attendance_screen.dart
 //
-// Stage A — Attendance Marking. Two-stage workflow, direct-save is
-// gone (per the redesign). No headcount step any more (removed 24 Sep
-// 2026): pick who's present from the worker master (search +
-// checkbox, with an inline "+ Add Worker" for anyone
-// missing), save. That SUBMITS the whole day for approval and locks
-// it. An admin approves or rejects (one decision covering the whole
-// day, not per worker) right here. Approved unlocks Stage B — Work
-// Allocation — reached via the button that appears once approved.
+// Stage A — Attendance (redesigned Oct 2026).
+//  - Morning: mark every worker Present / ½ (half day) / Absent. Live counters show
+//    who is on work today (permanent, men, women) and the wage. Workers flagged
+//    "Paid when absent" who are not on work are paid as leave with pay and counted
+//    separately. Save draft keeps the list without sending it; Submit sends it for approval.
+//  - Approved day: anyone with "Correct approved day" can change workers (half day,
+//    left early, remove, make present, add late). The change is applied at once, the day
+//    shows as pending again, and only the changed rows go back to the approver, who
+//    approves or rejects each row (or all). Each waiting change can be undone.
+//  - Offline: the morning list is saved on the phone when there is no signal (same as
+//    before). Draft and approved-day changes need a connection.
+// Calls: POST /attendance/day/:date/present { workers:[{worker_id, kind, amount}], draft? }
+//        POST /attendance/day/:date/amend { reason, changes:[{worker_id, action, amount}] }
+//        POST /attendance/day/:date/amendments/:id/undo
+//        PATCH /attendance/day/:date/attendance-decision { decision, note, ids? }
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -17,10 +24,11 @@ import '../services/api_service.dart';
 import '../services/api_client.dart';
 import '../services/offline_queue.dart';
 import '../widgets/offline_status_bar.dart';
-import 'attendance_report_screen.dart';
+import '../widgets/att_parts.dart';
 import 'reports/report_builder_screen.dart';
 import 'work_allocation_screen.dart';
 import 'attendance_calendar_screen.dart';
+import 'attendance_change_log_screen.dart';
 import 'face_attendance_capture_screen.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
@@ -33,9 +41,8 @@ class AttendanceScreen extends StatefulWidget {
 }
 
 class _AttendanceScreenState extends State<AttendanceScreen> {
-  static const idaGreen = Color(0xFF3B7A28);
-  static const idaDark = Color(0xFF1E4012);
-  static const amber = Color(0xFFF5A623);
+  static const idaGreen = attGreen;
+  static const idaDark = attDark;
 
   late DateTime selectedDate = widget.initialDate ?? DateTime.now();
   bool isAdmin = false;
@@ -45,37 +52,40 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   bool loadingDay = false;
   String? error;
 
-  final Set<int> selectedWorkerIds = {};
-  final Map<int, TextEditingController> presentWageCtrls = {};
-  String workerFilter = 'All'; // 'All' | 'M' | 'F'
+  // ── Marking (morning) ──
+  // id -> 'present' | 'half' | 'early' | 'absent'; a worker not in the map is not marked yet.
+  final Map<int, String> kinds = {};
+  final Map<int, TextEditingController> amtCtrls = {};
+  String workerFilter = 'All'; // All | M | F | P | N (not marked)
+  final TextEditingController searchCtrl = TextEditingController();
   bool savingPresent = false;
+  bool savingDraft = false;
+  bool editList = false; // editing a submitted list that has no changes yet
 
-  // Day state from GET /day/:date
+  // ── Day state from GET /day/:date ──
   String? attendanceStatus; // null | pending | approved | returned
   String? attendanceAdminNote;
   String? allocationStatus;
-  // Totals of the submitted present list (from the server), shown once
-  // the day is submitted: total, male, female, permanent, total_wage.
   Map<String, dynamic>? presentSummary;
   List<Map<String, dynamic>> presentWorkers = [];
-  bool permanentAutoSuggested =
-      false; // present_workers came from permanent-worker suggestions, not an actual saved submission
+  List<Map<String, dynamic>> leaveWorkers = [];
+  List<Map<String, dynamic>> amendments = [];
+  int pendAtt = 0;
+  int pendAlloc = 0;
+  bool permanentAutoSuggested = false;
+
+  // ── Changes after approval ──
+  String viewFilter = 'All'; // All | M | F | P | L (leave) | C (changed)
+  final Set<int> amendSel = {};
+  bool busy = false;
 
   bool decidingAttendance = false;
-  // Stage A (attendance marking) specific access - separate from the
-  // existing isAdmin check above, which only gates the admin
-  // approve/reject decision, not the day-to-day marking itself.
   bool canUpdateStageA = false;
-  // The actual admin approve/reject decision - now its own distinct
-  // 'approve' permission rather than the plain isAdmin boolean, so a
-  // non-admin can be granted specifically this without full admin.
   bool canApproveStageA = false;
+  bool canCorrectDay = false;
 
   // ── Offline entry ──
-  // The entry waiting on this phone for the chosen date has this key.
   String get _offlineKey => 'present:$_dateStr';
-  // Was something waiting for the shown date at the last check? Used to
-  // notice that it has been sent (or discarded) so the day is re-read.
   bool _hadWaiting = false;
   String? mastersError;
   late final Listenable _offlineChanges = Listenable.merge(
@@ -87,7 +97,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final now = Offline.waitingFor(_offlineKey);
     _hadWaiting = now != null;
     if (had && now == null && !savingPresent) {
-      // sent (or discarded): show what the server has now
       _loadDay();
     } else {
       setState(() {});
@@ -99,12 +108,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     super.initState();
     _hadWaiting = Offline.waitingFor(_offlineKey) != null;
     _offlineChanges.addListener(_onOfflineChange);
-    // Marking attendance = add or update on the 'attendance' section.
     ApiService.canWriteSection('farm_attendance', 'attendance').then((v) {
       if (mounted) setState(() => canUpdateStageA = v);
     });
     ApiService.canApproveSection('farm_attendance', 'attendance').then((v) {
       if (mounted) setState(() => canApproveStageA = v);
+    });
+    ApiService.canCorrect('farm_attendance').then((v) {
+      if (mounted) setState(() => canCorrectDay = v);
     });
     _init();
   }
@@ -112,7 +123,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   @override
   void dispose() {
     _offlineChanges.removeListener(_onOfflineChange);
-    for (final c in presentWageCtrls.values) c.dispose();
+    for (final c in amtCtrls.values) {
+      c.dispose();
+    }
+    searchCtrl.dispose();
     super.dispose();
   }
 
@@ -140,7 +154,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       }
     } catch (e) {
       debugPrint('Load masters error: $e');
-      // no signal and no saved list of workers on this phone yet
       if (mounted && workers.isEmpty && Offline.isNetworkError(e)) {
         mastersError = AppLocalizations.of(context)!.offNoSaved;
       }
@@ -148,6 +161,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       if (mounted) setState(() => loadingMasters = false);
     }
   }
+
+  int _int(dynamic v) => int.tryParse(v?.toString() ?? '') ?? 0;
 
   Future<void> _loadDay() async {
     setState(() {
@@ -158,6 +173,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       final res = await Api.get('/attendance/day/$_dateStr');
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
+        final pc = data['pending_changes'] is Map ? data['pending_changes'] as Map : {};
         setState(() {
           presentSummary = data['present_summary'] is Map
               ? Map<String, dynamic>.from(data['present_summary'])
@@ -166,22 +182,23 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           attendanceAdminNote = data['attendance_admin_note'];
           allocationStatus = data['allocation_status'];
           permanentAutoSuggested = data['permanent_auto_suggested'] == true;
-
+          pendAtt = _int(pc['attendance']);
+          pendAlloc = _int(pc['allocation']);
           presentWorkers =
               List<Map<String, dynamic>>.from(data['present_workers'] ?? []);
-          presentWorkers.sort((a, b) => (a['name'] ?? '')
+          leaveWorkers =
+              List<Map<String, dynamic>>.from(data['leave_workers'] ?? []);
+          amendments =
+              List<Map<String, dynamic>>.from(data['amendments'] ?? []);
+          int byName(a, b) => (a['name'] ?? '')
               .toString()
               .toLowerCase()
-              .compareTo((b['name'] ?? '').toString().toLowerCase()));
-          for (final c in presentWageCtrls.values) c.dispose();
-          presentWageCtrls.clear();
-          for (final p in presentWorkers) {
-            presentWageCtrls[p['worker_id'] as int] =
-                TextEditingController(text: p['daily_wage']?.toString() ?? '');
-          }
-          selectedWorkerIds
-            ..clear()
-            ..addAll(presentWorkers.map((p) => p['worker_id'] as int));
+              .compareTo((b['name'] ?? '').toString().toLowerCase());
+          presentWorkers.sort(byName);
+          leaveWorkers.sort(byName);
+          amendSel.clear();
+          editList = false;
+          _resetMarks();
         });
       }
     } catch (e) {
@@ -198,313 +215,247 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
+  // Marks start from what the server holds (a draft, a returned list, permanent
+  // workers suggested on a fresh day).
+  void _resetMarks() {
+    for (final c in amtCtrls.values) {
+      c.dispose();
+    }
+    amtCtrls.clear();
+    kinds.clear();
+    for (final p in presentWorkers) {
+      final id = p['worker_id'] as int;
+      final k = permanentAutoSuggested ? 'present' : ((p['kind'] ?? 'present') as String);
+      kinds[id] = k;
+      final amt = permanentAutoSuggested
+          ? p['daily_wage']
+          : (p['morning_amount'] ?? p['daily_wage']);
+      amtCtrls[id] = TextEditingController(text: attFmt(attNum(amt)));
+    }
+  }
+
   Future<void> _pickDate() async {
-    // Uses the same colored Status Calendar as the AppBar's calendar
-    // icon, not Flutter's stock showDatePicker — the stock picker has
-    // no way to show which dates already have attendance entered, so
-    // every day looked identical regardless of status. This one
-    // already fetches and colors by status; reusing it here means a
-    // day with attendance already marked (or approved) now looks
-    // visibly different the moment you open the picker to choose a
-    // date, instead of only after separately opening "Status Calendar".
     final picked = await Navigator.push<DateTime>(context,
         MaterialPageRoute(builder: (_) => const AttendanceCalendarScreen()));
     if (picked != null) {
       setState(() {
         selectedDate = picked;
-        selectedWorkerIds.clear();
-        for (final c in presentWageCtrls.values) c.dispose();
-        presentWageCtrls.clear();
+        kinds.clear();
+        for (final c in amtCtrls.values) {
+          c.dispose();
+        }
+        amtCtrls.clear();
       });
       _hadWaiting = Offline.waitingFor(_offlineKey) != null;
       await _loadDay();
     }
   }
 
-  bool get _canEditAttendance =>
+  // ── Who may do what ──
+  bool get _editing =>
       canUpdateStageA &&
-      (attendanceStatus == null || attendanceStatus == 'returned');
+      (attendanceStatus == null ||
+          attendanceStatus == 'returned' ||
+          (editList && attendanceStatus == 'pending' && pendAtt == 0));
+  bool get _tracked =>
+      attendanceStatus == 'approved' ||
+      (attendanceStatus == 'pending' && pendAtt > 0);
+  bool get _mayChange => canCorrectDay && _tracked;
 
-  void _addWorker(int id) {
-    setState(() {
-      selectedWorkerIds.add(id);
-      final w = workers.firstWhere((w) => w['id'] == id, orElse: () => {});
-      presentWageCtrls[id] =
-          TextEditingController(text: w['daily_wage']?.toString() ?? '');
-    });
+  // ── Marking helpers ──
+  Map _worker(int id) =>
+      workers.firstWhere((w) => w['id'] == id, orElse: () => {}) as Map;
+  double _wageOf(int id) => attNum(_worker(id)['daily_wage']);
+  bool _isOn(int id) {
+    final k = kinds[id];
+    return k == 'present' || k == 'half' || k == 'early';
   }
 
-  // Face recognition is purely an ALTERNATIVE way to reach the same
-  // outcome as tapping a worker in the manual list — it reuses
-  // _addWorker() so amount defaults, gender counting, and everything
-  // else behaves identically regardless of which way a worker got
-  // selected. Android/iOS only (ML Kit + TFLite have no web support).
-  Future<void> _markViaFace() async {
-    final result = await Navigator.push<FaceMatchResult>(
-      context,
-      MaterialPageRoute(builder: (_) => const FaceAttendanceCaptureScreen()),
-    );
-    if (result == null) return;
-    if (selectedWorkerIds.contains(result.workerId)) {
-      if (mounted) {
-        final loc = AppLocalizations.of(context)!;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content:
-              Text('${tl(context, result.name)} ${loc.faAlreadyMarkedPresent}'),
-          backgroundColor: Colors.orange.shade700,
-          behavior: SnackBarBehavior.floating,
-        ));
+  List<int> get _onIds => kinds.keys.where(_isOn).toList();
+
+  void _setKind(int id, String k) {
+    setState(() {
+      final prev = kinds[id];
+      if (k == 'half' && prev == 'early') return;
+      kinds[id] = k;
+      final wage = _wageOf(id);
+      final c = amtCtrls.putIfAbsent(id, () => TextEditingController());
+      if (k == 'present' &&
+          (prev == null || prev == 'half' || prev == 'early' || prev == 'absent' || c.text.isEmpty)) {
+        c.text = attFmt(wage);
       }
-      return;
-    }
-    _addWorker(result.workerId);
-    if (mounted) {
-      final loc = AppLocalizations.of(context)!;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('${tl(context, result.name)} ${loc.faMarkedViaFace}'),
-        backgroundColor: idaGreen,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        margin: const EdgeInsets.all(16),
-      ));
-    }
-  }
-
-  void _removeWorker(int id) {
-    setState(() {
-      selectedWorkerIds.remove(id);
-      presentWageCtrls.remove(id)?.dispose();
+      if (k == 'half') c.text = attFmt(attHalfOf(wage));
     });
   }
 
-  double get _computedTotal => presentWageCtrls.values
-      .fold(0.0, (s, c) => s + (double.tryParse(c.text.trim()) ?? 0));
-
-  // Pay of the ticked men ('M') or women ('F') — Oct 2026.
-  double _selectedWage(String g) => selectedWorkerIds
-      .where((id) =>
-          workers.firstWhere((w) => w['id'] == id, orElse: () => {})['gender'] ==
-          g)
-      .fold(0.0,
-          (s, id) => s + (double.tryParse(presentWageCtrls[id]?.text.trim() ?? '') ?? 0));
-
-  // Pay of the submitted men / women (morning amount, else usual wage).
-  double _presentWage(String g) => presentWorkers
-      .where((p) => p['gender'] == g)
-      .fold(
-          0.0,
-          (s, p) =>
-              s +
-              (double.tryParse(
-                      (p['morning_amount'] ?? p['daily_wage'])?.toString() ??
-                          '') ??
-                  0));
-
-  int get _selectedPermanent => selectedWorkerIds.where((id) {
-        final w = workers.firstWhere((w) => w['id'] == id, orElse: () => {});
-        return w['is_permanent'] == 1 || w['is_permanent'] == true;
-      }).length;
-
-  // The day's totals after submission — from the server's
-  // present_summary, or worked out from the present list if missing.
-  Widget _submittedTotals(AppLocalizations loc) {
-    final s = presentSummary;
-    int n(dynamic v) => int.tryParse(v?.toString() ?? '') ?? 0;
-    if (s != null) {
-      return _dayTotals(loc,
-          title: loc.faPresentToday,
-          total: n(s['total']),
-          male: n(s['male']),
-          female: n(s['female']),
-          permanent: n(s['permanent']),
-          wage: double.tryParse(s['total_wage']?.toString() ?? '') ?? 0,
-          maleWage: presentWorkers.isEmpty ? null : _presentWage('M'),
-          femaleWage: presentWorkers.isEmpty ? null : _presentWage('F'));
-    }
-    if (presentWorkers.isEmpty) return const SizedBox.shrink();
-    return _dayTotals(loc,
-        title: loc.faPresentToday,
-        total: presentWorkers.length,
-        male: presentWorkers.where((p) => p['gender'] == 'M').length,
-        female: presentWorkers.where((p) => p['gender'] == 'F').length,
-        permanent: presentWorkers
-            .where((p) => p['is_permanent'] == 1 || p['is_permanent'] == true)
-            .length,
-        wage: presentWorkers.fold(
-            0.0,
-            (sum, p) =>
-                sum +
-                (double.tryParse(
-                        (p['morning_amount'] ?? p['daily_wage'])?.toString() ??
-                            '') ??
-                    0)),
-        maleWage: _presentWage('M'),
-        femaleWage: _presentWage('F'));
+  List get _shownWorkers {
+    final q = searchCtrl.text.trim().toLowerCase();
+    return workers.where((w) {
+      final id = w['id'] as int;
+      if (q.isNotEmpty && !(w['name'] ?? '').toString().toLowerCase().contains(q)) {
+        return false;
+      }
+      switch (workerFilter) {
+        case 'M':
+          return w['gender'] == 'M';
+        case 'F':
+          return w['gender'] == 'F';
+        case 'P':
+          return attIsPerm(w);
+        case 'N':
+          return !kinds.containsKey(id);
+      }
+      return true;
+    }).toList();
   }
 
-  // Total workers, male/female split, permanent (included in the
-  // total) and total wage. Same box on the web.
-  Widget _dayTotals(AppLocalizations loc,
-      {required String title,
-      required int total,
-      required int male,
-      required int female,
-      required int permanent,
-      required double wage,
-      double? maleWage,
-      double? femaleWage}) {
-    const grey = TextStyle(fontSize: 12, color: Color(0xFF4B5563));
-    String rs(double v) =>
-        '₹${v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2)}';
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-          color: const Color(0xFFF3F7EF),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFC9D6BF))),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('$title: $total ${loc.faWorkersWord}',
-            style: const TextStyle(
-                fontSize: 13.5, fontWeight: FontWeight.w700, color: idaDark)),
-        const SizedBox(height: 4),
-        Wrap(spacing: 14, runSpacing: 2, children: [
-          Text(
-              '♂ $male ${loc.faMaleFull.toLowerCase()}${maleWage != null ? ' · ${rs(maleWage)}' : ''}',
-              style: grey),
-          Text(
-              '♀ $female ${loc.faFemaleFull.toLowerCase()}${femaleWage != null ? ' · ${rs(femaleWage)}' : ''}',
-              style: grey),
-          Text('📌 $permanent ${loc.faPermanentIncluded}', style: grey),
-        ]),
-        const SizedBox(height: 6),
-        Row(children: [
-          Expanded(
-              child: Text(loc.faTotalWage,
-                  style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                      color: idaDark))),
-          Text('₹${wage.toStringAsFixed(2)}',
-              style: const TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w700, color: idaGreen)),
-        ]),
-      ]),
-    );
+  void _markShownPresent() {
+    setState(() {
+      for (final w in _shownWorkers) {
+        final id = w['id'] as int;
+        if (!_isOn(id)) {
+          kinds[id] = 'present';
+          amtCtrls.putIfAbsent(id, () => TextEditingController()).text =
+              attFmt(attNum(w['daily_wage']));
+        }
+      }
+    });
+  }
+
+  Future<void> _copyYesterday() async {
+    final y = selectedDate.subtract(const Duration(days: 1));
+    try {
+      final res = await Api.get('/attendance/day/${DateFormat('yyyy-MM-dd').format(y)}');
+      if (res.statusCode != 200) {
+        setState(() => error = Api.responseError(res));
+        return;
+      }
+      final data = jsonDecode(res.body);
+      final list = List<Map<String, dynamic>>.from(data['present_workers'] ?? []);
+      if (data['permanent_auto_suggested'] == true || list.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Nothing was marked yesterday'),
+              behavior: SnackBarBehavior.floating));
+        }
+        return;
+      }
+      setState(() {
+        for (final p in list) {
+          final id = p['worker_id'] as int;
+          if (!workers.any((w) => w['id'] == id)) continue;
+          kinds[id] = 'present';
+          amtCtrls.putIfAbsent(id, () => TextEditingController()).text =
+              attFmt(_wageOf(id));
+        }
+      });
+    } catch (e) {
+      setState(() => error = 'Could not reach server: ${Api.errorText(e)}');
+    }
+  }
+
+  // Counters of the list being marked (live).
+  ({int on, int perm, int men, int women, int halfM, int halfF, int leaveN, double leaveAmt, double wage}) get _live {
+    var on = 0, perm = 0, men = 0, women = 0, halfM = 0, halfF = 0;
+    var wage = 0.0;
+    for (final id in _onIds) {
+      final w = _worker(id);
+      on++;
+      if (attIsPerm(w)) perm++;
+      final half = kinds[id] != 'present';
+      if (w['gender'] == 'M') {
+        men++;
+        if (half) halfM++;
+      } else if (w['gender'] == 'F') {
+        women++;
+        if (half) halfF++;
+      }
+      wage += attNum(amtCtrls[id]?.text);
+    }
+    var leaveN = 0;
+    var leaveAmt = 0.0;
+    for (final w in workers) {
+      if (attIsPaidAbsent(w) && !_isOn(w['id'] as int)) {
+        leaveN++;
+        leaveAmt += attNum(w['daily_wage']);
+      }
+    }
+    return (on: on, perm: perm, men: men, women: women, halfM: halfM, halfF: halfF, leaveN: leaveN, leaveAmt: leaveAmt, wage: wage);
+  }
+
+  List<Map<String, dynamic>> _presentBody() => _onIds
+      .map((id) => {
+            'worker_id': id,
+            'kind': kinds[id],
+            'amount': double.tryParse(amtCtrls[id]?.text.trim() ?? ''),
+          })
+      .toList();
+
+  Future<void> _saveDraft() async {
+    setState(() {
+      savingDraft = true;
+      error = null;
+    });
+    try {
+      final res = await Api.post('/attendance/day/$_dateStr/present',
+          body: {'draft': true, 'workers': _presentBody()});
+      if (res.statusCode == 200) {
+        await _loadDay();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: const Text('Draft saved. Nothing has gone to the approver yet.'),
+              backgroundColor: idaGreen,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              margin: const EdgeInsets.all(16)));
+        }
+      } else {
+        setState(() => error = Api.responseError(res));
+      }
+    } catch (e) {
+      setState(() => error = 'Could not reach server: ${Api.errorText(e)}');
+    } finally {
+      if (mounted) setState(() => savingDraft = false);
+    }
   }
 
   Future<void> _reviewAndSubmit() async {
-    if (selectedWorkerIds.isEmpty) {
-      setState(() => error = 'Select at least one present worker');
+    if (_onIds.isEmpty) {
+      setState(() => error = 'Mark at least one worker present');
       return;
     }
-    final maleList = selectedWorkerIds
-        .where((id) =>
-            workers.firstWhere((w) => w['id'] == id,
-                orElse: () => {})['gender'] ==
-            'M')
-        .toList();
-    final femaleList = selectedWorkerIds
-        .where((id) =>
-            workers.firstWhere((w) => w['id'] == id,
-                orElse: () => {})['gender'] ==
-            'F')
-        .toList();
-    String nameOf(int id) =>
-        workers.firstWhere((w) => w['id'] == id, orElse: () => {})['name'] ??
-        '';
-
-    final confirmed = await showDialog<bool>(
+    final t = _live;
+    final loc = AppLocalizations.of(context)!;
+    final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) {
-        final loc = AppLocalizations.of(ctx)!;
-        return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(loc.faReviewPresentWorkers,
-              style: const TextStyle(fontWeight: FontWeight.w700)),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: SingleChildScrollView(
-              child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (maleList.isNotEmpty) ...[
-                      Text(
-                          '${loc.faMaleFull.toUpperCase()} (${maleList.length})',
-                          style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF6B7280))),
-                      const SizedBox(height: 4),
-                      ...maleList.map((id) => Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 2),
-                            child: Row(children: [
-                              Expanded(
-                                  child: Text(tl(context, nameOf(id)),
-                                      style: const TextStyle(fontSize: 13),
-                                      overflow: TextOverflow.ellipsis,
-                                      maxLines: 1)),
-                              Text('₹${presentWageCtrls[id]?.text ?? ''}',
-                                  style: const TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600)),
-                            ]),
-                          )),
-                      const SizedBox(height: 10),
-                    ],
-                    if (femaleList.isNotEmpty) ...[
-                      Text(
-                          '${loc.faFemaleFull.toUpperCase()} (${femaleList.length})',
-                          style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF6B7280))),
-                      const SizedBox(height: 4),
-                      ...femaleList.map((id) => Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 2),
-                            child: Row(children: [
-                              Expanded(
-                                  child: Text(tl(context, nameOf(id)),
-                                      style: const TextStyle(fontSize: 13),
-                                      overflow: TextOverflow.ellipsis,
-                                      maxLines: 1)),
-                              Text('₹${presentWageCtrls[id]?.text ?? ''}',
-                                  style: const TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600)),
-                            ]),
-                          )),
-                    ],
-                    const Divider(height: 20),
-                    _dayTotals(loc,
-                        title: loc.faPresentToday,
-                        total: selectedWorkerIds.length,
-                        male: maleList.length,
-                        female: femaleList.length,
-                        permanent: _selectedPermanent,
-                        wage: _computedTotal,
-                        maleWage: _selectedWage('M'),
-                        femaleWage: _selectedWage('F')),
-                  ]),
-            ),
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(loc.faReviewPresentWorkers,
+            style: const TextStyle(fontWeight: FontWeight.w700)),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${t.on} on work today', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          Text('Men ${t.men} · Women ${t.women} · Permanent ${t.perm}', style: const TextStyle(fontSize: 13)),
+          if (t.halfM + t.halfF > 0) Text('Half day: ${t.halfM + t.halfF}', style: const TextStyle(fontSize: 13)),
+          const SizedBox(height: 6),
+          Text('Wage for work: ${attRs(t.wage)}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+          if (t.leaveN > 0)
+            Text('Paid, not working: ${t.leaveN} · ${attRs(t.leaveAmt)}',
+                style: const TextStyle(fontSize: 13, color: attAmberFg)),
+          const SizedBox(height: 8),
+          Text('Not marked or absent: ${workers.length - t.on}', style: const TextStyle(fontSize: 12.5, color: Color(0xFF6B7280))),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(loc.cancel)),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(loc.faConfirmSubmit, style: const TextStyle(color: Colors.white)),
           ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: Text(loc.cancel)),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(loc.faConfirmSubmit,
-                  style: const TextStyle(color: Colors.white)),
-            ),
-          ],
-        );
-      },
+        ],
+      ),
     );
-    if (confirmed == true) await _submitPresent();
+    if (ok == true) await _submitPresent();
   }
 
   Future<void> _submitPresent() async {
@@ -515,22 +466,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     try {
       final res = await Api.post(
         '/attendance/day/$_dateStr/present',
-        queueLabel:
-            'Attendance ${DateFormat('dd MMM yyyy').format(selectedDate)}',
+        queueLabel: 'Attendance ${DateFormat('dd MMM yyyy').format(selectedDate)}',
         queueKey: _offlineKey,
-        body: {
-          'workers': selectedWorkerIds
-              .map((id) => {
-                    'worker_id': id,
-                    'amount': double.tryParse(
-                        presentWageCtrls[id]?.text.trim() ?? ''),
-                  })
-              .toList(),
-        },
+        body: {'workers': _presentBody()},
       );
       if (Api.wasQueued(res)) {
-        // No signal: kept on this phone. The selection stays on screen
-        // (no reload) and can still be corrected and submitted again.
         if (mounted) {
           final loc = AppLocalizations.of(context)!;
           setState(() => _hadWaiting = true);
@@ -538,13 +478,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             content: Text(loc.offSavedSnack),
             backgroundColor: const Color(0xFFB45309),
             behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             margin: const EdgeInsets.all(16),
           ));
         }
       } else if (res.statusCode == 200) {
-        // An older saved-offline copy for this date is now out of date.
         final old = Offline.waitingFor(_offlineKey);
         if (old != null) await Offline.discard(old.id);
         await _loadDay();
@@ -554,8 +492,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             content: Text(loc.faAttendanceSubmitted),
             backgroundColor: idaGreen,
             behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             margin: const EdgeInsets.all(16),
           ));
         }
@@ -569,19 +506,50 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
-  Future<void> _decideAttendance(String decision) async {
+  // Face recognition is an alternative way to mark someone present.
+  Future<void> _markViaFace() async {
+    final result = await Navigator.push<FaceMatchResult>(
+      context,
+      MaterialPageRoute(builder: (_) => const FaceAttendanceCaptureScreen()),
+    );
+    if (result == null) return;
+    if (_isOn(result.workerId)) {
+      if (mounted) {
+        final loc = AppLocalizations.of(context)!;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${tl(context, result.name)} ${loc.faAlreadyMarkedPresent}'),
+          backgroundColor: Colors.orange.shade700,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+      return;
+    }
+    _setKind(result.workerId, 'present');
+    if (mounted) {
+      final loc = AppLocalizations.of(context)!;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('${tl(context, result.name)} ${loc.faMarkedViaFace}'),
+        backgroundColor: idaGreen,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        margin: const EdgeInsets.all(16),
+      ));
+    }
+  }
+
+  // ── Approver ──
+  Future<void> _decideAttendance(String decision, {List<int>? ids}) async {
     String? note;
     if (decision == 'reject') {
       final loc = AppLocalizations.of(context)!;
-      note = await _promptForNote(
-          loc.faRejectAttendanceTitle, loc.faRejectAttendanceHint);
+      note = await _promptForNote(loc.faRejectAttendanceTitle, loc.faRejectAttendanceHint);
       if (note == null || note.trim().isEmpty) return;
     }
     setState(() => decidingAttendance = true);
     try {
       final res = await Api.patch(
         '/attendance/day/$_dateStr/attendance-decision',
-        body: {'decision': decision, if (note != null) 'note': note},
+        body: {'decision': decision, if (note != null) 'note': note, if (ids != null) 'ids': ids},
       );
       if (res.statusCode == 200) {
         await _loadDay();
@@ -602,34 +570,351 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       builder: (ctx) {
         final loc = AppLocalizations.of(ctx)!;
         return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title:
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
           content: TextField(
             controller: ctrl,
             maxLines: 2,
             autofocus: true,
             decoration: InputDecoration(
                 hintText: hint,
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10))),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
           ),
           actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, null),
-                child: Text(loc.cancel)),
+            TextButton(onPressed: () => Navigator.pop(ctx, null), child: Text(loc.cancel)),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red.shade600),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade600),
               onPressed: () => Navigator.pop(ctx, ctrl.text),
-              child: Text(loc.faConfirm,
-                  style: const TextStyle(color: Colors.white)),
+              child: Text(loc.faConfirm, style: const TextStyle(color: Colors.white)),
             ),
           ],
         );
       },
     );
+  }
+
+  // ── Changes after approval ──
+  Future<void> _postChange(String path, Map<String, dynamic> body) async {
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      final res = await Api.post('/attendance/day/$_dateStr/$path', body: body);
+      if (res.statusCode == 200) {
+        await _loadDay();
+      } else {
+        setState(() => error = Api.responseError(res));
+      }
+    } catch (e) {
+      setState(() => error = 'Could not reach server: ${Api.errorText(e)}');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> _undo(Map change) =>
+      _postChange('amendments/${change['id']}/undo', {});
+
+  // Rows of the submitted day: on work, leave with pay, and people removed by a waiting change.
+  List<Map<String, dynamic>> get _rows {
+    final list = <Map<String, dynamic>>[];
+    for (final p in presentWorkers) {
+      list.add({...p, 'kind': p['kind'] ?? 'present', 'amount': attNum(p['morning_amount'])});
+    }
+    for (final p in leaveWorkers) {
+      list.add({...p, 'kind': 'paid_leave', 'amount': attNum(p['morning_amount'])});
+    }
+    final have = list.map((r) => r['worker_id']).toSet();
+    for (final a in amendments) {
+      if (a['stage'] != 'attendance' || have.contains(a['worker_id']) || a['was'] == null) continue;
+      final w = _worker(a['worker_id'] as int);
+      list.add({
+        'worker_id': a['worker_id'],
+        'name': a['worker_name'] ?? w['name'] ?? '#${a['worker_id']}',
+        'gender': a['worker_gender'] ?? w['gender'],
+        'is_permanent': w['is_permanent'],
+        'paid_when_absent': w['paid_when_absent'],
+        'daily_wage': w['daily_wage'],
+        'kind': 'removed',
+        'amount': 0.0,
+        'change': a,
+        'removed': true,
+      });
+    }
+    const order = {'present': 0, 'half': 0, 'early': 0, 'paid_leave': 1, 'removed': 2};
+    list.sort((a, b) {
+      final c = (order[a['kind']] ?? 0).compareTo(order[b['kind']] ?? 0);
+      if (c != 0) return c;
+      return (a['name'] ?? '').toString().toLowerCase().compareTo((b['name'] ?? '').toString().toLowerCase());
+    });
+    return list;
+  }
+
+  bool _rowOnWork(Map r) => r['kind'] == 'present' || r['kind'] == 'half' || r['kind'] == 'early';
+
+  // Half day / left early / remove / full day for the chosen people (one sheet, one reason).
+  Future<void> _changeSheet(String mode, List<Map<String, dynamic>> people) async {
+    final reasonCtrl = TextEditingController();
+    final amounts = <int, TextEditingController>{};
+    for (final p in people) {
+      final id = p['worker_id'] as int;
+      final wage = attNum(p['daily_wage'] ?? p['amount']);
+      final base = p['kind'] == 'present' ? attNum(p['amount']) : wage;
+      final text = mode == 'half'
+          ? attFmt(attHalfOf(base))
+          : mode == 'present'
+              ? attFmt(wage > 0 ? wage : attNum(p['amount']))
+              : mode == 'early'
+                  ? (p['kind'] == 'early' ? attFmt(attNum(p['amount'])) : '')
+                  : '';
+      amounts[id] = TextEditingController(text: text);
+    }
+    String? err;
+    final title = {'half': 'Half day', 'early': 'Left early', 'remove': 'Remove from today', 'present': 'Full day'}[mode]!;
+    final help = {
+      'half': 'Paid half the daily wage by default. Change the amount if it is different.',
+      'early': 'Type what each person is paid for the day. They stay counted as present.',
+      'remove': 'They are taken off the work list and any work allocated to them is removed.',
+      'present': 'Marked present for the full day.',
+    }[mode]!;
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) {
+        return Padding(
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(ctx).viewInsets.bottom),
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text('$title · ${people.length == 1 ? tl(context, people.first['name'] ?? '') : '${people.length} workers'}',
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: idaDark)),
+              const SizedBox(height: 4),
+              Text('$help It goes back to the approver; the rest of the day stays approved.',
+                  style: const TextStyle(fontSize: 12.5, color: Color(0xFF5F6A58))),
+              const SizedBox(height: 10),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 220),
+                child: ListView(shrinkWrap: true, children: [
+                  for (final p in people)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(children: [
+                        Expanded(
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(tl(context, p['name'] ?? ''),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+                          Text('now ${attKindTag(p['kind'] ?? 'present').text} · ${attRs(attNum(p['amount']))}',
+                              style: const TextStyle(fontSize: 11.5, color: Color(0xFF6B7280))),
+                        ])),
+                        if (mode != 'remove')
+                          SizedBox(
+                            width: 100,
+                            child: TextField(
+                              controller: amounts[p['worker_id'] as int],
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(fontWeight: FontWeight.w700),
+                              decoration: InputDecoration(
+                                  prefixText: '₹', isDense: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                            ),
+                          ),
+                      ]),
+                    ),
+                ]),
+              ),
+              if (mode == 'remove' && people.any((p) => attIsPaidAbsent(p)))
+                const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text('Workers marked "Paid when absent" are paid as leave with pay.',
+                        style: TextStyle(fontSize: 12, color: attAmberFg))),
+              const SizedBox(height: 10),
+              Wrap(spacing: 6, children: [
+                for (final r in attQuickReasons)
+                  ChoiceChip(
+                    label: Text(r, style: const TextStyle(fontSize: 12.5)),
+                    selected: reasonCtrl.text == r,
+                    selectedColor: const Color(0xFFDCEBD2),
+                    onSelected: (_) => setSheet(() {
+                      reasonCtrl.text = r;
+                      err = null;
+                    }),
+                  ),
+              ]),
+              const SizedBox(height: 4),
+              TextField(
+                controller: reasonCtrl,
+                onChanged: (_) => setSheet(() => err = null),
+                decoration: InputDecoration(
+                    labelText: 'Reason (required)',
+                    errorText: err,
+                    isDense: true,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
+              ),
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel'))),
+                const SizedBox(width: 10),
+                Expanded(
+                    child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: mode == 'remove' ? const Color(0xFFC0392B) : idaGreen),
+                  onPressed: () {
+                    if (reasonCtrl.text.trim().isEmpty) {
+                      setSheet(() => err = 'Write a short reason first');
+                      return;
+                    }
+                    if (mode == 'early' && amounts.values.any((c) => double.tryParse(c.text.trim()) == null)) {
+                      setSheet(() => err = 'Type the amount for everyone');
+                      return;
+                    }
+                    Navigator.pop(ctx, true);
+                  },
+                  child: Text(title, style: const TextStyle(color: Colors.white)),
+                )),
+              ]),
+            ]),
+          ),
+        );
+      }),
+    );
+    final reason = reasonCtrl.text.trim();
+    final action = {'half': 'half', 'early': 'left_early', 'remove': 'absent', 'present': 'present'}[mode]!;
+    final changes = [
+      for (final p in people)
+        {
+          'worker_id': p['worker_id'],
+          'action': action,
+          if (mode != 'remove') 'amount': double.tryParse(amounts[p['worker_id'] as int]!.text.trim()),
+        }
+    ];
+    // (the controllers are left to be collected: the sheet is still animating out)
+    if (ok != true) return;
+    setState(() => amendSel.clear());
+    await _postChange('amend', {'reason': reason, 'changes': changes});
+  }
+
+  // Add workers who came but are not on today's list.
+  Future<void> _addWorkersSheet() async {
+    final onIds = presentWorkers.map((p) => p['worker_id']).toSet();
+    final choices = workers.where((w) => !onIds.contains(w['id'])).toList();
+    final pick = <int, TextEditingController>{};
+    final reasonCtrl = TextEditingController();
+    final qCtrl = TextEditingController();
+    String? err;
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) {
+        final q = qCtrl.text.trim().toLowerCase();
+        final shown = choices.where((w) => q.isEmpty || (w['name'] ?? '').toString().toLowerCase().contains(q)).toList();
+        return Padding(
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(ctx).viewInsets.bottom),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const Text('Add workers to today', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: idaDark)),
+            const SizedBox(height: 4),
+            const Text('For people who came to work but are not on the list. They are added as present, then need to be allocated to a task.',
+                style: TextStyle(fontSize: 12.5, color: Color(0xFF5F6A58))),
+            const SizedBox(height: 8),
+            TextField(
+              controller: qCtrl,
+              onChanged: (_) => setSheet(() {}),
+              decoration: InputDecoration(
+                  hintText: 'Search worker',
+                  prefixIcon: const Icon(Icons.search, size: 18),
+                  isDense: true,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
+            ),
+            const SizedBox(height: 6),
+            Flexible(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 260),
+                child: ListView(shrinkWrap: true, children: [
+                  if (shown.isEmpty)
+                    const Padding(padding: EdgeInsets.all(12), child: Text('No one left to add.', style: TextStyle(color: Colors.grey))),
+                  for (final w in shown)
+                    Row(children: [
+                      Checkbox(
+                        value: pick.containsKey(w['id']),
+                        activeColor: idaGreen,
+                        onChanged: (v) => setSheet(() {
+                          if (v == true) {
+                            pick[w['id'] as int] = TextEditingController(text: attFmt(attNum(w['daily_wage'])));
+                          } else {
+                            pick.remove(w['id']);
+                          }
+                        }),
+                      ),
+                      Expanded(
+                          child: Text(tl(context, w['name'] ?? ''),
+                              maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600))),
+                      if (pick.containsKey(w['id']))
+                        SizedBox(
+                          width: 90,
+                          child: TextField(
+                            controller: pick[w['id']],
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            textAlign: TextAlign.right,
+                            decoration: InputDecoration(prefixText: '₹', isDense: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+                          ),
+                        ),
+                    ]),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Wrap(spacing: 6, children: [
+              for (final r in attQuickReasons)
+                ChoiceChip(
+                  label: Text(r, style: const TextStyle(fontSize: 12.5)),
+                  selected: reasonCtrl.text == r,
+                  selectedColor: const Color(0xFFDCEBD2),
+                  onSelected: (_) => setSheet(() {
+                    reasonCtrl.text = r;
+                    err = null;
+                  }),
+                ),
+            ]),
+            TextField(
+              controller: reasonCtrl,
+              onChanged: (_) => setSheet(() => err = null),
+              decoration: InputDecoration(
+                  labelText: 'Reason (required)', errorText: err, isDense: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
+            ),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel'))),
+              const SizedBox(width: 10),
+              Expanded(
+                  child: ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
+                onPressed: () {
+                  if (pick.isEmpty) {
+                    setSheet(() => err = 'Tick at least one worker');
+                    return;
+                  }
+                  if (reasonCtrl.text.trim().isEmpty) {
+                    setSheet(() => err = 'Write a short reason first');
+                    return;
+                  }
+                  Navigator.pop(ctx, true);
+                },
+                child: Text('Add ${pick.length}', style: const TextStyle(color: Colors.white)),
+              )),
+            ]),
+          ]),
+        );
+      }),
+    );
+    final reason = reasonCtrl.text.trim();
+    final changes = [
+      for (final e in pick.entries) {'worker_id': e.key, 'action': 'add', 'amount': double.tryParse(e.value.text.trim())}
+    ];
+    if (ok != true) return;
+    await _postChange('amend', {'reason': reason, 'changes': changes});
   }
 
   Future<void> _showAddWorkerDialog() async {
@@ -643,10 +928,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         builder: (ctx, setDialogState) {
           final loc = AppLocalizations.of(ctx)!;
           return AlertDialog(
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: Text(loc.faAddWorker,
-                style: const TextStyle(fontWeight: FontWeight.w700)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Text(loc.faAddWorker, style: const TextStyle(fontWeight: FontWeight.w700)),
             content: SingleChildScrollView(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 TextField(
@@ -654,8 +937,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   autofocus: true,
                   decoration: InputDecoration(
                       labelText: loc.faWorkerNameLabel,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10))),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
                 ),
                 const SizedBox(height: 12),
                 Row(children: [
@@ -664,26 +946,22 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           label: Text(loc.faMaleFull),
                           selected: gender == 'M',
                           selectedColor: idaGreen.withOpacity(0.15),
-                          onSelected: (_) =>
-                              setDialogState(() => gender = 'M'))),
+                          onSelected: (_) => setDialogState(() => gender = 'M'))),
                   const SizedBox(width: 10),
                   Expanded(
                       child: ChoiceChip(
                           label: Text(loc.faFemaleFull),
                           selected: gender == 'F',
                           selectedColor: idaGreen.withOpacity(0.15),
-                          onSelected: (_) =>
-                              setDialogState(() => gender = 'F'))),
+                          onSelected: (_) => setDialogState(() => gender = 'F'))),
                 ]),
                 const SizedBox(height: 12),
                 TextField(
                   controller: wageCtrl,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
                       labelText: loc.faDailyWageLabel,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10))),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -691,20 +969,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   keyboardType: TextInputType.phone,
                   decoration: InputDecoration(
                       labelText: loc.faPhoneOptionalLabel,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10))),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
                 ),
               ]),
             ),
             actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: Text(loc.cancel)),
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(loc.cancel)),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
                 onPressed: () async {
-                  if (nameCtrl.text.trim().isEmpty ||
-                      wageCtrl.text.trim().isEmpty) return;
+                  if (nameCtrl.text.trim().isEmpty || wageCtrl.text.trim().isEmpty) return;
                   final res = await Api.post(
                     '/farm-workers',
                     body: {
@@ -716,8 +990,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   );
                   if (ctx.mounted) Navigator.pop(ctx, res.statusCode == 200);
                 },
-                child: Text(loc.faAdd,
-                    style: const TextStyle(color: Colors.white)),
+                child: Text(loc.faAdd, style: const TextStyle(color: Colors.white)),
               ),
             ],
           );
@@ -732,14 +1005,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           content: Text(loc.faWorkerAdded),
           backgroundColor: idaGreen,
           behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           margin: const EdgeInsets.all(16),
         ));
       }
     }
   }
 
+  // ════════════════════════ build ════════════════════════
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context)!;
@@ -749,8 +1022,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         backgroundColor: idaDark,
         foregroundColor: Colors.white,
         elevation: 0,
-        title: Text(loc.faTitle,
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+        title: Text(loc.faTitle, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
         actions: [
           IconButton(
             icon: const Icon(Icons.calendar_month_outlined),
@@ -758,15 +1030,25 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             onPressed: _pickDate,
           ),
           IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'Change log',
+            onPressed: () async {
+              await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => AttendanceChangeLogScreen(date: selectedDate)));
+              if (mounted) _loadDay();
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.summarize_outlined),
             tooltip: loc.faReportsTooltip,
-            onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const ReportBuilderScreen(reportKey: 'attendance'))),
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const ReportBuilderScreen(reportKey: 'attendance'))),
           ),
         ],
       ),
+      bottomNavigationBar: (_mayChange && amendSel.isNotEmpty && !_editing) ? _bulkBar() : null,
       body: loadingMasters
           ? const Center(child: CircularProgressIndicator(color: idaGreen))
           : RefreshIndicator(
@@ -789,22 +1071,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           decoration: BoxDecoration(
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(12),
-                              border:
-                                  Border.all(color: const Color(0xFFE0E7D8))),
+                              border: Border.all(color: const Color(0xFFE0E7D8))),
                           child: Row(children: [
-                            const Icon(Icons.calendar_today,
-                                size: 18, color: idaGreen),
+                            const Icon(Icons.calendar_today, size: 18, color: idaGreen),
                             const SizedBox(width: 10),
-                            Text(
-                                DateFormat('EEEE, dd MMM yyyy')
-                                    .format(selectedDate),
-                                style: const TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: idaDark)),
+                            Text(DateFormat('EEEE, dd MMM yyyy').format(selectedDate),
+                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: idaDark)),
                             const Spacer(),
-                            const Icon(Icons.edit_calendar_outlined,
-                                size: 18, color: Colors.grey),
+                            const Icon(Icons.edit_calendar_outlined, size: 18, color: Colors.grey),
                           ]),
                         ),
                       ),
@@ -812,27 +1086,23 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                       _workflowStepper(loc),
                       const SizedBox(height: 12),
                       _statusBanner(loc),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                       if (loadingDay)
                         const Center(
                             child: Padding(
                                 padding: EdgeInsets.all(30),
-                                child:
-                                    CircularProgressIndicator(color: idaGreen)))
-                      else ...[
-                        _presentWorkersCard(loc),
-                      ],
+                                child: CircularProgressIndicator(color: idaGreen)))
+                      else if (_editing)
+                        ..._editBody(loc)
+                      else
+                        ..._readBody(loc),
                       if (error != null) ...[
                         const SizedBox(height: 10),
-                        Text(error!,
-                            style: const TextStyle(
-                                color: Colors.red, fontSize: 12.5)),
+                        Text(error!, style: const TextStyle(color: Colors.red, fontSize: 12.5)),
                       ],
                       if (mastersError != null && mastersError != error) ...[
                         const SizedBox(height: 10),
-                        Text(mastersError!,
-                            style: const TextStyle(
-                                color: Colors.red, fontSize: 12.5)),
+                        Text(mastersError!, style: const TextStyle(color: Colors.red, fontSize: 12.5)),
                       ],
                     ],
                   )),
@@ -840,8 +1110,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
   }
 
-  // Offline entry waiting on this phone for the chosen date (or refused by
-  // the server). Correcting the selection and submitting again replaces it.
   Widget _offlineNotice(AppLocalizations loc) {
     final e = Offline.waitingFor(_offlineKey);
     if (e == null) return const SizedBox.shrink();
@@ -852,20 +1120,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
-      decoration:
-          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Icon(failed ? Icons.error_outline : Icons.cloud_upload_outlined,
-              color: fg, size: 18),
+          Icon(failed ? Icons.error_outline : Icons.cloud_upload_outlined, color: fg, size: 18),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-                failed
-                    ? loc.offNoticeFailed(e.error)
-                    : loc.offNoticeWaiting,
-                style: TextStyle(
-                    color: fg, fontWeight: FontWeight.w600, fontSize: 13)),
+            child: Text(failed ? loc.offNoticeFailed(e.error) : loc.offNoticeWaiting,
+                style: TextStyle(color: fg, fontWeight: FontWeight.w600, fontSize: 13)),
           ),
         ]),
         if (failed) ...[
@@ -874,11 +1136,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             alignment: Alignment.centerLeft,
             child: TextButton(
               onPressed: () => Navigator.pushNamed(context, '/offline'),
-              style: TextButton.styleFrom(
-                  foregroundColor: fg,
-                  padding: const EdgeInsets.symmetric(horizontal: 8)),
-              child: Text(loc.offOpenList,
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              style: TextButton.styleFrom(foregroundColor: fg, padding: const EdgeInsets.symmetric(horizontal: 8)),
+              child: Text(loc.offOpenList, style: const TextStyle(fontWeight: FontWeight.w700)),
             ),
           ),
         ],
@@ -886,25 +1145,19 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
   }
 
-  // Shows where today's entry stands in the two-gate pipeline:
-  // Attendance marked/submitted -> Attendance approved ->
-  // Allocation submitted -> Allocation approved. A compact segmented
-  // bar rather than 4 individually-labeled steps, since 4 labels
-  // don't fit comfortably on a narrow phone screen - one clear
-  // current-stage sentence below the bar carries the actual meaning.
   Widget _workflowStepper(AppLocalizations loc) {
-    int stage; // 1-4, how many segments are "reached"
+    int stage;
     String label;
     Color activeColor = idaGreen;
-
-    if (attendanceStatus == null) {
+    final att = (attendanceStatus == 'pending' && pendAtt > 0) ? 'approved' : attendanceStatus;
+    if (att == null) {
       stage = 1;
       label = loc.faStepMarkPresent;
-    } else if (attendanceStatus == 'returned') {
+    } else if (att == 'returned') {
       stage = 1;
       label = loc.faStepAttendanceReturned;
       activeColor = const Color(0xFFC0392B);
-    } else if (attendanceStatus == 'pending') {
+    } else if (att == 'pending') {
       stage = 1;
       label = loc.faStepAttendancePending;
       activeColor = const Color(0xFF92600A);
@@ -923,7 +1176,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       stage = 4;
       label = loc.faStepComplete;
     }
-
+    if (pendAtt + pendAlloc > 0) {
+      label = '${pendAtt + pendAlloc} change${pendAtt + pendAlloc == 1 ? '' : 's'} waiting for re-approval';
+      activeColor = const Color(0xFF92600A);
+    }
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(
         children: List.generate(4, (i) {
@@ -941,9 +1197,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         }),
       ),
       const SizedBox(height: 6),
-      Text(label,
-          style: TextStyle(
-              fontSize: 11.5, fontWeight: FontWeight.w600, color: activeColor)),
+      Text(label, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: activeColor)),
     ]);
   }
 
@@ -958,7 +1212,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         bg = const Color(0xFFFEF3DC);
         fg = const Color(0xFF92600A);
         icon = Icons.hourglass_top;
-        label = loc.faStatusPendingAttendance;
+        label = pendAtt > 0
+            ? '$pendAtt change${pendAtt == 1 ? ' is' : 's are'} waiting for re-approval. Everything else stays approved.'
+            : loc.faStatusPendingAttendance;
         break;
       case 'approved':
         bg = const Color(0xFFE8F5E2);
@@ -974,70 +1230,66 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         bg = const Color(0xFFFDE8E8);
         fg = const Color(0xFFC0392B);
         icon = Icons.error_outline;
-        label =
-            '${loc.faStatusReturned}${attendanceAdminNote != null ? ': $attendanceAdminNote' : ''}';
+        label = '${loc.faStatusReturned}${attendanceAdminNote != null ? ': $attendanceAdminNote' : ''}';
         break;
       default:
         return const SizedBox.shrink();
     }
+    final firstDecision = attendanceStatus == 'pending' && pendAtt == 0 && canApproveStageA;
     return Container(
       padding: const EdgeInsets.all(14),
-      decoration:
-          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Icon(icon, color: fg, size: 18),
           const SizedBox(width: 8),
-          Expanded(
-              child: Text(label,
-                  style: TextStyle(
-                      color: fg, fontWeight: FontWeight.w600, fontSize: 13))),
+          Expanded(child: Text(label, style: TextStyle(color: fg, fontWeight: FontWeight.w600, fontSize: 13))),
         ]),
-        if (attendanceStatus == 'pending' && canApproveStageA) ...[
+        if (firstDecision) ...[
           const SizedBox(height: 12),
           Row(children: [
             Expanded(
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-                onPressed: decidingAttendance
-                    ? null
-                    : () => _decideAttendance('approve'),
-                child: Text(loc.faApprove,
-                    style: const TextStyle(color: Colors.white)),
+                onPressed: decidingAttendance ? null : () => _decideAttendance('approve'),
+                child: Text(loc.faApprove, style: const TextStyle(color: Colors.white)),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: OutlinedButton(
-                style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red,
-                    side: const BorderSide(color: Colors.red)),
-                onPressed: decidingAttendance
-                    ? null
-                    : () => _decideAttendance('reject'),
+                style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
+                onPressed: decidingAttendance ? null : () => _decideAttendance('reject'),
                 child: Text(loc.faReject),
               ),
             ),
           ]),
         ],
-        if (attendanceStatus == 'approved') ...[
+        if (attendanceStatus == 'pending' && pendAtt == 0 && canUpdateStageA && !editList) ...[
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.edit_outlined, size: 16),
+            label: const Text('Edit list'),
+            onPressed: () => setState(() {
+              editList = true;
+              _resetMarks();
+            }),
+          ),
+        ],
+        if (_tracked) ...[
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              icon:
-                  const Icon(Icons.work_outline, color: Colors.white, size: 18),
+              icon: const Icon(Icons.work_outline, color: Colors.white, size: 18),
               label: Text(loc.faGoToWorkAllocation,
-                  style: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w700)),
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: idaDark,
-                  padding: const EdgeInsets.symmetric(vertical: 12)),
-              onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) =>
-                          WorkAllocationScreen(attendanceDate: selectedDate))),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+              style: ElevatedButton.styleFrom(backgroundColor: idaDark, padding: const EdgeInsets.symmetric(vertical: 12)),
+              onPressed: () async {
+                await Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => WorkAllocationScreen(attendanceDate: selectedDate)));
+                if (mounted) _loadDay();
+              },
             ),
           ),
         ],
@@ -1045,494 +1297,538 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
   }
 
-  // Same reasoning as Dashboard's tile grid: one column on mobile
-  // (unchanged behavior), reflowing to 2-3 columns on wider screens.
-  // Each row card is wrapped in a fixed-width SizedBox before going
-  // into the Wrap, since the card's Row contains an Expanded, which
-  // needs a bounded width - a bare Wrap gives unbounded width and
-  // would crash without this.
-  Widget _presentWorkersGrid(BuildContext context, List<Widget> cards) {
-    final columns = Responsive.gridColumns(context);
-    if (columns == 1) return Column(children: cards);
-    const spacing = 10.0;
-    return LayoutBuilder(builder: (context, constraints) {
-      final cardWidth =
-          (constraints.maxWidth - spacing * (columns - 1)) / columns;
-      return Wrap(
-        spacing: spacing,
-        runSpacing: 0,
-        children:
-            cards.map((c) => SizedBox(width: cardWidth, child: c)).toList(),
-      );
-    });
-  }
-
-  // The submitted list, men first then women (Oct 2026), each with its
-  // count and pay — what the approver checks.
-  Widget _presentBySection(AppLocalizations loc) {
-    String rs(double v) =>
-        '₹${v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2)}';
-    double pay(Map p) =>
-        double.tryParse((p['morning_amount'] ?? p['daily_wage'])?.toString() ?? '') ?? 0;
-    final sorted = List<Map<String, dynamic>>.from(presentWorkers)
-      ..sort((a, b) => (a['name'] ?? '')
-          .toString()
-          .toLowerCase()
-          .compareTo((b['name'] ?? '').toString().toLowerCase()));
-    final sections = <(String, List<Map<String, dynamic>>)>[
-      (loc.faMaleFull, sorted.where((p) => p['gender'] == 'M').toList()),
-      (loc.faFemaleFull, sorted.where((p) => p['gender'] == 'F').toList()),
-      ('—', sorted.where((p) => p['gender'] != 'M' && p['gender'] != 'F').toList()),
-    ].where((s) => s.$2.isNotEmpty).toList();
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      for (final sec in sections) ...[
+  // ── Morning marking ──
+  List<Widget> _editBody(AppLocalizations loc) {
+    final t = _live;
+    final shown = _shownWorkers;
+    return [
+      AttStatTiles(
+          onWork: t.on, permanent: t.perm, men: t.men, women: t.women, halfMen: t.halfM, halfWomen: t.halfF,
+          leaveCount: t.leaveN, leaveAmount: t.leaveAmt, workWage: t.wage),
+      const SizedBox(height: 12),
+      if (permanentAutoSuggested)
         Container(
-          margin: const EdgeInsets.only(top: 8, bottom: 2),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
-              color: const Color(0xFFEEF4E8),
-              borderRadius: BorderRadius.circular(8)),
-          child: Row(children: [
-            Text('${sec.$1.toUpperCase()} (${sec.$2.length})',
-                style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    color: idaDark,
-                    letterSpacing: 0.4)),
-            const Spacer(),
-            Text(rs(sec.$2.fold(0.0, (t, p) => t + pay(p))),
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w800, color: idaDark)),
+              color: const Color(0xFFFFF7E6),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFF5D48A))),
+          child: const Row(children: [
+            Icon(Icons.push_pin, size: 15, color: Color(0xFFB8860B)),
+            SizedBox(width: 6),
+            Expanded(
+                child: Text('Permanent workers are marked present for you. Change anyone who is absent or on a half day, then submit.',
+                    style: TextStyle(fontSize: 11.5, color: Color(0xFF8A6D1F)))),
           ]),
         ),
-        ...sec.$2.map((p) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-              child: Row(children: [
-                Icon(p['gender'] == 'M' ? Icons.male : Icons.female,
-                    color: idaGreen, size: 20),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(tl(context, p['name'] ?? ''),
-                      style: const TextStyle(
-                          fontSize: 13.5, fontWeight: FontWeight.w600),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1),
-                ),
-                const SizedBox(width: 8),
-                Text(rs(pay(p)),
-                    style:
-                        TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
-              ]),
-            )),
-      ],
-    ]);
+      Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE0E7D8))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Wrap(alignment: WrapAlignment.end, spacing: 12, runSpacing: 4, children: [
+            TextButton.icon(
+              onPressed: _markViaFace,
+              icon: const Icon(Icons.face_retouching_natural, size: 16, color: idaGreen),
+              label: Text(loc.faMarkViaFace,
+                  style: const TextStyle(color: idaGreen, fontSize: 12.5, fontWeight: FontWeight.w600)),
+              style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 0)),
+            ),
+            TextButton.icon(
+              onPressed: _showAddWorkerDialog,
+              icon: const Icon(Icons.person_add_alt_1, size: 16, color: idaGreen),
+              label: Text(loc.faAddWorker,
+                  style: const TextStyle(color: idaGreen, fontSize: 12.5, fontWeight: FontWeight.w600)),
+              style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 0)),
+            ),
+          ]),
+          TextField(
+            controller: searchCtrl,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              hintText: loc.faSearchWorkers,
+              hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+              prefixIcon: const Icon(Icons.search, size: 18, color: Colors.grey),
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE0E7D8))),
+            ),
+          ),
+          const SizedBox(height: 8),
+          _filterChips([
+            ('All', loc.faAll, workers.length),
+            ('M', loc.faMaleFull, workers.where((w) => w['gender'] == 'M').length),
+            ('F', loc.faFemaleFull, workers.where((w) => w['gender'] == 'F').length),
+            ('P', 'Permanent', workers.where((w) => attIsPerm(w)).length),
+            ('N', 'Not marked', workers.where((w) => !kinds.containsKey(w['id'])).length),
+          ], workerFilter, (v) => setState(() => workerFilter = v)),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 4, children: [
+            OutlinedButton.icon(
+                onPressed: _markShownPresent,
+                icon: const Icon(Icons.check, size: 16),
+                label: const Text('Mark shown present', style: TextStyle(fontSize: 12.5))),
+            OutlinedButton.icon(
+                onPressed: _copyYesterday,
+                icon: const Icon(Icons.copy_outlined, size: 16),
+                label: const Text('Copy yesterday', style: TextStyle(fontSize: 12.5))),
+          ]),
+          const SizedBox(height: 8),
+          if (shown.isEmpty)
+            const Padding(padding: EdgeInsets.all(14), child: Text('No one matches.', style: TextStyle(color: Colors.grey))),
+          for (final w in shown) _markRow(w as Map),
+        ]),
+      ),
+      const SizedBox(height: 14),
+      Row(children: [
+        if (editList)
+          Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: OutlinedButton(
+                  onPressed: () => setState(() {
+                        editList = false;
+                        _resetMarks();
+                      }),
+                  child: const Text('Cancel'))),
+        Expanded(
+          child: OutlinedButton(
+            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 13)),
+            onPressed: (savingDraft || savingPresent) ? null : _saveDraft,
+            child: Text(savingDraft ? 'Saving…' : 'Save draft'),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          flex: 2,
+          child: ElevatedButton.icon(
+            icon: savingPresent
+                ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.check_circle_outline, color: Colors.white, size: 18),
+            label: Text(savingPresent ? loc.faSubmitting : 'Submit ${t.on} present',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: idaGreen,
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+            onPressed: (savingPresent || savingDraft) ? null : _reviewAndSubmit,
+          ),
+        ),
+      ]),
+    ];
   }
 
-  Widget _presentWorkersCard(AppLocalizations loc) {
-    final selectedMale = selectedWorkerIds
-        .where((id) =>
-            workers.firstWhere((w) => w['id'] == id,
-                orElse: () => {})['gender'] ==
-            'M')
-        .length;
-    final selectedFemale = selectedWorkerIds
-        .where((id) =>
-            workers.firstWhere((w) => w['id'] == id,
-                orElse: () => {})['gender'] ==
-            'F')
-        .length;
+  Widget _filterChips(List<(String, String, int)> items, String value, ValueChanged<String> onPick) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(children: [
+        for (final it in items)
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: GestureDetector(
+              onTap: () => onPick(it.$1),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                    color: value == it.$1 ? idaGreen : const Color(0xFFF4F7F2),
+                    borderRadius: BorderRadius.circular(8)),
+                child: Text('${it.$2} ${it.$3}',
+                    style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: value == it.$1 ? Colors.white : Colors.grey.shade700)),
+              ),
+            ),
+          ),
+      ]),
+    );
+  }
 
+  Widget _markRow(Map w) {
+    final id = w['id'] as int;
+    final k = kinds[id];
+    final on = _isOn(id);
+    final leave = attIsPaidAbsent(w) && !on;
+    final half = k == 'half' || k == 'early';
+    final bg = k == null
+        ? Colors.white
+        : on
+            ? (half ? const Color(0xFFFFF8E8) : const Color(0xFFE8F5E2))
+            : (leave ? const Color(0xFFFFFAF3) : const Color(0xFFF1F2EE));
+    final sub = k == 'half'
+        ? 'Half day'
+        : k == 'early'
+            ? 'Left early'
+            : on
+                ? 'Present'
+                : leave
+                    ? 'Leave with pay · not working'
+                    : k == 'absent'
+                        ? 'Absent'
+                        : 'Not marked yet';
+    Widget seg(String label, String kind, bool selected, Color on) => Expanded(
+          child: InkWell(
+            onTap: () => _setKind(id, kind),
+            child: Container(
+              height: 40,
+              alignment: Alignment.center,
+              color: selected ? on : Colors.white,
+              child: Text(label,
+                  style: TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w800, color: selected ? Colors.white : const Color(0xFF3C4837))),
+            ),
+          ),
+        );
     return Container(
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+          color: bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFE0E7D8))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(w['gender'] == 'M' ? Icons.male : (w['gender'] == 'F' ? Icons.female : Icons.person_outline), color: idaGreen, size: 18),
+          const SizedBox(width: 6),
+          Flexible(
+              child: Text(tl(context, w['name'] ?? ''),
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700))),
+          if (attIsPerm(w)) const AttPermTag(),
+          if (attIsPaidAbsent(w)) const AttPaidTag(),
+          const Spacer(),
+          if (on)
+            SizedBox(
+              width: 92,
+              child: TextField(
+                controller: amtCtrls[id],
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => setState(() {}),
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                decoration: InputDecoration(
+                    prefixText: '₹',
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
+              ),
+            )
+          else
+            Text(attRs(attNum(w['daily_wage'])), style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
+        ]),
+        const SizedBox(height: 2),
+        Padding(
+          padding: const EdgeInsets.only(left: 24),
+          child: Text(sub,
+              style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: (half || leave) ? FontWeight.w700 : FontWeight.w500,
+                  color: (half || leave) ? attAmberFg : Colors.grey.shade600)),
+        ),
+        const SizedBox(height: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(9),
+          child: Container(
+            decoration: BoxDecoration(border: Border.all(color: const Color(0xFFCDD7C5)), borderRadius: BorderRadius.circular(9)),
+            child: Row(children: [
+              seg('Present', 'present', k == 'present', const Color(0xFF2C6A1A)),
+              Container(width: 1, height: 40, color: const Color(0xFFCDD7C5)),
+              seg('½', 'half', k == 'half' || k == 'early', const Color(0xFFB76E00)),
+              Container(width: 1, height: 40, color: const Color(0xFFCDD7C5)),
+              seg('Absent', 'absent', k == 'absent', const Color(0xFF5B6755)),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  // ── Submitted day ──
+  List<Widget> _readBody(AppLocalizations loc) {
+    final rows = _rows;
+    if (attendanceStatus == null && rows.isEmpty) {
+      return [
+        Container(
+          padding: const EdgeInsets.all(24),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE0E7D8))),
+          child: Text(canUpdateStageA ? '' : 'Attendance for this day has not been marked yet.',
+              style: const TextStyle(color: Colors.grey)),
+        ),
+      ];
+    }
+    final s = presentSummary;
+    final men = s != null ? _int(s['male']) : presentWorkers.where((p) => p['gender'] == 'M').length;
+    final women = s != null ? _int(s['female']) : presentWorkers.where((p) => p['gender'] == 'F').length;
+    final halfM = presentWorkers.where((p) => p['gender'] == 'M' && (p['kind'] ?? 'present') != 'present').length;
+    final halfF = presentWorkers.where((p) => p['gender'] == 'F' && (p['kind'] ?? 'present') != 'present').length;
+    final shown = rows.where((r) {
+      final q = searchCtrl.text.trim().toLowerCase();
+      if (q.isNotEmpty && !(r['name'] ?? '').toString().toLowerCase().contains(q)) return false;
+      switch (viewFilter) {
+        case 'M':
+          return r['gender'] == 'M';
+        case 'F':
+          return r['gender'] == 'F';
+        case 'P':
+          return attIsPerm(r);
+        case 'L':
+          return r['kind'] == 'paid_leave';
+        case 'C':
+          return r['change'] != null;
+      }
+      return true;
+    }).toList();
+    final reviewList = amendments.where((a) => a['stage'] == 'attendance').toList();
+    return [
+      AttStatTiles(
+          onWork: s != null ? _int(s['on_work']) : presentWorkers.length,
+          permanent: s != null ? _int(s['permanent']) : presentWorkers.where((p) => attIsPerm(p)).length,
+          men: men, women: women, halfMen: halfM, halfWomen: halfF,
+          leaveCount: s != null ? _int(s['paid_leave_count']) : leaveWorkers.length,
+          leaveAmount: s != null ? attNum(s['paid_leave_amount']) : 0,
+          workWage: s != null ? attNum(s['work_wage']) : 0),
+      const SizedBox(height: 12),
+      if (attendanceStatus == 'pending' && pendAtt > 0 && canApproveStageA && reviewList.isNotEmpty) ...[
+        _changeReview(reviewList),
+        const SizedBox(height: 12),
+      ],
+      Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE0E7D8))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            Text(attendanceStatus == 'approved' ? 'ATTENDANCE' : 'MARKED PRESENT',
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF6B7280), letterSpacing: 0.6)),
+            const Spacer(),
+            if (_mayChange)
+              TextButton.icon(
+                onPressed: busy ? null : _addWorkersSheet,
+                icon: const Icon(Icons.person_add_alt_1, size: 16, color: idaGreen),
+                label: const Text('Add workers', style: TextStyle(color: idaGreen, fontSize: 12.5, fontWeight: FontWeight.w700)),
+                style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 0)),
+              ),
+          ]),
+          const SizedBox(height: 6),
+          TextField(
+            controller: searchCtrl,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              hintText: loc.faSearchWorkers,
+              hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+              prefixIcon: const Icon(Icons.search, size: 18, color: Colors.grey),
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE0E7D8))),
+            ),
+          ),
+          const SizedBox(height: 8),
+          _filterChips([
+            ('All', loc.faAll, rows.length),
+            ('M', loc.faMaleFull, rows.where((r) => r['gender'] == 'M').length),
+            ('F', loc.faFemaleFull, rows.where((r) => r['gender'] == 'F').length),
+            ('P', 'Permanent', rows.where((r) => attIsPerm(r)).length),
+            ('L', 'Leave with pay', rows.where((r) => r['kind'] == 'paid_leave').length),
+            if (pendAtt > 0) ('C', 'Changed', rows.where((r) => r['change'] != null).length),
+          ], viewFilter, (v) => setState(() => viewFilter = v)),
+          const SizedBox(height: 8),
+          if (shown.isEmpty) const Padding(padding: EdgeInsets.all(14), child: Text('No one here.', style: TextStyle(color: Colors.grey))),
+          for (final r in shown) _sheetRow(r),
+          if (!canCorrectDay && _tracked)
+            const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text('You can view this day. Changing an approved day needs the "Correct approved day" permission.',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)))),
+        ]),
+      ),
+    ];
+  }
+
+  Widget _sheetRow(Map<String, dynamic> r) {
+    final id = r['worker_id'] as int;
+    final change = r['change'] is Map ? r['change'] as Map : null;
+    final removed = r['removed'] == true;
+    final kind = removed ? 'removed' : (change != null && change['action'] == 'add' ? 'added' : (r['kind'] as String));
+    final onW = _rowOnWork(r);
+    final amount = attNum(r['amount']);
+    final was = change != null && change['was'] is Map ? change['was'] as Map : null;
+    final wasText = (was != null && (attNum(was['amount']) - amount).abs() > 0.004) ? ' (was ${attRs(attNum(was['amount']))})' : '';
+    final selectable = _mayChange && onW && !removed;
+    final bg = change != null ? const Color(0xFFFFF8E8) : (amendSel.contains(id) ? const Color(0xFFEEF6E8) : (r['kind'] == 'paid_leave' ? const Color(0xFFFFFAF3) : Colors.white));
+    Widget btn(String t, VoidCallback f) => OutlinedButton(
+        onPressed: busy ? null : f,
+        style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 10)),
+        child: Text(t, style: const TextStyle(fontSize: 12.5)));
+    final actions = <Widget>[];
+    if (_mayChange) {
+      if (change != null) {
+        if (onW) actions.add(btn('Edit', () => _changeSheet(r['kind'] == 'early' ? 'early' : 'half', [r])));
+        actions.add(btn('Undo change', () => _undo(change)));
+      } else if (onW) {
+        actions.add(r['kind'] == 'present' ? btn('Half', () => _changeSheet('half', [r])) : btn('Full day', () => _changeSheet('present', [r])));
+        actions.add(btn('Left early', () => _changeSheet('early', [r])));
+        actions.add(btn('Remove', () => _changeSheet('remove', [r])));
+      } else if (r['kind'] == 'paid_leave') {
+        actions.add(btn('Make present', () => _changeSheet('present', [r])));
+      }
+    }
+    final note = change != null
+        ? '${change['reason'] ?? ''}${change['created_by_name'] != null ? ' · ${change['created_by_name']}' : ''} · waiting approval'
+        : (r['kind'] == 'paid_leave' ? 'Paid, not working' : (r['note'] ?? '').toString());
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFE0E7D8))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          if (selectable)
+            SizedBox(
+              width: 32,
+              height: 28,
+              child: Checkbox(
+                value: amendSel.contains(id),
+                activeColor: idaGreen,
+                onChanged: (v) => setState(() {
+                  if (v == true) {
+                    amendSel.add(id);
+                  } else {
+                    amendSel.remove(id);
+                  }
+                }),
+              ),
+            ),
+          Flexible(
+              child: Text(tl(context, r['name'] ?? ''),
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700))),
+          if (attIsPerm(r)) const AttPermTag(),
+          if (attIsPaidAbsent(r)) const AttPaidTag(),
+          const Spacer(),
+          Text(removed ? '' : attRs(amount), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
+        ]),
+        const SizedBox(height: 4),
+        Row(children: [
+          AttChip.kind(kind),
+          if (wasText.isNotEmpty) Padding(padding: const EdgeInsets.only(left: 6), child: Text(wasText, style: const TextStyle(fontSize: 11.5, color: attAmberFg))),
+        ]),
+        if (note.isNotEmpty)
+          Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(note, style: TextStyle(fontSize: 11.5, color: change != null ? attAmberFg : Colors.grey.shade600))),
+        if (actions.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Wrap(spacing: 6, runSpacing: 4, children: actions)),
+      ]),
+    );
+  }
+
+  Widget _bulkBar() {
+    final people = _rows.where((r) => amendSel.contains(r['worker_id'])).toList();
+    Widget b(String t, String mode) => Expanded(
+          child: TextButton(
+              onPressed: busy ? null : () => _changeSheet(mode, people),
+              child: Text(t, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700))),
+        );
+    return Container(
+      color: idaDark,
+      padding: EdgeInsets.only(left: 12, right: 12, top: 6, bottom: 6 + MediaQuery.of(context).padding.bottom),
+      child: Row(children: [
+        Text('${people.length} selected', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+        const SizedBox(width: 8),
+        b('Half day', 'half'),
+        b('Left early', 'early'),
+        b('Remove', 'remove'),
+        IconButton(
+            onPressed: () => setState(() => amendSel.clear()),
+            icon: const Icon(Icons.close, color: Color(0xFFCFE3C0), size: 20)),
+      ]),
+    );
+  }
+
+  String _amText(Map a) {
+    final now = a['now'] is Map ? a['now'] as Map : null;
+    final was = a['was'] is Map ? a['was'] as Map : null;
+    final act = a['action'];
+    final label = act == 'add'
+        ? 'Added late'
+        : act == 'absent'
+            ? ((now != null && now['kind'] == 'paid_leave') ? 'Absent, leave with pay' : 'Removed')
+            : act == 'half'
+                ? 'Half day'
+                : act == 'left_early'
+                    ? 'Left early'
+                    : act == 'paid_leave'
+                        ? 'Leave with pay'
+                        : act == 'present'
+                            ? 'Full day'
+                            : '$act';
+    final amt = now != null ? ' · ${attRs(attNum(now['amount']))}' : '';
+    final wasT = (was != null && (now == null || (attNum(was['amount']) - attNum(now['amount'])).abs() > 0.004))
+        ? ' (was ${attRs(attNum(was['amount']))})'
+        : '';
+    return '$label$amt$wasT';
+  }
+
+  // The approver's view of what changed: approve or reject each row, or all.
+  Widget _changeReview(List<Map<String, dynamic>> list) {
+    return Container(
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFE0E7D8))),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(loc.faSelectWorkers,
-              style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF6B7280),
-                  letterSpacing: 0.6)),
-          if (_canEditAttendance)
-            Expanded(
-              child: Wrap(
-                alignment: WrapAlignment.end,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 12,
-                runSpacing: 4,
-                children: [
-                  TextButton.icon(
-                    onPressed: _markViaFace,
-                    icon: const Icon(Icons.face_retouching_natural,
-                        size: 16, color: idaGreen),
-                    label: Text(loc.faMarkViaFace,
-                        style: const TextStyle(
-                            color: idaGreen,
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600)),
-                    style: TextButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        minimumSize: const Size(0, 0)),
-                  ),
-                  TextButton.icon(
-                    onPressed: _showAddWorkerDialog,
-                    icon: const Icon(Icons.person_add_alt_1,
-                        size: 16, color: idaGreen),
-                    label: Text(loc.faAddWorker,
-                        style: const TextStyle(
-                            color: idaGreen,
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600)),
-                    style: TextButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        minimumSize: const Size(0, 0)),
-                  ),
-                ],
-              ),
-            ),
-        ]),
-        if (!_canEditAttendance) ...[
-          const SizedBox(height: 10),
-          _submittedTotals(loc),
-        ],
-        if (permanentAutoSuggested && _canEditAttendance) ...[
-          const SizedBox(height: 8),
+          border: Border.all(color: const Color(0xFFEEC46B), width: 2)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('Changes to approve · ${list.length}',
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: idaDark)),
+        const SizedBox(height: 8),
+        for (final a in list)
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFF7E6),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFF5D48A)),
-            ),
-            child: const Row(children: [
-              Icon(Icons.push_pin, size: 15, color: Color(0xFFB8860B)),
-              SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'Permanent workers are pre-selected below — uncheck anyone absent today, then submit.',
-                  style: TextStyle(fontSize: 11.5, color: Color(0xFF8A6D1F)),
-                ),
-              ),
+                color: const Color(0xFFFFFAF0),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFF0DBA6))),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(tl(context, (a['worker_name'] ?? '').toString()),
+                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700)),
+              Text(_amText(a), style: const TextStyle(fontSize: 12.5, color: Color(0xFF5C4A1A))),
+              Text('${a['reason'] != null ? '"${a['reason']}"' : ''} ${a['created_by_name'] != null ? '· ${a['created_by_name']}' : ''}',
+                  style: const TextStyle(fontSize: 11.5, color: Color(0xFF6B7280))),
+              const SizedBox(height: 4),
+              Row(children: [
+                Expanded(
+                    child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: idaGreen, visualDensity: VisualDensity.compact),
+                  onPressed: decidingAttendance ? null : () => _decideAttendance('approve', ids: [_int(a['id'])]),
+                  child: const Text('Approve', style: TextStyle(color: Colors.white, fontSize: 12.5)),
+                )),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red, side: const BorderSide(color: Colors.red), visualDensity: VisualDensity.compact),
+                  onPressed: decidingAttendance ? null : () => _decideAttendance('reject', ids: [_int(a['id'])]),
+                  child: const Text('Reject', style: TextStyle(fontSize: 12.5)),
+                )),
+              ]),
             ]),
           ),
-        ],
-        const SizedBox(height: 10),
-        if (_canEditAttendance) ...[
-          _genderFilterToggle(loc),
-          const SizedBox(height: 10),
-          _WorkerPicker(
-            workers: workers,
-            excludeIds: selectedWorkerIds,
-            genderFilter: workerFilter,
-            idaGreen: idaGreen,
-            onAdd: _addWorker,
-          ),
-          if (selectedWorkerIds.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Text(loc.faTodayPresent,
-                style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF6B7280),
-                    letterSpacing: 0.6)),
-            const SizedBox(height: 8),
-            _presentWorkersGrid(
-                context,
-                (selectedWorkerIds.toList()
-                      ..sort((a, b) {
-                        final nameA = workers.firstWhere((w) => w['id'] == a,
-                                orElse: () => {})['name'] ??
-                            '';
-                        final nameB = workers.firstWhere((w) => w['id'] == b,
-                                orElse: () => {})['name'] ??
-                            '';
-                        return nameA
-                            .toString()
-                            .toLowerCase()
-                            .compareTo(nameB.toString().toLowerCase());
-                      }))
-                    .map((id) {
-                  final w = workers.firstWhere((w) => w['id'] == id,
-                      orElse: () => {});
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                        color: const Color(0xFFE8F5E2),
-                        borderRadius: BorderRadius.circular(10)),
-                    child: Row(children: [
-                      Icon(w['gender'] == 'M' ? Icons.male : Icons.female,
-                          color: idaGreen, size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(
-                          child: Text(tl(context, w['name'] ?? ''),
-                              style: const TextStyle(
-                                  fontSize: 13.5, fontWeight: FontWeight.w600),
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1)),
-                      SizedBox(
-                        width: 100,
-                        child: TextField(
-                          controller: presentWageCtrls[id],
-                          keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true),
-                          onChanged: (_) => setState(() {}),
-                          style: const TextStyle(fontSize: 13),
-                          decoration: InputDecoration(
-                            prefixText: '₹',
-                            isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 8),
-                            filled: true,
-                            fillColor: Colors.white,
-                            border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide.none),
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close,
-                            size: 18, color: Colors.red),
-                        onPressed: () => _removeWorker(id),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                      ),
-                    ]),
-                  );
-                }).toList()),
-            const SizedBox(height: 4),
-            _dayTotals(loc,
-                title: loc.faSelectedSoFar,
-                total: selectedWorkerIds.length,
-                male: selectedMale,
-                female: selectedFemale,
-                permanent: _selectedPermanent,
-                wage: _computedTotal,
-                maleWage: _selectedWage('M'),
-                femaleWage: _selectedWage('F')),
-          ],
-        ] else
-          _presentBySection(loc),
-        if (_canEditAttendance) ...[
-          const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              icon: savingPresent
-                  ? const SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : const Icon(Icons.check_circle_outline,
-                      color: Colors.white, size: 18),
-              label: Text(
-                  savingPresent
-                      ? loc.faSubmitting
-                      : loc.faReviewSubmitAttendance,
-                  style: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w700)),
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: idaGreen,
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12))),
-              onPressed: savingPresent ? null : _reviewAndSubmit,
-            ),
-          ),
-        ],
+        const SizedBox(height: 4),
+        Row(children: [
+          Expanded(
+              child: OutlinedButton(
+            style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
+            onPressed: decidingAttendance ? null : () => _decideAttendance('reject'),
+            child: const Text('Reject all'),
+          )),
+          const SizedBox(width: 10),
+          Expanded(
+              child: ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
+            onPressed: decidingAttendance ? null : () => _decideAttendance('approve'),
+            child: const Text('Approve all', style: TextStyle(color: Colors.white)),
+          )),
+        ]),
       ]),
     );
-  }
-
-  Widget _genderFilterToggle(AppLocalizations loc) {
-    Widget chip(String label, String value) {
-      final selected = workerFilter == value;
-      return Expanded(
-        child: GestureDetector(
-          onTap: () => setState(() => workerFilter = value),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: selected ? idaGreen : const Color(0xFFF4F7F2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(label,
-                style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    color: selected ? Colors.white : Colors.grey.shade600)),
-          ),
-        ),
-      );
-    }
-
-    return Row(children: [
-      chip(loc.faAll, 'All'),
-      const SizedBox(width: 6),
-      chip(loc.faMaleFull, 'M'),
-      const SizedBox(width: 6),
-      chip(loc.faFemaleFull, 'F'),
-      const SizedBox(width: 6),
-      // Permanent workers already show up pre-selected on a fresh day
-      // (server-suggested - see attendance.js's GET /day/:date), so this
-      // chip is mainly for finding one to double-check or re-add after
-      // an accidental uncheck, not the everyday path.
-      chip('📌 Permanent', 'P'),
-    ]);
-  }
-}
-
-// ── Worker picker: search + gender filter, tap to add to Today Present ──
-class _WorkerPicker extends StatefulWidget {
-  final List workers;
-  final Set<int> excludeIds; // already selected — not shown here
-  final String genderFilter; // 'All' | 'M' | 'F'
-  final Color idaGreen;
-  final ValueChanged<int> onAdd;
-
-  const _WorkerPicker(
-      {required this.workers,
-      required this.excludeIds,
-      required this.genderFilter,
-      required this.idaGreen,
-      required this.onAdd});
-
-  @override
-  State<_WorkerPicker> createState() => _WorkerPickerState();
-}
-
-class _WorkerPickerState extends State<_WorkerPicker> {
-  final _searchCtrl = TextEditingController();
-  String _query = '';
-
-  @override
-  void dispose() {
-    _searchCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final loc = AppLocalizations.of(context)!;
-    final filtered = widget.workers.where((w) {
-      if (widget.excludeIds.contains(w['id'])) return false;
-      final isPermanent = w['is_permanent'] == 1 || w['is_permanent'] == true;
-      if (widget.genderFilter == 'P') {
-        if (!isPermanent) return false;
-      } else if (widget.genderFilter != 'All' &&
-          w['gender'] != widget.genderFilter) {
-        return false;
-      }
-      if (_query.isEmpty) return true;
-      return (w['name'] ?? '')
-          .toString()
-          .toLowerCase()
-          .contains(_query.toLowerCase());
-    }).toList();
-
-    return Column(children: [
-      TextField(
-        controller: _searchCtrl,
-        onChanged: (v) => setState(() => _query = v),
-        decoration: InputDecoration(
-          hintText: loc.faSearchWorkers,
-          hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
-          prefixIcon: const Icon(Icons.search, size: 18, color: Colors.grey),
-          filled: true,
-          fillColor: Colors.white,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Color(0xFFE0E7D8))),
-        ),
-      ),
-      Container(
-        margin: const EdgeInsets.only(top: 8),
-        constraints: const BoxConstraints(maxHeight: 260),
-        decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFE0E7D8))),
-        child: filtered.isEmpty
-            ? Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(loc.faNoWorkersMatch,
-                    style: const TextStyle(fontSize: 12.5, color: Colors.grey)))
-            : ListView.builder(
-                shrinkWrap: true,
-                padding: EdgeInsets.zero,
-                itemCount: filtered.length,
-                itemBuilder: (_, i) {
-                  final w = filtered[i];
-                  final gender = w['gender'] as String?;
-                  final isPermanent =
-                      w['is_permanent'] == 1 || w['is_permanent'] == true;
-
-                  return InkWell(
-                    onTap: () => widget.onAdd(w['id']),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.max,
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Icon(
-                              gender == 'M'
-                                  ? Icons.male
-                                  : gender == 'F'
-                                      ? Icons.female
-                                      : Icons.person_outline,
-                              color: widget.idaGreen,
-                              size: 20),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                    (isPermanent ? '📌 ' : '') +
-                                        tl(context, w['name'] ?? ''),
-                                    style: const TextStyle(
-                                        fontSize: 13.5,
-                                        fontWeight: FontWeight.w600),
-                                    overflow: TextOverflow.ellipsis,
-                                    maxLines: 1),
-                                gender == null
-                                    ? Text(loc.faGenderNotSet,
-                                        style: const TextStyle(
-                                            fontSize: 11, color: Colors.orange),
-                                        overflow: TextOverflow.ellipsis,
-                                        maxLines: 1)
-                                    : Text(
-                                        '${gender == 'M' ? loc.faMaleFull : loc.faFemaleFull} · ₹${w['daily_wage']}/day',
-                                        style: TextStyle(
-                                            fontSize: 11,
-                                            color: Colors.grey.shade600),
-                                        overflow: TextOverflow.ellipsis,
-                                        maxLines: 1),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Icon(Icons.add_circle_outline,
-                              color: widget.idaGreen, size: 22),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-      ),
-    ]);
   }
 }

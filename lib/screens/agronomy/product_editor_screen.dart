@@ -8,6 +8,7 @@
 // The list reloads when this screen closes.
 
 import 'package:flutter/material.dart';
+import '../admin/admin_common.dart' show MasterLifecycle, usedCountOf;
 import 'agronomy_common.dart';
 
 class ProductEditorScreen extends StatefulWidget {
@@ -146,24 +147,6 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
     await _run(() => AgriApi.delete('/agri/products/${p!['id']}/brands/${b['id']}'));
   }
 
-  Future<void> _toggleActive() async {
-    final on = p!['is_active'] == true || p!['is_active'] == 1;
-    await _run(() => AgriApi.patch('/agri/products/${p!['id']}', {'is_active': !on}));
-  }
-
-  Future<void> _deleteProduct() async {
-    setState(() => saving = true);
-    try {
-      await AgriApi.delete('/agri/products/${p!['id']}');
-      if (mounted) Navigator.pop(context, true);
-    } catch (e) {
-      setState(() {
-        saving = false;
-        error = e.toString();
-      });
-    }
-  }
-
   List<Map> get brands {
     if (isNew) return [for (final b in newBrands) {'id': null, 'brand_name': b['name'], 'preferred': b['preferred']}];
     return [
@@ -274,25 +257,18 @@ class _ProductEditorScreenState extends State<ProductEditorScreen> {
             ),
           const SizedBox(height: 16),
           TextField(controller: notesCtrl, enabled: ed, decoration: agInput('Notes (optional)', hint: 'e.g. keep away from rain for 6 hours')),
-          if (!isNew && ed && (widget.canDelete || !(used == 0 && !active))) ...[
-            const SizedBox(height: 24),
-            const Divider(),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(used == 0 && !active ? 'Delete this product' : (active ? 'Turn off' : 'Turned off'),
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text(used == 0 && !active
-                  ? 'Only possible because it isn’t used anywhere.'
-                  : active
-                      ? 'Stays in plans and records; can’t be added to new steps.'
-                      : 'Can’t be added to steps.'),
-              trailing: OutlinedButton(
-                style: OutlinedButton.styleFrom(foregroundColor: active || used == 0 ? Colors.red.shade700 : agDark),
-                onPressed: saving ? null : (used == 0 && !active ? _deleteProduct : _toggleActive),
-                child: Text(used == 0 && !active ? 'Delete' : (active ? 'Turn off' : 'Turn on')),
-              ),
+          if (!isNew)
+            MasterLifecycle(
+              path: '/agri/products/${p!['id']}',
+              module: 'agri',
+              itemName: '${p!['name'] ?? ''}',
+              isActive: active,
+              usedCount: usedCountOf(p) ?? used,
+              onDone: (msg) {
+                agSnack(context, msg);
+                Navigator.pop(context, true);
+              },
             ),
-          ],
         ]),
         bottomNavigationBar: !ed
             ? null

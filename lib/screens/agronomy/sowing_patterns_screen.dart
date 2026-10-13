@@ -75,8 +75,9 @@ class _SowingPatternsScreenState extends State<SowingPatternsScreen> {
     });
     try {
       final p = await AdminApi.get('/agri/sowing-patterns?all=1');
-      final c = await AdminApi.get('/agri/crops');
-      final v = await AdminApi.get('/agri/crop-varieties');
+      // all=1: a pattern of a crop marked inactive later still shows its crop; new work picks active ones only
+      final c = await AdminApi.get('/agri/crops?all=1');
+      final v = await AdminApi.get('/agri/crop-varieties?all=1');
       if (!mounted) return;
       setState(() {
         _patterns = _pmaps(p);
@@ -234,6 +235,9 @@ class _SowingPatternScreenState extends State<SowingPatternScreen> {
   List<_PLine> _lines = [_PLine()];
   String _origKey = '';
 
+  // A variety that can be picked for new work: active, and so is its crop.
+  bool _pickableVariety(Map v) => isRowActive(v) && !(v['crop_is_active'] == 0 || v['crop_is_active'] == false);
+
   bool get _isNew => _pattern == null;
   bool get _mayEdit => _isNew ? widget.canAdd : widget.canEdit;
   bool get _isOn => _pattern == null || '${_pattern!['is_active']}' == '1' || _pattern!['is_active'] == true;
@@ -385,10 +389,10 @@ class _SowingPatternScreenState extends State<SowingPatternScreen> {
               ),
           ]),
           DropdownButtonFormField<int>(
-            value: _lines[i].variety,
+            value: widget.varieties.any((x) => int.tryParse('${x['id']}') == _lines[i].variety) ? _lines[i].variety : null,
             isExpanded: true,
             decoration: aInput('Crop'),
-            items: [for (final v in widget.varieties) DropdownMenuItem<int>(value: int.tryParse('${v['id']}') ?? 0, child: Text('${v['crop_name']} · ${v['name']}', overflow: TextOverflow.ellipsis))],
+            items: [for (final v in widget.varieties.where((x) => _pickableVariety(x) || int.tryParse('${x['id']}') == _lines[i].variety)) DropdownMenuItem<int>(value: int.tryParse('${v['id']}') ?? 0, child: Text('${v['crop_name']} · ${v['name']}', overflow: TextOverflow.ellipsis))],
             onChanged: _mayEdit ? (v) => setState(() => _lines[i].variety = v) : null,
           ),
           const SizedBox(height: 8),
@@ -443,10 +447,10 @@ class _SowingPatternScreenState extends State<SowingPatternScreen> {
               TextField(controller: _name, enabled: _mayEdit, onChanged: (_) => setState(() {}), decoration: aInput('Name', hint: 'e.g. Soybean 30 in uniform')),
               const SizedBox(height: 10),
               DropdownButtonFormField<int>(
-                value: _cropId,
+                value: widget.crops.any((x) => int.tryParse('${x['id']}') == _cropId) ? _cropId : null,
                 isExpanded: true,
                 decoration: aInput('Crop'),
-                items: [for (final c in widget.crops) DropdownMenuItem<int>(value: int.tryParse('${c['id']}') ?? 0, child: Text('${c['name']}', overflow: TextOverflow.ellipsis))],
+                items: [for (final c in widget.crops.where((x) => isRowActive(x) || int.tryParse('${x['id']}') == _cropId)) DropdownMenuItem<int>(value: int.tryParse('${c['id']}') ?? 0, child: Text('${c['name']}', overflow: TextOverflow.ellipsis))],
                 onChanged: _mayEdit
                     ? (v) => setState(() {
                           _cropId = v;
@@ -456,12 +460,12 @@ class _SowingPatternScreenState extends State<SowingPatternScreen> {
               ),
               const SizedBox(height: 10),
               DropdownButtonFormField<int?>(
-                value: _varietyId,
+                value: _cropVarieties.any((x) => int.tryParse('${x['id']}') == _varietyId) ? _varietyId : null,
                 isExpanded: true,
                 decoration: aInput('Variety', helper: 'Leave on “Any variety” to offer it for every variety of the crop.'),
                 items: [
                   const DropdownMenuItem<int?>(value: null, child: Text('Any variety')),
-                  for (final v in _cropVarieties) DropdownMenuItem<int?>(value: int.tryParse('${v['id']}'), child: Text('${v['name']}', overflow: TextOverflow.ellipsis)),
+                  for (final v in _cropVarieties.where((x) => _pickableVariety(x) || int.tryParse('${x['id']}') == _varietyId)) DropdownMenuItem<int?>(value: int.tryParse('${v['id']}'), child: Text('${v['name']}', overflow: TextOverflow.ellipsis)),
                 ],
                 onChanged: _mayEdit && _cropId != null ? (v) => setState(() => _varietyId = v) : null,
               ),

@@ -15,6 +15,8 @@ import '../../localization/transliterate.dart';
 import '../face_enrollment_screen.dart';
 import '../../services/responsive.dart';
 import '../../services/api_client.dart';
+import '../../services/api_service.dart';
+import 'admin_common.dart' show AChip, MasterLifecycle, MasterStatusToggle, isRowActive, usedCountOf;
 
 class FarmMastersScreen extends StatefulWidget {
   const FarmMastersScreen({super.key});
@@ -30,6 +32,8 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
 
   _Tab _tab = _Tab.farms;
   bool loading = true;
+  // Active / Inactive switch above the lists (default Active)
+  bool showInactive = false;
 
   List farms = [];
   List workTypes = [];
@@ -38,15 +42,21 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
   @override
   void initState() {
     super.initState();
+    ApiService.isAdmin().then((v) {
+      if (mounted) setState(() => _isAdmin = v);
+    });
     _loadAll();
   }
+
+  // "Paid when absent" can only be set by an admin (the server refuses anyone else).
+  bool _isAdmin = false;
 
   Future<void> _loadAll() async {
     setState(() => loading = true);
     try {
       final results = await Future.wait([
         Api.get('/farms?all=1'),
-        Api.get('/work-types'),
+        Api.get('/work-types?all=1'),
         Api.get('/farm-workers?all=1'),
         Api.get('/face/status'),
       ]);
@@ -130,7 +140,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
     try {
       await Api.patch(
         '/farms/${farm['id']}',
-        body: {'is_active': farm['is_active'] == 1 ? false : true},
+        body: {'is_active': !isRowActive(farm)},
       );
       _loadAll();
     } catch (e) {
@@ -173,6 +183,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
     String? phone,
     String? gender,
     bool? isPermanent,
+    bool? paidWhenAbsent,
   }) async {
     try {
       final body = {
@@ -183,6 +194,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
         'phone': phone,
         'gender': gender,
         if (isPermanent != null) 'is_permanent': isPermanent,
+        if (paidWhenAbsent != null && _isAdmin) 'paid_when_absent': paidWhenAbsent,
       };
       final res = id == null
           ? await Api.post('/farm-workers', body: body)
@@ -201,7 +213,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
     try {
       await Api.patch(
         '/farm-workers/${worker['id']}',
-        body: {'is_active': worker['is_active'] == 1 ? false : true},
+        body: {'is_active': !isRowActive(worker)},
       );
       _loadAll();
     } catch (e) {
@@ -338,6 +350,19 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                     style:
                         TextStyle(fontSize: 11, color: Colors.grey.shade500)),
               ),
+              if (farm != null)
+                MasterLifecycle(
+                  path: '/farms/${farm['id']}',
+                  module: 'farm_masters',
+                  itemName: '${farm['name'] ?? ''}',
+                  isActive: isRowActive(farm),
+                  usedCount: usedCountOf(farm),
+                  onDone: (msg) {
+                    Navigator.pop(ctx);
+                    _showSnack(msg);
+                    _loadAll();
+                  },
+                ),
             ]),
           ),
           actions: [
@@ -419,6 +444,19 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
             ),
             const SizedBox(height: 16),
             _QuickDetailsEditor(items: detailOptions),
+            if (workType != null)
+              MasterLifecycle(
+                path: '/work-types/${workType['id']}',
+                module: 'farm_masters',
+                itemName: '${workType['name'] ?? ''}',
+                isActive: isRowActive(workType),
+                usedCount: usedCountOf(workType),
+                onDone: (msg) {
+                  Navigator.pop(ctx);
+                  _showSnack(msg);
+                  _loadAll();
+                },
+              ),
           ])),
           actions: [
             TextButton(
@@ -455,6 +493,8 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
     int? workTypeId = worker?['work_type_id'];
     String? gender = worker?['gender'];
     bool isPermanent = worker?['is_permanent'] == 1 || worker?['is_permanent'] == true;
+    bool paidWhenAbsent =
+        worker?['paid_when_absent'] == 1 || worker?['paid_when_absent'] == true;
 
     showDialog(
       context: context,
@@ -515,7 +555,9 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10)),
                 ),
+                // active farms, plus the worker's current farm even if inactive
                 items: farms
+                    .where((f) => isRowActive(f) || f['id'] == farmId)
                     .map<DropdownMenuItem<int>>((f) => DropdownMenuItem(
                         value: f['id'],
                         child: Text(tl(ctx, f['name']),
@@ -534,6 +576,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                       borderRadius: BorderRadius.circular(10)),
                 ),
                 items: workTypes
+                    .where((w) => isRowActive(w) || w['id'] == workTypeId)
                     .map<DropdownMenuItem<int>>((w) => DropdownMenuItem(
                         value: w['id'],
                         child: Text(tl(ctx, w['name']),
@@ -567,6 +610,19 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                 subtitle: const Text('Auto-suggested on every attendance day',
                     style: TextStyle(fontSize: 11.5)),
               ),
+              if (_isAdmin)
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  activeColor: idaGreen,
+                  value: paidWhenAbsent,
+                  onChanged: (v) => setDialogState(() => paidWhenAbsent = v),
+                  title: const Text('Paid when absent',
+                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                  subtitle: const Text(
+                      'Paid the full daily wage on days they do not work (leave with pay)',
+                      style: TextStyle(fontSize: 11.5)),
+                ),
               if (worker != null) ...[
                 const SizedBox(height: 16),
                 const Divider(height: 1),
@@ -616,6 +672,19 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                   ),
                 ]),
               ],
+              if (worker != null)
+                MasterLifecycle(
+                  path: '/farm-workers/${worker['id']}',
+                  module: 'farm_masters',
+                  itemName: '${worker['name'] ?? ''}',
+                  isActive: isRowActive(worker),
+                  usedCount: usedCountOf(worker),
+                  onDone: (msg) {
+                    Navigator.pop(ctx);
+                    _showSnack(msg);
+                    _loadAll();
+                  },
+                ),
             ]),
           ),
           actions: [
@@ -638,6 +707,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                   phone: phoneCtrl.text.trim(),
                   gender: gender,
                   isPermanent: isPermanent,
+                  paidWhenAbsent: paidWhenAbsent,
                 );
               },
               child:
@@ -683,12 +753,24 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
           color: idaDark,
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
           child: Row(children: [
-            _segment(loc.faFarmsTab, _Tab.farms, farms.length),
+            _segment(loc.faFarmsTab, _Tab.farms, _shown(farms).length),
             const SizedBox(width: 8),
-            _segment(loc.faWorkTypesTab, _Tab.workTypes, workTypes.length),
+            _segment(loc.faWorkTypesTab, _Tab.workTypes, _shown(workTypes).length),
             const SizedBox(width: 8),
-            _segment(loc.faWorkersTab, _Tab.workers, workers.length),
+            _segment(loc.faWorkersTab, _Tab.workers, _shown(workers).length),
           ]),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: MasterStatusToggle(
+              showInactive: showInactive,
+              activeCount: _current().where(isRowActive).length,
+              inactiveCount: _current().where((r) => !isRowActive(r)).length,
+              onChanged: (v) => setState(() => showInactive = v),
+            ),
+          ),
         ),
         Expanded(
           child: Responsive.constrainedContent(
@@ -705,6 +787,21 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
       ]),
     );
   }
+
+  // The list of the open tab (all rows, active and inactive)
+  List _current() {
+    switch (_tab) {
+      case _Tab.farms:
+        return farms;
+      case _Tab.workTypes:
+        return workTypes;
+      case _Tab.workers:
+        return workers;
+    }
+  }
+
+  // Rows of [all] for the chosen Active / Inactive view
+  List _shown(List all) => all.where((r) => isRowActive(r) != showInactive).toList();
 
   Widget _segment(String label, _Tab tab, int count) {
     final selected = _tab == tab;
@@ -736,15 +833,16 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
   Widget _buildList() {
     switch (_tab) {
       case _Tab.farms:
-        return farms.isEmpty
-            ? _empty(AppLocalizations.of(context)!.faNoFarmsYet)
+        final shownFarms = _shown(farms);
+        return shownFarms.isEmpty
+            ? _empty(_emptyText(farms.isEmpty, AppLocalizations.of(context)!.faNoFarmsYet))
             : ListView.separated(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                itemCount: farms.length,
+                itemCount: shownFarms.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (_, i) {
-                  final f = farms[i];
-                  final active = f['is_active'] == 1;
+                  final f = shownFarms[i];
+                  final active = isRowActive(f);
                   return _row(
                     title: tl(context, f['name'] ?? ''),
                     subtitle: f['location'] != null
@@ -757,39 +855,44 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                 },
               );
       case _Tab.workTypes:
-        return workTypes.isEmpty
-            ? _empty(AppLocalizations.of(context)!.faNoWorkTypesYet)
+        final shownTypes = _shown(workTypes);
+        return shownTypes.isEmpty
+            ? _empty(_emptyText(workTypes.isEmpty, AppLocalizations.of(context)!.faNoWorkTypesYet))
             : ListView.separated(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                itemCount: workTypes.length,
+                itemCount: shownTypes.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (_, i) {
-                  final w = workTypes[i];
+                  final w = shownTypes[i];
                   return _row(
                     title: tl(context, w['name'] ?? ''),
                     subtitle: _parseDetailOptions(w['detail_options']).join(' · '),
-                    active: true,
+                    active: isRowActive(w),
                     showSwitch: false,
                     onTap: () => _showWorkTypeDialog(workType: w),
                   );
                 },
               );
       case _Tab.workers:
-        return workers.isEmpty
-            ? _empty(AppLocalizations.of(context)!.faNoFarmWorkersYet)
+        final shownWorkers = _shown(workers);
+        return shownWorkers.isEmpty
+            ? _empty(_emptyText(workers.isEmpty, AppLocalizations.of(context)!.faNoFarmWorkersYet))
             : ListView.separated(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                itemCount: workers.length,
+                itemCount: shownWorkers.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (_, i) {
-                  final w = workers[i];
-                  final active = w['is_active'] == 1;
+                  final w = shownWorkers[i];
+                  final active = isRowActive(w);
                   final loc = AppLocalizations.of(context)!;
                   final permanent = w['is_permanent'] == 1 || w['is_permanent'] == true;
+                  final paidAbsent =
+                      w['paid_when_absent'] == 1 || w['paid_when_absent'] == true;
                   final parts = <String>[
                     if (w['gender'] != null)
                       (w['gender'] == 'M' ? loc.faMaleFull : loc.faFemaleFull),
                     '₹${w['daily_wage']}/day',
+                    if (paidAbsent) 'Paid when absent',
                     if (w['work_type_name'] != null)
                       tl(context, w['work_type_name']),
                     if (w['farm_name'] != null) tl(context, w['farm_name']),
@@ -804,6 +907,14 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                 },
               );
     }
+  }
+
+  // Empty message: the "none yet" line when the whole list is empty,
+  // else which view (Active / Inactive) has nothing.
+  String _emptyText(bool nothingAtAll, String noneYet) {
+    if (nothingAtAll) return noneYet;
+    final loc = AppLocalizations.of(context)!;
+    return showInactive ? loc.miNoneInactive : loc.miNoneActive;
   }
 
   Widget _empty(String text) =>
@@ -837,12 +948,16 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
               ? Text(subtitle,
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600))
               : null,
-          trailing: showSwitch
-              ? Switch(
-                  value: active,
-                  activeColor: idaGreen,
-                  onChanged: (_) => onToggle?.call())
-              : const Icon(Icons.edit_outlined, size: 18, color: Colors.grey),
+          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (!active) AChip(AppLocalizations.of(context)!.miInactive),
+            const SizedBox(width: 6),
+            showSwitch
+                ? Switch(
+                    value: active,
+                    activeColor: idaGreen,
+                    onChanged: (_) => onToggle?.call())
+                : const Icon(Icons.edit_outlined, size: 18, color: Colors.grey),
+          ]),
         ),
       );
 }

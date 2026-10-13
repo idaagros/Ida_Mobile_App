@@ -1,20 +1,31 @@
 // lib/screens/work_allocation_screen.dart
 //
-// Stage B — Work Allocation. Only reachable once Stage A (attendance)
-// is approved for the date. Assign every present worker to a Farm +
-// Work Type: "Assign Single Task" starts a group with everyone
-// pre-selected (the common case — one task for the whole day);
-// "Assign Multi Task" starts an empty group so you can split workers
-// across several Farm/Work Type groups one at a time. Both use the
-// same underlying "task group" builder and both end up in the same
-// save call — every present worker must land in exactly one group
-// before saving. Each worker's rate is individually editable, with a
-// "Break Attendance" action for anyone who left early (illness, etc.)
-// — enter a reduced amount + a reason, no separate mechanism needed.
+// Step 2 - Work allocation (redesigned Oct 2026, same behaviour as the web).
 //
-// Sep 2026 (group C): on saving, a farm with more than one crop that
-// day asks "For which crop?" once per farm + work (or General farm
-// work); a single-crop farm is linked to its crop by the server.
+//  While it can still be changed (not submitted, or returned):
+//   * Workers tab: tick one, many or all workers (Select all / Men / Women).
+//   * "Assign" them to a task: farm + work (+ crop when the farm has several,
+//     + work detail). A person can be in several tasks (same or different
+//     farms); their pay is then split by rupee amounts typed per task, with a
+//     live balance and "Split equally".
+//   * Tasks tab: the tasks with amounts, and a "Check before submit" panel.
+//   * "Paid, not working" people are not allocated.
+//   * Save draft keeps everything on the server without sending it to the
+//     approver; Submit sends it. Reopening a day keeps what was entered.
+//
+//  Once submitted (waiting / approved):
+//   * First submission: the approver approves or returns it.
+//   * Approved day: people with "Correct approved day" can Change one person,
+//     or Assign / Remove many. The change applies at once, the day shows as
+//     pending and ONLY the changed people go back to the approver. Each change
+//     can be undone. The approver reviews per person or all together.
+//
+// Calls: POST  /attendance/day/:date/allocation          { submit?, allocations }
+//        POST  /attendance/day/:date/allocation-amend    { reason, changes }
+//        POST  /attendance/day/:date/amendments/:id/undo
+//        PATCH /attendance/day/:date/allocation-decision { decision, note, ids? }
+// The submit is kept on the phone when there is no signal (key 'allocation:$date').
+// Reopen moved to the change log screen.
 
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -24,9 +35,12 @@ import '../services/api_service.dart';
 import '../services/api_client.dart';
 import '../services/offline_queue.dart';
 import '../widgets/offline_status_bar.dart';
+import '../widgets/att_parts.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
+import 'admin/admin_common.dart' show isRowActive;
+import 'attendance_change_log_screen.dart';
 
 class WorkAllocationScreen extends StatefulWidget {
   final DateTime attendanceDate;
@@ -36,22 +50,49 @@ class WorkAllocationScreen extends StatefulWidget {
   State<WorkAllocationScreen> createState() => _WorkAllocationScreenState();
 }
 
-class _TaskGroup {
+int _int(dynamic v) => int.tryParse('${v ?? ''}') ?? 0;
+
+// One person inside one task.
+class _TW {
+  final int workerId;
+  final TextEditingController amount;
+  String notes;
+  _TW(this.workerId, String amt, {this.notes = ''})
+      : amount = TextEditingController(text: amt);
+}
+
+class _Task {
+  final int uid;
   int? farmId;
   int? workTypeId;
-  String? crop; // 'seasonal:12', 'orchard:3', 'none:x' (general work) or null
-  final Map<int, TextEditingController> rateCtrls = {};
-  final Map<int, TextEditingController> noteCtrls = {};
-  // Optional free-text "Work detail" for this farm + work type (max 255).
-  final TextEditingController detailCtrl = TextEditingController();
-  final Set<int> workerIds = {};
-  bool isTask1 =
-      false; // true = Round 1 (rate defaults from morning amount, admin-gated); false = multi-task (blank, open to all)
+  String? workTypeName;
+  String crop = ''; // '' | 'seasonal:12' | 'orchard:3' | 'none:x' (general work)
+  String detail = '';
+  final List<_TW> workers = [];
+  _Task(this.uid);
+  String get key => '$farmId::${workTypeId ?? ''}::$crop';
+}
 
+// What the farm / work / crop / detail form edits.
+class _Spec {
+  int? farmId;
+  int? workTypeId;
+  String? workTypeName;
+  String crop;
+  final TextEditingController detail;
+  final TextEditingController amount;
+  _Spec(
+      {this.farmId,
+      this.workTypeId,
+      this.workTypeName,
+      this.crop = '',
+      String detailText = '',
+      String amountText = ''})
+      : detail = TextEditingController(text: detailText),
+        amount = TextEditingController(text: amountText);
   void dispose() {
-    for (final c in rateCtrls.values) c.dispose();
-    for (final c in noteCtrls.values) c.dispose();
-    detailCtrl.dispose();
+    detail.dispose();
+    amount.dispose();
   }
 }
 
@@ -83,22 +124,13 @@ List<String> _detailParts(String text) => text
     .where((e) => e.isNotEmpty)
     .toList();
 
-// "Work type — detail" (or just the work type / just the detail).
-String _withDetail(String? workType, dynamic detail) {
-  final d = (detail ?? '').toString().trim();
-  final w = (workType ?? '').trim();
-  if (d.isEmpty) return w;
-  if (w.isEmpty) return d;
-  return '$w — $d';
-}
-
 // Text field + quick-pick chips for the optional work detail.
 class _WorkDetailField extends StatefulWidget {
   final TextEditingController controller;
   final List<String> options;
   final VoidCallback? onChanged;
   const _WorkDetailField(
-      {required this.controller, required this.options, this.onChanged});
+      {super.key, required this.controller, required this.options, this.onChanged});
 
   @override
   State<_WorkDetailField> createState() => _WorkDetailFieldState();
@@ -183,43 +215,187 @@ class _WorkDetailFieldState extends State<_WorkDetailField> {
   }
 }
 
-class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
-  static const idaGreen = Color(0xFF3B7A28);
-  static const idaDark = Color(0xFF1E4012);
+// Farm, work done, crop (only when the farm has several) and work detail.
+class _TaskFields extends StatefulWidget {
+  final _Spec spec;
+  final List farms;
+  final List workTypes;
+  final Future<List> Function(int farmId) loadCrops;
+  final VoidCallback? onChanged;
+  final bool showErr;
+  const _TaskFields({
+    super.key,
+    required this.spec,
+    required this.farms,
+    required this.workTypes,
+    required this.loadCrops,
+    this.onChanged,
+    this.showErr = false,
+  });
 
+  @override
+  State<_TaskFields> createState() => _TaskFieldsState();
+}
+
+class _TaskFieldsState extends State<_TaskFields> {
+  List crops = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetch();
+  }
+
+  Future<void> _fetch() async {
+    final id = widget.spec.farmId;
+    if (id == null) {
+      if (mounted) setState(() => crops = []);
+      return;
+    }
+    final c = await widget.loadCrops(id);
+    if (mounted && widget.spec.farmId == id) setState(() => crops = c);
+  }
+
+  InputDecoration _dec(String label, {bool err = false}) => InputDecoration(
+        labelText: label,
+        isDense: true,
+        filled: true,
+        fillColor: Colors.white,
+        errorText: err ? 'Required' : null,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.spec;
+    final farmItems = widget.farms
+        .where((f) => isRowActive(f) || f['id'] == s.farmId)
+        .toList();
+    final workItems = widget.workTypes
+        .where((w) => isRowActive(w) || w['id'] == s.workTypeId)
+        .toList();
+    final farmVal = farmItems.any((f) => f['id'] == s.farmId) ? s.farmId : null;
+    final workVal =
+        workItems.any((w) => w['id'] == s.workTypeId) ? s.workTypeId : null;
+    final cropValues = [
+      for (final c in crops) '${c['cycle_type']}:${c['cycle_id']}',
+      'none:x'
+    ];
+    final cropVal = cropValues.contains(s.crop) ? s.crop : null;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      DropdownButtonFormField<int>(
+        value: farmVal,
+        isExpanded: true,
+        decoration: _dec('Farm', err: widget.showErr && s.farmId == null),
+        items: [
+          for (final f in farmItems)
+            DropdownMenuItem<int>(
+                value: f['id'] as int,
+                child: Text(tl(context, '${f['name']}'),
+                    overflow: TextOverflow.ellipsis)),
+        ],
+        onChanged: (v) {
+          setState(() {
+            s.farmId = v;
+            s.crop = '';
+            crops = [];
+          });
+          _fetch();
+          widget.onChanged?.call();
+        },
+      ),
+      const SizedBox(height: 10),
+      DropdownButtonFormField<int>(
+        value: workVal,
+        isExpanded: true,
+        decoration: _dec('Work done (optional)'),
+        items: [
+          for (final w in workItems)
+            DropdownMenuItem<int>(
+                value: w['id'] as int,
+                child: Text(tl(context, '${w['name']}'),
+                    overflow: TextOverflow.ellipsis)),
+        ],
+        onChanged: (v) {
+          setState(() {
+            s.workTypeId = v;
+            s.workTypeName = null;
+          });
+          widget.onChanged?.call();
+        },
+      ),
+      if (crops.length > 1) ...[
+        const SizedBox(height: 10),
+        DropdownButtonFormField<String>(
+          value: cropVal,
+          isExpanded: true,
+          decoration:
+              _dec('For which crop', err: widget.showErr && s.crop.isEmpty),
+          items: [
+            for (final c in crops)
+              DropdownMenuItem<String>(
+                  value: '${c['cycle_type']}:${c['cycle_id']}',
+                  child: Text('${c['label'] ?? c['crop_name'] ?? ''}',
+                      overflow: TextOverflow.ellipsis)),
+            const DropdownMenuItem<String>(
+                value: 'none:x', child: Text('General farm work (no crop)')),
+          ],
+          onChanged: (v) {
+            setState(() => s.crop = v ?? '');
+            widget.onChanged?.call();
+          },
+        ),
+      ],
+      const SizedBox(height: 10),
+      _WorkDetailField(
+        key: ValueKey('wd-${s.workTypeId}'),
+        controller: s.detail,
+        options: _detailOptionsOf(widget.workTypes, s.workTypeId),
+        onChanged: widget.onChanged,
+      ),
+    ]);
+  }
+}
+
+class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
   bool loading = true;
-  bool saving = false;
-  bool decidingAllocation = false;
-  bool isAdmin = false;
-  // Section-level access (farm_attendance, Stage B 'allocation'), same
-  // rules as the server: build / change an allocation = add or update on
-  // the section; approve / return = approve on the section; reopen a day or
-  // allocation and add a missed worker = the Reopen level. Admin has all.
+  String? busy; // 'draft' | 'submit' | 'copy' | 'save' | 'decide'
+  String? error;
+  String? notice;
+
   bool canWriteAlloc = false;
   bool canApproveAlloc = false;
-  bool canReopenDay = false;
-  String? error;
+  bool canCorrectDay = false;
 
   List farms = [];
   List workTypes = [];
   List<Map<String, dynamic>> presentWorkers = [];
-  List<Map<String, dynamic>> savedAllocations = []; // once submitted/approved
-  List<Map<String, dynamic>> perWorker =
-      []; // fresh from server every load — used for review, not just post-save
+  List<Map<String, dynamic>> leaveWorkers = [];
+  List<Map<String, dynamic>> savedAllocations = [];
+  List<Map<String, dynamic>> amendments = []; // allocation stage only
   String? attendanceStatus;
   String? allocationStatus;
   String? allocationAdminNote;
-  double? expectedTotalWage;
+  int pendAtt = 0;
+  int pendAlloc = 0;
 
-  final List<_TaskGroup> groups = [];
+  final List<_Task> tasks = [];
+  int _uid = 1;
+  final Set<int> sel = {};
+  String status = 'todo'; // builder: todo | done | split | all
+  String filter = 'all'; // sheet: all | none | split | changed
+  String q = '';
+  int tab = 0; // 0 workers, 1 tasks
+  final TextEditingController _searchCtrl = TextEditingController();
 
   String get _dateStr => DateFormat('yyyy-MM-dd').format(widget.attendanceDate);
 
   // ── Offline entry ──
-  // The allocation waiting on this phone for this date has this key.
   String get _offlineKey => 'allocation:$_dateStr';
-  bool _hadWaiting = false; // something was waiting at the last check
-  bool _mastersNetFail = false; // farms / work types could not be read
+  bool _hadWaiting = false;
+  bool _mastersNetFail = false;
   late final Listenable _offlineChanges = Listenable.merge(
       [Offline.sentTick, Offline.pendingCount, Offline.failedCount]);
 
@@ -228,26 +404,19 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
     final had = _hadWaiting;
     final now = Offline.waitingFor(_offlineKey);
     _hadWaiting = now != null;
-    if (had && now == null && !saving) {
+    if (had && now == null && busy == null) {
       _reloadAfterSend();
     } else {
       setState(() {});
     }
   }
 
-  // The waiting allocation was sent (or discarded): read the day again.
-  // Only when the server now holds the allocation (pending / approved) are
-  // the groups on screen and the local draft dropped; after a discard the
-  // person's groups stay.
   Future<void> _reloadAfterSend() async {
     await _loadDay();
     if (!mounted) return;
     if (allocationStatus == 'pending' || allocationStatus == 'approved') {
-      setState(() {
-        for (final g in groups) g.dispose();
-        groups.clear();
-      });
-      await _clearDraft();
+      setState(() => tasks.clear());
+      await _clearLocalDraft();
     }
   }
 
@@ -262,17 +431,21 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
   @override
   void dispose() {
     _offlineChanges.removeListener(_onOfflineChange);
-    for (final g in groups) g.dispose();
+    _searchCtrl.dispose();
+    for (final t in tasks) {
+      for (final w in t.workers) {
+        w.amount.dispose();
+      }
+    }
     super.dispose();
   }
 
   Future<void> _init() async {
-    isAdmin = await ApiService.isAdmin();
     canWriteAlloc =
         await ApiService.canWriteSection('farm_attendance', 'allocation');
     canApproveAlloc =
         await ApiService.canApproveSection('farm_attendance', 'allocation');
-    canReopenDay = await ApiService.canReopen('farm_attendance');
+    canCorrectDay = await ApiService.canCorrect('farm_attendance');
     await _loadMasters();
     await _loadDay();
     if (mounted &&
@@ -283,19 +456,45 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
     }
   }
 
+  Future<List?> _getMaster(String path, String allQuery) async {
+    try {
+      final r = await Api.get('$path$allQuery');
+      if (r.statusCode == 200) return jsonDecode(r.body) as List;
+    } catch (e) {
+      debugPrint('Load master (all=1) error: $e');
+    }
+    final r = await Api.get(path);
+    if (r.statusCode == 200) return jsonDecode(r.body) as List;
+    return null;
+  }
+
   Future<void> _loadMasters() async {
     try {
       final results = await Future.wait([
-        Api.get('/farms'),
-        Api.get('/work-types?applies_to=worker'),
+        _getMaster('/farms', '?all=1'),
+        _getMaster('/work-types?applies_to=worker', '&all=1'),
       ]);
-      if (results[0].statusCode == 200) farms = jsonDecode(results[0].body);
-      if (results[1].statusCode == 200) workTypes = jsonDecode(results[1].body);
+      if (results[0] != null) farms = results[0]!;
+      if (results[1] != null) workTypes = results[1]!;
     } catch (e) {
       debugPrint('Load masters error: $e');
       if (Offline.isNetworkError(e)) _mastersNetFail = true;
     }
   }
+
+  bool get _attOpen =>
+      attendanceStatus == 'approved' ||
+      (attendanceStatus == 'pending' && pendAtt > 0);
+
+  bool get _canBuild =>
+      canWriteAlloc &&
+      (allocationStatus == null || allocationStatus == 'returned');
+
+  bool get _tracked =>
+      allocationStatus == 'approved' ||
+      (allocationStatus == 'pending' && pendAlloc > 0);
+
+  bool get _mayChange => canCorrectDay && _tracked;
 
   Future<void> _loadDay() async {
     setState(() {
@@ -306,40 +505,42 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
       final res = await Api.get('/attendance/day/$_dateStr');
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
+        final pc = data['pending_changes'] is Map
+            ? data['pending_changes'] as Map
+            : {};
+        List<Map<String, dynamic>> maps(dynamic v) => [
+              for (final e in (v is List ? v : const []))
+                if (e is Map) Map<String, dynamic>.from(e)
+            ];
         setState(() {
           attendanceStatus = data['attendance_status'];
           allocationStatus = data['allocation_status'];
           allocationAdminNote = data['allocation_admin_note'];
-          expectedTotalWage = data['expected_total_wage'] != null
-              ? double.tryParse(data['expected_total_wage'].toString())
-              : null;
-          presentWorkers =
-              List<Map<String, dynamic>>.from(data['present_workers'] ?? []);
-          presentWorkers.sort((a, b) => (a['name'] ?? '')
-              .toString()
+          pendAtt = _int(pc['attendance']);
+          pendAlloc = _int(pc['allocation']);
+          presentWorkers = maps(data['present_workers']);
+          presentWorkers.sort((a, b) => '${a['name'] ?? ''}'
               .toLowerCase()
-              .compareTo((b['name'] ?? '').toString().toLowerCase()));
-          savedAllocations =
-              List<Map<String, dynamic>>.from(data['allocations'] ?? []);
-          // This is the fresh, always-available version — unlike a
-          // save-response-only field would be, this comes from the
-          // server every time the day loads, so an admin reviewing
-          // later sees the same remarks the field user saw, not nothing.
-          perWorker = List<Map<String, dynamic>>.from(data['per_worker'] ?? []);
+              .compareTo('${b['name'] ?? ''}'.toLowerCase()));
+          leaveWorkers = maps(data['leave_workers']);
+          savedAllocations = maps(data['allocations']);
+          amendments = maps(data['amendments'])
+              .where((a) => a['stage'] == 'allocation')
+              .toList();
+          sel.removeWhere(
+              (id) => !presentWorkers.any((p) => _int(p['worker_id']) == id));
         });
-        if (_canBuild && groups.isEmpty) {
-          await _loadDraft();
-          // A returned / reopened allocation comes back already filled in,
-          // so only the wrong parts need changing.
-          if (groups.isEmpty) _prefillFromSaved();
+        if (_canBuild && tasks.isEmpty) {
+          await _restoreLocalDraft();
+          if (tasks.isEmpty) _prefillFromSaved();
+          await _normalizeCrops();
         }
-        // The server already holds this day's allocation and nothing is
-        // waiting on the phone: an old local draft would be wrong to keep
-        // (it could come back later over a returned allocation).
         if ((allocationStatus == 'pending' || allocationStatus == 'approved') &&
             Offline.waitingFor(_offlineKey) == null) {
-          await _clearDraft();
+          await _clearLocalDraft();
         }
+      } else if (mounted) {
+        setState(() => error = Api.responseError(res));
       }
     } catch (e) {
       if (mounted) {
@@ -355,696 +556,722 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
     }
   }
 
-  Set<int> get _allocatedWorkerIds => groups.expand((g) => g.workerIds).toSet();
-  List<Map<String, dynamic>> get _unallocated => presentWorkers
-      .where((p) => !_allocatedWorkerIds.contains(p['worker_id']))
-      .toList();
-
-  bool get _canBuild =>
-      canWriteAlloc &&
-      (allocationStatus == null || allocationStatus == 'returned');
-
-  // ── Draft persistence ────────────────────────────────────────────
-  //
-  // groups only lives in memory until "Save All Allocations" is
-  // pressed — before that, navigating away (even just to fix a
-  // missing Work Type in a different screen) destroys this State
-  // object and silently loses everything the person just built, with
-  // no warning. That's a real data-loss bug, not acceptable for real
-  // entered work.
-  //
-  // Fix: mirror `groups` to SharedPreferences on every change, keyed
-  // by date, and restore it here on load if a draft exists and the
-  // day is still in a buildable state (not yet submitted/approved).
-  // Cleared once the final save actually reaches the server, since at
-  // that point the server copy is the source of truth and an old
-  // local draft would be actively wrong to keep resurrecting.
-  String get _draftKey => 'wa_draft_$_dateStr';
-
-  Future<void> _saveDraft() async {
-    final prefs = await SharedPreferences.getInstance();
-    final data = groups
-        .map((g) => {
-              'farmId': g.farmId,
-              'workTypeId': g.workTypeId,
-              'isTask1': g.isTask1,
-              'crop': g.crop,
-              'workDetail': g.detailCtrl.text,
-              'workers': g.workerIds
-                  .map((id) => {
-                        'workerId': id,
-                        'rate': g.rateCtrls[id]?.text ?? '',
-                        'note': g.noteCtrls[id]?.text ?? '',
-                      })
-                  .toList(),
-            })
-        .toList();
-    await prefs.setString(_draftKey, jsonEncode(data));
-  }
-
-  // Rebuilds the task groups from the allocation saved on the server
-  // (same farm + work + crop = one task), used when a day comes back
-  // for correction or an admin reopens it.
-  void _prefillFromSaved() {
-    if (savedAllocations.isEmpty || !mounted) return;
-    final byTask = <String, _TaskGroup>{};
-    for (final a in savedAllocations) {
-      final ct = a['cycle_type']?.toString();
-      final cid = a['cycle_id']?.toString();
-      final key = '${a['farm_id']}|${a['work_type_id']}|$ct|$cid';
-      final g = byTask.putIfAbsent(key, () {
-        final ng = _TaskGroup()
-          ..farmId = int.tryParse(a['farm_id'].toString())
-          ..workTypeId = a['work_type_id'] == null
-              ? null
-              : int.tryParse(a['work_type_id'].toString())
-          ..crop = ct == null
-              ? null
-              : (ct == 'none' ? 'none:x' : (cid == null ? null : '$ct:$cid'));
-        return ng;
-      });
-      final savedDetail = a['work_detail'];
-      if (g.detailCtrl.text.isEmpty &&
-          savedDetail is String &&
-          savedDetail.trim().isNotEmpty) {
-        g.detailCtrl.text = savedDetail.trim();
-      }
-      final wid = int.tryParse(a['worker_id'].toString());
-      if (wid == null) continue;
-      final rate = double.tryParse(a['wage_snapshot'].toString()) ?? 0;
-      final rateText =
-          rate == rate.roundToDouble() ? rate.toInt().toString() : rate.toString();
-      final note = a['notes']?.toString() ?? '';
-      g.workerIds.add(wid);
-      g.rateCtrls[wid] = TextEditingController(text: rateText);
-      g.noteCtrls[wid] = TextEditingController(text: note);
+  // ── small helpers ──
+  Map<String, dynamic>? _person(int id) {
+    for (final p in presentWorkers) {
+      if (_int(p['worker_id']) == id) return p;
     }
-    if (byTask.isEmpty) return;
-    setState(() => groups.addAll(byTask.values));
+    return null;
   }
 
-  Future<void> _loadDraft() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_draftKey);
-    if (raw == null) return;
-    try {
-      final data = jsonDecode(raw) as List;
-      final restored = <_TaskGroup>[];
-      for (final item in data) {
-        final g = _TaskGroup()
-          ..farmId = item['farmId']
-          ..workTypeId = item['workTypeId']
-          ..isTask1 = item['isTask1'] ?? false
-          ..crop = item['crop'];
-        final savedDetail = item['workDetail'];
-        if (savedDetail is String) g.detailCtrl.text = savedDetail;
-        for (final w in (item['workers'] as List)) {
-          final id = w['workerId'] as int;
-          g.workerIds.add(id);
-          g.rateCtrls[id] = TextEditingController(text: w['rate'] ?? '');
-          g.noteCtrls[id] = TextEditingController(text: w['note'] ?? '');
-        }
-        restored.add(g);
-      }
-      if (mounted) setState(() => groups.addAll(restored));
-    } catch (e) {
-      debugPrint('Draft restore error: $e');
-      await prefs.remove(_draftKey);
+  double _wage(Map p) =>
+      attNum(p['morning_amount'] ?? p['daily_wage'] ?? p['wage']);
+  double _wageOf(int id) {
+    final p = _person(id);
+    return p == null ? 0 : _wage(p);
+  }
+
+  String _nameOf(int id) => tl(context, '${_person(id)?['name'] ?? '#$id'}');
+
+  String _farmName(int? id) {
+    for (final f in farms) {
+      if (f is Map && f['id'] == id) return tl(context, '${f['name']}');
     }
+    return 'Farm not chosen';
   }
 
-  Future<void> _clearDraft() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_draftKey);
+  String _workName(_Task t) {
+    for (final w in workTypes) {
+      if (w is Map && w['id'] == t.workTypeId) return tl(context, '${w['name']}');
+    }
+    return t.workTypeName ?? 'Work not chosen';
   }
 
-  // A "single task" — pick Farm + Work Type, then choose WHICH
-  // currently-unassigned present workers belong to it (not necessarily
-  // everyone). Rates default to each worker's morning-allocated amount
-  // (admin-gated to edit). Repeatable — each press creates a fresh
-  // Task N covering whoever's still unassigned at that moment.
-  void _addSingleTask() {
-    final group = _TaskGroup()..isTask1 = true;
-    _showGroupBuilder(group,
-        isNew: true, prefillRate: true, restrictToWorkerId: null);
-  }
-
-  void _editGroup(_TaskGroup group) {
-    final restrictTo =
-        group.workerIds.length == 1 ? group.workerIds.first : null;
-    _showGroupBuilder(group,
-        isNew: false,
-        prefillRate: group.isTask1,
-        restrictToWorkerId: restrictTo);
-  }
-
-  // Multi Task remainder: one worker, one sheet — add as many
-  // Farm + Work Type lines as needed (blank amounts, split however
-  // their morning-allocated amount needs dividing), with "+" at the
-  // bottom of the sheet, then a single Save for all of them at once.
-  void _openMultiTaskSheet(int workerId) {
-    final w = presentWorkers.firstWhere((p) => p['worker_id'] == workerId,
-        orElse: () => {});
-    final existingLines = _linesFor(workerId);
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _MultiTaskWorkerSheet(
-        workerId: workerId,
-        workerName: w['name'] ?? '',
-        workerGender: w['gender'],
-        morningAmount: w['morning_amount'] != null
-            ? double.tryParse(w['morning_amount'].toString())
-            : null,
-        farms: farms,
-        workTypes: workTypes,
-        idaGreen: idaGreen,
-        existingGroups: existingLines,
-        onSave: (newGroups) {
-          setState(() {
-            for (final g in existingLines) {
-              groups.remove(g);
-              g.dispose();
-            }
-            groups.addAll(newGroups);
-          });
-          _saveDraft();
-        },
-      ),
-    );
-  }
-
-  void _showGroupBuilder(_TaskGroup group,
-      {required bool isNew,
-      required bool prefillRate,
-      int? restrictToWorkerId,
-      String? workerName}) {
-    final candidateWorkers = restrictToWorkerId != null
-        ? presentWorkers
-            .where((p) => p['worker_id'] == restrictToWorkerId)
-            .toList()
-        : [
-            ..._unallocated,
-            ...presentWorkers
-                .where((p) => group.workerIds.contains(p['worker_id'])),
-          ]
-      ..sort((a, b) => (a['name'] ?? '')
-          .toString()
-          .toLowerCase()
-          .compareTo((b['name'] ?? '').toString().toLowerCase()));
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _TaskGroupSheet(
-        group: group,
-        farms: farms,
-        workTypes: workTypes,
-        allPresent: presentWorkers,
-        unallocatedExcludingThisGroup: candidateWorkers,
-        idaGreen: idaGreen,
-        prefillRate: prefillRate,
-        isAdmin: isAdmin,
-        title: workerName != null
-            ? '${AppLocalizations.of(context)!.faWaAssignTaskTitlePrefix} — ${tl(context, workerName)}'
-            : (restrictToWorkerId != null
-                ? AppLocalizations.of(context)!.faWaAssignTask
-                : AppLocalizations.of(context)!.faWaTask1FarmWorkersTitle),
-        onSave: (finishedGroup) {
-          setState(() {
-            if (isNew) groups.add(finishedGroup);
-          });
-          _saveDraft();
-        },
-        onDelete: isNew
-            ? null
-            : () {
-                setState(() {
-                  groups.remove(group);
-                  group.dispose();
-                });
-                _saveDraft();
-              },
-      ),
-    );
-  }
-
-  // ── Which crop was the work for? (Sep 2026, group C) ──────────────
-  // A farm with one crop on the ground that day needs no question: the
-  // server links the work to it. A farm with two or more asks once per
-  // farm + work, before saving, so labour cost lands on the right crop.
-  // "General farm work" = no crop (fencing, cleaning, …).
   final Map<int, List> _farmCrops = {};
 
   Future<List> _cropsOn(int farmId) async {
     if (_farmCrops.containsKey(farmId)) return _farmCrops[farmId]!;
     try {
-      final res = await Api.get('/agri/cycles/on-farm?farm_id=$farmId&date=$_dateStr');
-      if (res.statusCode == 200) {
-        _farmCrops[farmId] = (jsonDecode(res.body)['cycles'] as List?) ?? [];
-      } else {
-        _farmCrops[farmId] = [];
-      }
+      final res = await Api.get(
+          '/agri/cycles/on-farm?farm_id=$farmId&date=$_dateStr');
+      _farmCrops[farmId] = res.statusCode == 200
+          ? ((jsonDecode(res.body)['cycles'] as List?) ?? [])
+          : [];
     } catch (_) {
       return [];
     }
     return _farmCrops[farmId]!;
   }
 
-  String _cropText(String? v, List crops) {
-    if (v == null) return '';
-    if (v == 'none:x') return 'General farm work';
-    for (final c in crops) {
-      if ('${c['cycle_type']}:${c['cycle_id']}' == v) return '${c['label'] ?? c['crop_name'] ?? ''}';
+  bool _needsCrop(int? farmId) =>
+      farmId != null && (_farmCrops[farmId]?.length ?? 0) > 1;
+
+  // A farm with one crop (or none) needs no crop on the task: the server fills it in.
+  Future<void> _normalizeCrops() async {
+    for (final t in tasks) {
+      if (t.farmId == null) continue;
+      final c = await _cropsOn(t.farmId!);
+      if (c.length <= 1) t.crop = '';
     }
-    return '';
+    if (mounted) setState(() {});
   }
 
-  // Returns false when the person closes the question without answering.
-  Future<bool> _askCrops() async {
-    final pairs = <String, List<_TaskGroup>>{};
-    for (final g in groups) {
-      if (g.farmId == null) continue;
-      pairs.putIfAbsent('${g.farmId}|${g.workTypeId}', () => []).add(g);
-    }
-    final ask = <String, List>{};
-    for (final e in pairs.entries) {
-      final crops = await _cropsOn(e.value.first.farmId!);
-      if (crops.length > 1) {
-        ask[e.key] = crops;
-      } else {
-        for (final g in e.value) {
-          g.crop = null; // one crop (or none): the server fills it in
-        }
-      }
-    }
-    if (ask.isEmpty || !mounted) return true;
-    final pick = <String, String?>{
-      for (final k in ask.keys)
-        k: pairs[k]!.map((g) => g.crop).firstWhere((c) => c != null && (c == 'none:x' || ask[k]!.any((x) => '${x['cycle_type']}:${x['cycle_id']}' == c)), orElse: () => null),
+  Map<String, dynamic> _cycleFields(String crop, int? farmId) {
+    if (!_needsCrop(farmId) || crop.isEmpty) return {};
+    final p = crop.split(':');
+    return {
+      'cycle_type': p[0],
+      if (p[0] != 'none' && p.length > 1 && p[1].isNotEmpty)
+        'cycle_id': int.tryParse(p[1]),
     };
-    final ok = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          final missing = pick.values.any((v) => v == null);
-          return Padding(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(ctx).viewInsets.bottom),
-            child: SingleChildScrollView(
-              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                const Text('For which crop?', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: idaDark)),
-                const SizedBox(height: 4),
-                const Text('These farms have more than one crop. Say which crop the work was for, so its cost counts on that crop.',
-                    style: TextStyle(fontSize: 13, color: Color(0xFF5F6A58))),
-                const SizedBox(height: 12),
-                for (final k in ask.keys) ...[
-                  Builder(builder: (_) {
-                    final g = pairs[k]!.first;
-                    final farmName = farms.firstWhere((f) => f['id'] == g.farmId, orElse: () => {})['name'] ?? '—';
-                    final work = workTypes.firstWhere((w) => w['id'] == g.workTypeId, orElse: () => {})['name'];
-                    final people = pairs[k]!.expand((x) => x.workerIds).toSet().length;
-                    return Text(
-                        '${tl(context, farmName)}${work != null ? ' · ${tl(context, work)}' : ''} · $people worker${people == 1 ? '' : 's'}',
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14));
-                  }),
-                  const SizedBox(height: 6),
-                  DropdownButtonFormField<String>(
-                    value: pick[k],
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'Crop', border: OutlineInputBorder(), isDense: true),
-                    items: [
-                      for (final c in ask[k]!)
-                        DropdownMenuItem(
-                            value: '${c['cycle_type']}:${c['cycle_id']}',
-                            child: Text('${c['label'] ?? c['crop_name'] ?? ''}', overflow: TextOverflow.ellipsis)),
-                      const DropdownMenuItem(value: 'none:x', child: Text('General farm work (no crop)')),
-                    ],
-                    onChanged: (v) => setSheet(() => pick[k] = v),
-                  ),
-                  const SizedBox(height: 14),
-                ],
-                ElevatedButton(
-                  onPressed: missing ? null : () => Navigator.pop(ctx, true),
-                  style: ElevatedButton.styleFrom(backgroundColor: idaGreen, padding: const EdgeInsets.symmetric(vertical: 14)),
-                  child: Text(missing ? 'Pick a crop for each' : 'Continue and save',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-                ),
-              ]),
-            ),
-          );
-        },
-      ),
-    );
-    if (ok != true) return false;
-    setState(() {
-      for (final k in ask.keys) {
-        for (final g in pairs[k]!) {
-          g.crop = pick[k];
-        }
-      }
-    });
-    _saveDraft();
-    return true;
   }
 
-  Future<void> _saveAllocations() async {
-    final loc = AppLocalizations.of(context)!;
-    if (_unallocated.isNotEmpty) {
-      setState(() => error =
-          '${_unallocated.length} ${loc.faWaErrStillNeedTask} ${_unallocated.map((w) => tl(context, w['name'])).join(', ')}');
-      return;
+  // Farm chosen? crop chosen where the farm has several? detail not too long?
+  Future<String?> _checkSpec(_Spec s) async {
+    if (s.farmId == null) return 'Choose the farm first.';
+    await _cropsOn(s.farmId!);
+    if (_needsCrop(s.farmId) && s.crop.isEmpty) {
+      return 'This farm has more than one crop. Choose the crop, or General farm work.';
     }
-    if (groups.isEmpty) {
-      setState(() => error = loc.faWaErrAddTaskGroup);
-      return;
+    if (s.detail.text.length > 255) {
+      return 'Work detail can be at most 255 characters.';
     }
-    setState(() {
-      saving = true;
-      error = null;
-    });
-    if (!await _askCrops()) {
-      if (mounted) setState(() => saving = false);
-      return;
+    return null;
+  }
+
+  // ── per-person view of the tasks ──
+  Map<int, List<(_Task, double)>> get _entries {
+    final m = <int, List<(_Task, double)>>{};
+    for (final t in tasks) {
+      for (final w in t.workers) {
+        (m[w.workerId] ??= []).add((t, attNum(w.amount.text)));
+      }
     }
+    return m;
+  }
+
+  String _stateOf(Map<int, List<(_Task, double)>> e, int id) {
+    final n = e[id]?.length ?? 0;
+    return n == 0 ? 'todo' : (n == 1 ? 'done' : 'split');
+  }
+
+  double _totalOf(Map<int, List<(_Task, double)>> e, int id) =>
+      attRound2((e[id] ?? []).fold<double>(0, (a, x) => a + x.$2));
+
+  // one task = full pay, several = equal split (then editable)
+  void _rebalance(int id) {
+    final hits = <_TW>[];
+    for (final t in tasks) {
+      for (final w in t.workers) {
+        if (w.workerId == id) hits.add(w);
+      }
+    }
+    final wage = _wageOf(id);
+    if (hits.length == 1) {
+      hits[0].amount.text = attFmt(wage);
+    } else if (hits.length > 1) {
+      final parts = attEqualSplit(wage, hits.length);
+      for (var i = 0; i < hits.length; i++) {
+        hits[i].amount.text = parts[i];
+      }
+    }
+  }
+
+  void _toggle(int id) => setState(() {
+        if (!sel.remove(id)) sel.add(id);
+      });
+
+  // ── local draft (a copy kept on this phone while building) ──
+  String get _draftKey => 'wa_draft_$_dateStr';
+
+  Future<void> _persist() async {
     try {
-      final payload = groups
-          .map((g) => {
-                'farm_id': g.farmId,
-                'work_type_id': g.workTypeId,
-                if (g.detailCtrl.text.trim().isNotEmpty)
-                  'work_detail': g.detailCtrl.text.trim(),
-                if (g.crop != null) 'cycle_type': g.crop!.split(':')[0],
-                if (g.crop != null && g.crop != 'none:x')
-                  'cycle_id': int.tryParse(g.crop!.split(':')[1]),
-                'workers': g.workerIds
-                    .map((id) => {
-                          'worker_id': id,
-                          'rate': double.tryParse(
-                              g.rateCtrls[id]?.text.trim() ?? ''),
-                          'notes': g.noteCtrls[id]?.text.trim(),
-                        })
-                    .toList(),
+      final prefs = await SharedPreferences.getInstance();
+      final data = tasks
+          .where((t) => t.workers.isNotEmpty)
+          .map((t) => {
+                'farmId': t.farmId,
+                'workTypeId': t.workTypeId,
+                'workTypeName': t.workTypeName,
+                'crop': t.crop,
+                'detail': t.detail,
+                'workers': [
+                  for (final w in t.workers)
+                    {'workerId': w.workerId, 'amount': w.amount.text, 'notes': w.notes}
+                ],
               })
           .toList();
+      if (data.isEmpty) {
+        await prefs.remove(_draftKey);
+      } else {
+        await prefs.setString(_draftKey, jsonEncode(data));
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _clearLocalDraft() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_draftKey);
+    } catch (_) {}
+  }
+
+  Future<void> _restoreLocalDraft() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_draftKey);
+      if (raw == null) return;
+      final data = jsonDecode(raw) as List;
+      final restored = <_Task>[];
+      for (final item in data) {
+        if (item is! Map || item['workers'] is! List) continue; // an older draft format
+        final t = _Task(_uid++)
+          ..farmId = item['farmId'] is int ? item['farmId'] : null
+          ..workTypeId = item['workTypeId'] is int ? item['workTypeId'] : null
+          ..workTypeName = item['workTypeName']?.toString()
+          ..crop = '${item['crop'] ?? ''}'
+          ..detail = '${item['detail'] ?? ''}';
+        for (final w in (item['workers'] as List)) {
+          if (w is! Map) continue;
+          final id = _int(w['workerId']);
+          if (_person(id) == null) continue; // no longer on work today
+          t.workers.add(_TW(id, '${w['amount'] ?? ''}', notes: '${w['notes'] ?? ''}'));
+        }
+        if (t.workers.isNotEmpty) restored.add(t);
+      }
+      if (mounted && restored.isNotEmpty) setState(() => tasks.addAll(restored));
+    } catch (e) {
+      debugPrint('Draft restore error: $e');
+      await _clearLocalDraft();
+    }
+  }
+
+  // Rebuilds the tasks from what the server holds (a saved draft, or a day that
+  // came back / was reopened): same farm + work + crop = one task.
+  void _prefillFromSaved() {
+    final by = <String, _Task>{};
+    for (final a in savedAllocations) {
+      final wid = _int(a['worker_id']);
+      if (_person(wid) == null) continue;
+      final ct = a['cycle_type']?.toString();
+      final crop = ct == null || ct.isEmpty
+          ? ''
+          : (ct == 'none' ? 'none:x' : '$ct:${a['cycle_id'] ?? ''}');
+      final key = '${a['farm_id']}::${a['work_type_id'] ?? ''}::$crop';
+      final t = by.putIfAbsent(
+          key,
+          () => _Task(_uid++)
+            ..farmId = _int(a['farm_id'])
+            ..workTypeId = a['work_type_id'] == null ? null : _int(a['work_type_id'])
+            ..workTypeName = a['work_type_name']?.toString()
+            ..crop = crop);
+      final d = a['work_detail'];
+      if (t.detail.isEmpty && d is String && d.trim().isNotEmpty) t.detail = d.trim();
+      t.workers.add(_TW(wid,
+          attFmt(attNum(a['total_wage'] ?? a['wage_snapshot'])),
+          notes: a['notes']?.toString() ?? ''));
+    }
+    if (by.isNotEmpty && mounted) setState(() => tasks.addAll(by.values));
+  }
+
+  // ── building the tasks ──
+  void _after({String? msg}) {
+    setState(() {
+      error = null;
+      notice = msg;
+    });
+    _persist();
+  }
+
+  _Task _taskFor(_Spec s) {
+    final key = '${s.farmId}::${s.workTypeId ?? ''}::${s.crop}';
+    for (final t in tasks) {
+      if (t.key == key) return t;
+    }
+    final t = _Task(_uid++)
+      ..farmId = s.farmId
+      ..workTypeId = s.workTypeId
+      ..crop = s.crop;
+    tasks.add(t);
+    return t;
+  }
+
+  void _addPeople(_Task t, Iterable<int> ids) {
+    for (final id in ids) {
+      if (t.workers.any((w) => w.workerId == id)) continue;
+      t.workers.add(_TW(id, ''));
+      _rebalance(id);
+    }
+  }
+
+  Future<void> _assignSheet() async {
+    if (sel.isEmpty) return;
+    final spec = _Spec();
+    String? err;
+    final ids = sel.toList();
+    final ok = await _sheet<bool>((ctx, setSheet) => [
+          Text('Assign ${ids.length} ${ids.length == 1 ? 'person' : 'people'} to a task',
+              style: const TextStyle(
+                  fontSize: 17, fontWeight: FontWeight.w800, color: attDark)),
+          const SizedBox(height: 4),
+          const Text(
+              'Each person gets this task. Someone in several tasks has their pay split, you can change the amounts on the Tasks tab.',
+              style: TextStyle(fontSize: 12.5, color: Color(0xFF5F6A58))),
+          const SizedBox(height: 12),
+          _TaskFields(
+              spec: spec,
+              farms: farms,
+              workTypes: workTypes,
+              loadCrops: _cropsOn,
+              showErr: err != null,
+              onChanged: () => setSheet(() => err = null)),
+          if (err != null) _errText(err!),
+          const SizedBox(height: 14),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: attGreen,
+                padding: const EdgeInsets.symmetric(vertical: 14)),
+            onPressed: () async {
+              final e = await _checkSpec(spec);
+              if (e != null) {
+                setSheet(() => err = e);
+                return;
+              }
+              if (ctx.mounted) Navigator.pop(ctx, true);
+            },
+            child: Text(
+                'Add ${ids.length} ${ids.length == 1 ? 'person' : 'people'} to this task',
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w700)),
+          ),
+        ]);
+    if (ok == true && mounted) {
+      final t = _taskFor(spec);
+      if (spec.detail.text.trim().isNotEmpty) t.detail = spec.detail.text.trim();
+      _addPeople(t, ids);
+      final msg =
+          '${ids.length} ${ids.length == 1 ? 'person' : 'people'} added to ${_workName(t)} · ${_farmName(t.farmId)}.';
+      sel.clear();
+      _after(msg: msg);
+    }
+  }
+
+  Future<void> _editTask(_Task t) async {
+    final spec = _Spec(
+        farmId: t.farmId,
+        workTypeId: t.workTypeId,
+        workTypeName: t.workTypeName,
+        crop: t.crop,
+        detailText: t.detail);
+    String? err;
+    final ok = await _sheet<bool>((ctx, setSheet) => [
+          const Text('Edit task',
+              style: TextStyle(
+                  fontSize: 17, fontWeight: FontWeight.w800, color: attDark)),
+          const SizedBox(height: 12),
+          _TaskFields(
+              spec: spec,
+              farms: farms,
+              workTypes: workTypes,
+              loadCrops: _cropsOn,
+              showErr: err != null,
+              onChanged: () => setSheet(() => err = null)),
+          if (err != null) _errText(err!),
+          const SizedBox(height: 14),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: attGreen,
+                padding: const EdgeInsets.symmetric(vertical: 14)),
+            onPressed: () async {
+              final e = await _checkSpec(spec);
+              if (e != null) {
+                setSheet(() => err = e);
+                return;
+              }
+              if (ctx.mounted) Navigator.pop(ctx, true);
+            },
+            child: const Text('Done',
+                style:
+                    TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+          ),
+        ]);
+    if (ok == true && mounted) {
+      t.farmId = spec.farmId;
+      t.workTypeId = spec.workTypeId;
+      t.workTypeName = spec.workTypeId == null ? null : t.workTypeName;
+      t.crop = spec.crop;
+      t.detail = spec.detail.text.trim();
+      // now the same as another task? join them
+      _Task? other;
+      for (final x in tasks) {
+        if (!identical(x, t) && x.key == t.key) other = x;
+      }
+      if (other != null) {
+        for (final w in t.workers) {
+          if (!other.workers.any((o) => o.workerId == w.workerId)) {
+            other.workers.add(w);
+          }
+        }
+        if (other.detail.isEmpty) other.detail = t.detail;
+        tasks.remove(t);
+        for (final id in other.workers.map((w) => w.workerId).toSet()) {
+          _rebalance(id);
+        }
+      }
+      _after();
+    }
+  }
+
+  void _addSelectedTo(_Task t) {
+    final n = sel.length;
+    _addPeople(t, sel.toList());
+    sel.clear();
+    _after(msg: '$n ${n == 1 ? 'person' : 'people'} added to ${_workName(t)} · ${_farmName(t.farmId)}.');
+  }
+
+  void _removeFrom(_Task t, int id) {
+    t.workers.removeWhere((w) => w.workerId == id);
+    _rebalance(id);
+    if (t.workers.isEmpty) tasks.remove(t);
+    _after();
+  }
+
+  Future<void> _deleteTask(_Task t) async {
+    if (t.workers.isNotEmpty) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Delete this task?'),
+          content: Text(
+              'Its ${t.workers.length} ${t.workers.length == 1 ? 'person goes' : 'people go'} back to "To do".'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Delete',
+                    style: TextStyle(color: Color(0xFFC0392B)))),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    final ids = t.workers.map((w) => w.workerId).toList();
+    tasks.remove(t);
+    for (final id in ids) {
+      _rebalance(id);
+    }
+    _after();
+  }
+
+  Future<void> _copyYesterday() async {
+    if (tasks.any((t) => t.workers.isNotEmpty)) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Copy yesterday?'),
+          content: const Text(
+              "This replaces what you have entered with yesterday's allocation."),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Replace')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    setState(() {
+      busy = 'copy';
+      error = null;
+    });
+    try {
+      final y = widget.attendanceDate.subtract(const Duration(days: 1));
+      final res = await Api.get('/attendance/day/${DateFormat('yyyy-MM-dd').format(y)}');
+      if (res.statusCode != 200) {
+        setState(() => error = Api.responseError(res));
+        return;
+      }
+      final data = jsonDecode(res.body);
+      final by = <String, _Task>{};
+      for (final a in (data['allocations'] is List ? data['allocations'] as List : [])) {
+        if (a is! Map) continue;
+        final wid = _int(a['worker_id']);
+        if (_person(wid) == null) continue;
+        final key = '${a['farm_id']}::${a['work_type_id'] ?? ''}::';
+        final t = by.putIfAbsent(
+            key,
+            () => _Task(_uid++)
+              ..farmId = _int(a['farm_id'])
+              ..workTypeId = a['work_type_id'] == null ? null : _int(a['work_type_id'])
+              ..workTypeName = a['work_type_name']?.toString()
+              ..detail = '${a['work_detail'] ?? ''}'.trim());
+        if (!t.workers.any((w) => w.workerId == wid)) t.workers.add(_TW(wid, ''));
+      }
+      if (by.isEmpty) {
+        setState(() => error = 'Nothing was allocated yesterday for the people on work today.');
+        return;
+      }
+      setState(() {
+        tasks
+          ..clear()
+          ..addAll(by.values);
+        sel.clear();
+      });
+      for (final p in presentWorkers) {
+        _rebalance(_int(p['worker_id']));
+      }
+      await _normalizeCrops();
+      _after(msg: 'Copied ${by.length} ${by.length == 1 ? 'task' : 'tasks'} from yesterday. Check the crop and amounts.');
+    } catch (e) {
+      if (mounted) setState(() => error = Api.errorText(e));
+    } finally {
+      if (mounted) setState(() => busy = null);
+    }
+  }
+
+  // ── save draft / submit ──
+  List<Map<String, dynamic>> _payload() {
+    return [
+      for (final t in tasks)
+        if (t.workers.isNotEmpty)
+          {
+            'farm_id': t.farmId,
+            'work_type_id': t.workTypeId,
+            if (t.detail.trim().isNotEmpty) 'work_detail': t.detail.trim(),
+            ..._cycleFields(t.crop, t.farmId),
+            'workers': [
+              for (final w in t.workers)
+                {
+                  'worker_id': w.workerId,
+                  'amount': w.amount.text.trim().isEmpty
+                      ? _wageOf(w.workerId)
+                      : attNum(w.amount.text),
+                  if (w.notes.trim().isNotEmpty) 'notes': w.notes.trim(),
+                }
+            ],
+          }
+    ];
+  }
+
+  Future<void> _save(bool submit) async {
+    final loc = AppLocalizations.of(context)!;
+    setState(() {
+      error = null;
+      notice = null;
+    });
+    final e = _entries;
+    final todo = presentWorkers
+        .where((p) => _stateOf(e, _int(p['worker_id'])) == 'todo')
+        .toList();
+    if (tasks.any((t) => t.workers.isNotEmpty && t.farmId == null)) {
+      setState(() {
+        tab = 1;
+        error = 'Choose a farm for every task (tap Edit).';
+      });
+      return;
+    }
+    for (final t in tasks) {
+      if (t.farmId != null) await _cropsOn(t.farmId!);
+    }
+    if (submit) {
+      if (todo.isNotEmpty) {
+        setState(() {
+          status = 'todo';
+          tab = 0;
+          error =
+              '${todo.length} ${loc.faWaErrStillNeedTask} ${todo.map((p) => tl(context, p['name'])).join(', ')}';
+        });
+        return;
+      }
+      if (tasks.every((t) => t.workers.isEmpty)) {
+        setState(() => error = loc.faWaErrAddTaskGroup);
+        return;
+      }
+      for (final t in tasks) {
+        if (t.workers.isNotEmpty && _needsCrop(t.farmId) && t.crop.isEmpty) {
+          setState(() {
+            tab = 1;
+            error =
+                '${_farmName(t.farmId)} has more than one crop. Tap Edit and choose which crop this work was for, or General farm work.';
+          });
+          return;
+        }
+      }
+    }
+    setState(() => busy = submit ? 'submit' : 'draft');
+    try {
       final res = await Api.post(
         '/attendance/day/$_dateStr/allocation',
-        queueLabel:
-            'Work allocation ${DateFormat('dd MMM yyyy').format(widget.attendanceDate)}',
-        queueKey: _offlineKey,
-        body: {'allocations': payload},
+        queueLabel: submit
+            ? 'Work allocation ${DateFormat('dd MMM yyyy').format(widget.attendanceDate)}'
+            : null,
+        queueKey: submit ? _offlineKey : null,
+        body: {'allocations': _payload(), if (!submit) 'submit': false},
       );
       if (Api.wasQueued(res)) {
-        // No signal: kept on this phone. The groups and the draft stay on
-        // screen (the day still reads "not submitted"), and the notice
-        // below explains. Saving again replaces the waiting entry.
         if (mounted) {
           setState(() => _hadWaiting = true);
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(loc.offSavedSnack),
             backgroundColor: const Color(0xFFB45309),
             behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             margin: const EdgeInsets.all(16),
           ));
         }
       } else if (res.statusCode == 200) {
-        // An older saved-offline copy for this date is now out of date.
-        final old = Offline.waitingFor(_offlineKey);
-        if (old != null) await Offline.discard(old.id);
-        setState(() {
-          for (final g in groups) g.dispose();
-          groups.clear();
-        });
-        await _clearDraft();
-        await _loadDay();
+        if (submit) {
+          final old = Offline.waitingFor(_offlineKey);
+          if (old != null) await Offline.discard(old.id);
+          setState(() => tasks.clear());
+          await _clearLocalDraft();
+          await _loadDay();
+        } else {
+          await _persist();
+          if (mounted) {
+            setState(() => notice = 'Draft saved. Nothing has gone to the approver yet.');
+          }
+        }
       } else {
         setState(() => error = Api.responseError(res));
       }
-    } catch (e) {
-      setState(() => error = '${loc.faErrServer}: ${Api.errorText(e)}');
+    } catch (ex) {
+      setState(() => error = '${loc.faErrServer}: ${Api.errorText(ex)}');
     } finally {
-      if (mounted) setState(() => saving = false);
+      if (mounted) setState(() => busy = null);
     }
   }
 
-  Future<void> _decideAllocation(String decision) async {
-    final loc = AppLocalizations.of(context)!;
-    String? note;
-    if (decision == 'reject') {
-      note = await _promptForNote(loc.faWaRejectTitle, loc.faWaRejectHint);
-      if (note == null || note.trim().isEmpty) return;
-    }
-    setState(() => decidingAllocation = true);
-    try {
-      final res = await Api.patch(
-        '/attendance/day/$_dateStr/allocation-decision',
-        body: {'decision': decision, if (note != null) 'note': note},
+  // ══════════════════════════ UI helpers ══════════════════════════
+  Widget _errText(String t) => Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(t,
+            style: const TextStyle(color: Color(0xFFC0392B), fontSize: 12.5)),
       );
-      if (res.statusCode == 200) {
-        await _loadDay();
-      } else {
-        setState(() => error = Api.responseError(res));
-      }
-    } catch (e) {
-      setState(() => error = '${loc.faErrServer}: ${Api.errorText(e)}');
-    } finally {
-      if (mounted) setState(() => decidingAllocation = false);
-    }
-  }
 
-  // Needs the Reopen level (admin always): reopen an approved day. kind = 'allocation' (a wrong farm /
-  // work / rate was approved) or 'day' (the whole day was wrong).
-  Future<void> _reopen(String kind) async {
-    final loc = AppLocalizations.of(context)!;
-    final reasonCtrl = TextEditingController();
-    String? validationError;
-    final reason = await showDialog<String>(
+  Future<T?> _sheet<T>(
+      List<Widget> Function(BuildContext ctx, StateSetter setSheet) builder) {
+    return showModalBottomSheet<T>(
       context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(kind == 'day' ? loc.faReopenDay : loc.faReopenAlloc,
-              style:
-                  const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-          content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(kind == 'day' ? loc.faReopenDayHint : loc.faReopenAllocHint,
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: reasonCtrl,
-                  autofocus: true,
-                  maxLines: 2,
-                  decoration: InputDecoration(
-                      labelText: loc.faReopenReason,
-                      isDense: true,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10))),
-                ),
-                if (validationError != null) ...[
-                  const SizedBox(height: 10),
-                  Text(validationError!,
-                      style: const TextStyle(
-                          color: Color(0xFFC0392B), fontSize: 12)),
-                ],
-              ]),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFC0392B)),
-              onPressed: () {
-                if (reasonCtrl.text.trim().isEmpty) {
-                  setDialogState(() => validationError = loc.faReopenReason);
-                  return;
-                }
-                Navigator.pop(ctx, reasonCtrl.text.trim());
-              },
-              child: Text(loc.faReopenConfirm),
-            ),
-          ],
+        builder: (ctx, setSheet) => Padding(
+          padding: EdgeInsets.fromLTRB(
+              16, 16, 16, 16 + MediaQuery.of(ctx).viewInsets.bottom),
+          child: SingleChildScrollView(
+            child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: builder(ctx, setSheet)),
+          ),
         ),
       ),
     );
-    if (reason == null || reason.isEmpty) return;
-    setState(() {
-      decidingAllocation = true;
-      error = null;
-    });
-    try {
-      final res = await Api.post(
-        '/attendance/day/$_dateStr/${kind == 'day' ? 'reopen-day' : 'reopen-allocation'}',
-        body: {'reason': reason},
+  }
+
+  Widget _pill(String label, bool on, VoidCallback onTap) => Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: on ? attDark : Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                  color: on ? attDark : const Color(0xFFD5DECC)),
+            ),
+            child: Text(label,
+                style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: on ? Colors.white : attDark)),
+          ),
+        ),
       );
-      if (res.statusCode == 200) {
-        setState(() {
-          for (final g in groups) g.dispose();
-          groups.clear();
-        });
-        await _clearDraft();
-        await _loadDay();
-      } else {
-        setState(() => error = Api.responseError(res));
-      }
-    } catch (e) {
-      setState(() => error = '${loc.faErrServer}: ${Api.errorText(e)}');
-    } finally {
-      if (mounted) setState(() => decidingAllocation = false);
-    }
-  }
 
-  // Box at the bottom of the screen for the Reopen level (admin always):
-  // reopen what was approved.
-  Widget _reopenSection(AppLocalizations loc) {
-    if (!canReopenDay || attendanceStatus != 'approved') {
-      return const SizedBox.shrink();
-    }
-    return Padding(
-      padding: const EdgeInsets.only(top: 20),
-      child: Column(children: [
-        if (allocationStatus == 'approved')
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              icon: const Icon(Icons.lock_open, size: 16, color: idaGreen),
-              label: Text(loc.faReopenAlloc,
+  Widget _box(String text,
+          {required Color bg,
+          required Color fg,
+          IconData icon = Icons.info_outline,
+          Widget? action}) =>
+      Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(12),
+        decoration:
+            BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(icon, color: fg, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(text,
+                    style: TextStyle(
+                        color: fg, fontWeight: FontWeight.w600, fontSize: 13)),
+                if (action != null) action,
+              ])),
+        ]),
+      );
+
+  Widget _card({required Widget child, Color? border}) => Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: border ?? const Color(0xFFE0E7D8))),
+        child: child,
+      );
+
+  Widget _kv(String k, String v, {Color? color}) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(children: [
+          Expanded(
+              child: Text(k,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      color: idaGreen,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13)),
-              style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: idaGreen),
-                  padding: const EdgeInsets.symmetric(vertical: 10)),
-              onPressed: decidingAllocation ? null : () => _reopen('allocation'),
-            ),
+                      fontSize: 13.5, color: Color(0xFF5F6A58)))),
+          Text(v,
+              style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w800,
+                  color: color ?? attDark)),
+        ]),
+      );
+
+  Widget _reasonField(
+      TextEditingController ctrl, StateSetter setSheet, String? err) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Wrap(spacing: 6, children: [
+        for (final r in const ['Wrong entry', 'Went to other farm', 'Came late'])
+          ActionChip(
+            label: Text(r, style: const TextStyle(fontSize: 12)),
+            onPressed: () => setSheet(() => ctrl.text = r),
           ),
-        if (allocationStatus == 'approved') const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            icon: const Icon(Icons.restart_alt,
-                size: 16, color: Color(0xFFC0392B)),
-            label: Text(loc.faReopenDay,
-                style: const TextStyle(
-                    color: Color(0xFFC0392B),
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13)),
-            style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Color(0xFFC0392B)),
-                padding: const EdgeInsets.symmetric(vertical: 10)),
-            onPressed: decidingAllocation ? null : () => _reopen('day'),
-          ),
-        ),
       ]),
-    );
-  }
-
-  Future<String?> _promptForNote(String title, String hint) async {
-    final ctrl = TextEditingController();
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) {
-        final loc = AppLocalizations.of(ctx)!;
-        return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title:
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-          content: TextField(
-            controller: ctrl,
-            maxLines: 2,
-            autofocus: true,
-            decoration: InputDecoration(
-                hintText: hint,
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10))),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, null),
-                child: Text(loc.cancel)),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red.shade600),
-              onPressed: () => Navigator.pop(ctx, ctrl.text),
-              child: Text(loc.faConfirm,
-                  style: const TextStyle(color: Colors.white)),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final loc = AppLocalizations.of(context)!;
-    return Scaffold(
-      backgroundColor: const Color(0xFFF4F7F2),
-      appBar: AppBar(
-        backgroundColor: idaDark,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        title: Text(
-            '${loc.faWaTitle} · ${DateFormat('dd MMM').format(widget.attendanceDate)}',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+      const SizedBox(height: 6),
+      TextField(
+        controller: ctrl,
+        onChanged: (_) => setSheet(() {}),
+        decoration: InputDecoration(
+            labelText: 'Reason (required)',
+            errorText: err,
+            isDense: true,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
       ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator(color: idaGreen))
-          : attendanceStatus != 'approved'
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const OfflineStatusBar(),
-                          Text(error ?? loc.faWaMustApproveFirst,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                  color: error != null
-                                      ? Colors.red
-                                      : Colors.grey.shade600,
-                                  fontSize: 14)),
-                        ]),
-                  ),
-                )
-              : RefreshIndicator(
-                  color: idaGreen,
-                  onRefresh: _loadDay,
-                  child: Responsive.constrainedContent(
-                      context,
-                      ListView(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-                        children: [
-                          const OfflineStatusBar(),
-                          _offlineNotice(loc),
-                          _statusBanner(loc),
-                          const SizedBox(height: 16),
-                          if (_canBuild) ..._buildSection(loc),
-                          if (!_canBuild) ...[
-                            _readOnlyAllocations(loc),
-                            _decisionButtons(loc),
-                          ],
-                          _reopenSection(loc),
-                          if (error != null) ...[
-                            const SizedBox(height: 10),
-                            Text(error!,
-                                style: const TextStyle(
-                                    color: Colors.red, fontSize: 12.5)),
-                          ],
-                        ],
-                      )),
-                ),
-    );
+    ]);
   }
 
   // The allocation saved on this phone for this date: waiting to be sent,
@@ -1053,2120 +1280,1354 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
     final e = Offline.waitingFor(_offlineKey);
     if (e == null) return const SizedBox.shrink();
     final failed = e.status == 'failed';
-    final fg = failed ? const Color(0xFFC0392B) : const Color(0xFF92600A);
-    final bg = failed ? const Color(0xFFFDE8E8) : const Color(0xFFFEF3DC);
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration:
-          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Icon(failed ? Icons.error_outline : Icons.cloud_upload_outlined,
-              color: fg, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-                failed ? loc.offNoticeFailed(e.error) : loc.offAllocSaved,
-                style: TextStyle(
-                    color: fg, fontWeight: FontWeight.w600, fontSize: 13)),
-          ),
-        ]),
-        if (failed) ...[
-          const SizedBox(height: 6),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton(
+    return _box(
+      failed ? loc.offNoticeFailed(e.error) : loc.offAllocSaved,
+      bg: failed ? const Color(0xFFFDE8E8) : const Color(0xFFFEF3DC),
+      fg: failed ? const Color(0xFFC0392B) : const Color(0xFF92600A),
+      icon: failed ? Icons.error_outline : Icons.cloud_upload_outlined,
+      action: failed
+          ? TextButton(
               onPressed: () => Navigator.pushNamed(context, '/offline'),
-              style: TextButton.styleFrom(
-                  foregroundColor: fg,
-                  padding: const EdgeInsets.symmetric(horizontal: 8)),
               child: Text(loc.offOpenList,
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
-            ),
-          ),
-        ],
-      ]),
+                  style: const TextStyle(fontWeight: FontWeight.w700)))
+          : null,
     );
   }
 
-  Widget _statusBanner(AppLocalizations loc) {
-    if (allocationStatus == null) {
-      return Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-            color: const Color(0xFFE8F5E2),
-            borderRadius: BorderRadius.circular(12)),
-        child: Row(children: [
-          const Icon(Icons.info_outline, color: idaGreen, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-              child: Text(
-                  '${presentWorkers.length} ${loc.faWaPresentToAllocate}${expectedTotalWage != null ? ' ${loc.faWaExpectedTotalSuffix}: ₹${expectedTotalWage!.toStringAsFixed(2)}' : ''}',
-                  style: const TextStyle(
-                      color: idaDark,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12.5))),
-        ]),
-      );
-    }
-    Color bg;
-    Color fg;
-    IconData icon;
-    String label;
-    switch (allocationStatus) {
-      case 'pending':
-        bg = const Color(0xFFFEF3DC);
-        fg = const Color(0xFF92600A);
-        icon = Icons.hourglass_top;
-        label = loc.faWaStatusPending;
-        break;
-      case 'approved':
-        bg = const Color(0xFFE8F5E2);
-        fg = idaGreen;
-        icon = Icons.check_circle;
-        label = loc.faWaStatusApproved;
-        break;
-      case 'returned':
-        bg = const Color(0xFFFDE8E8);
-        fg = const Color(0xFFC0392B);
-        icon = Icons.error_outline;
-        label =
-            '${loc.faStatusReturned}${allocationAdminNote != null ? ': $allocationAdminNote' : ''}';
-        break;
-      default:
-        return const SizedBox.shrink();
-    }
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration:
-          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Icon(icon, color: fg, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-              child: Text(label,
-                  style: TextStyle(
-                      color: fg, fontWeight: FontWeight.w600, fontSize: 13))),
-        ]),
-      ]),
-    );
-  }
-
-  // Approve/Reject — deliberately rendered AFTER the remarks and
-  // allocation list below, not at the top, so an admin scrolls through
-  // what actually happened (same / excess / less / Break Attendance
-  // reasons) before the buttons are even in view. Nothing to approve
-  // blind against.
-  Widget _decisionButtons(AppLocalizations loc) {
-    if (allocationStatus != 'pending' || !canApproveAlloc)
-      return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 16),
-      child: Row(children: [
-        Expanded(
-          child: ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: idaGreen,
-                padding: const EdgeInsets.symmetric(vertical: 13)),
-            onPressed:
-                decidingAllocation ? null : () => _decideAllocation('approve'),
-            child: Text(loc.faApprove,
-                style: const TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.w700)),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: OutlinedButton(
-            style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.red,
-                side: const BorderSide(color: Colors.red),
-                padding: const EdgeInsets.symmetric(vertical: 13)),
-            onPressed:
-                decidingAllocation ? null : () => _decideAllocation('reject'),
-            child: Text(loc.faReject,
-                style: const TextStyle(fontWeight: FontWeight.w700)),
-          ),
-        ),
-      ]),
-    );
-  }
-
-  double get _liveTotal {
-    double total = 0;
-    for (final g in groups) {
-      for (final id in g.workerIds) {
-        total += double.tryParse(g.rateCtrls[id]?.text.trim() ?? '') ?? 0;
-      }
-    }
-    return total;
-  }
-
-  List<Widget> _buildSection(AppLocalizations loc) {
-    final hasBatchTasks = _batchTasks.isNotEmpty;
-    return [
-      // ── First single task, covering some or all present workers ──
-      if (!hasBatchTasks)
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            icon: const Icon(Icons.groups_outlined,
-                color: Colors.white, size: 18),
-            label: Text(loc.faWaAssignTaskSelectWorkers,
-                style: const TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.w700)),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: idaGreen,
-                padding: const EdgeInsets.symmetric(vertical: 13)),
-            onPressed: _addSingleTask,
-          ),
-        ),
-
-      if (hasBatchTasks) ...[
-        Row(children: [
-          Text(loc.faWaTasks,
-              style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF6B7280),
-                  letterSpacing: 0.6)),
-          const Spacer(),
-          Text(
-              '${_allocatedWorkerIds.length}/${presentWorkers.length} ${loc.faWaAllocatedSuffix}',
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: _unallocated.isEmpty ? idaGreen : Colors.orange)),
-        ]),
-        const SizedBox(height: 10),
-        ..._batchTasks.asMap().entries.map((entry) {
-          final taskNumber = entry.key + 1;
-          final group = entry.value;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('${loc.faWaTaskNumber} $taskNumber',
-                  style: const TextStyle(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF9CA3AF),
-                      letterSpacing: 0.5)),
-              const SizedBox(height: 4),
-              _groupCard(group, loc),
-              if (_nonBatchTaskWorkers.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () => _editGroup(group),
-                      icon: const Icon(Icons.add, size: 16, color: idaGreen),
-                      label: Text('${loc.faWaAddMoreWorkersToTask} $taskNumber',
-                          style: const TextStyle(
-                              color: idaGreen,
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600)),
-                      style: TextButton.styleFrom(
-                          padding: EdgeInsets.zero,
-                          minimumSize: const Size(0, 0),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                    ),
-                  ),
-                ),
-            ]),
-          );
-        }),
-
-        // ── Start another single task from whoever's still fully
-        // unassigned — same picker as the first task, different
-        // Farm/Work Type, repeatable as many times as needed. ───────
-        if (_unallocated.isNotEmpty) ...[
-          const SizedBox(height: 4),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              icon:
-                  const Icon(Icons.add_box_outlined, size: 18, color: idaGreen),
-              label: Text(loc.faWaAddNewSingleTask,
-                  style: const TextStyle(
-                      color: idaGreen, fontWeight: FontWeight.w700)),
-              style: OutlinedButton.styleFrom(
-                  foregroundColor: idaGreen,
-                  side: const BorderSide(color: idaGreen),
-                  padding: const EdgeInsets.symmetric(vertical: 13)),
-              onPressed: _addSingleTask,
-            ),
-          ),
-        ],
-
-        // ── Multi Task: whoever's left after every single task above.
-        // Each worker can have MORE THAN ONE task line, splitting
-        // their morning amount across farms/work types — the "+"
-        // stays available even after their first task, for exactly
-        // that. ─────────────────────────────────────────────────────
-        if (_nonBatchTaskWorkers.isNotEmpty) ...[
-          const SizedBox(height: 18),
-          Text(loc.faWaMultiTaskRemaining,
-              style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF6B7280),
-                  letterSpacing: 0.6)),
-          const SizedBox(height: 4),
-          Text(loc.faWaMultiTaskHint,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
-          const SizedBox(height: 10),
-          _tileGrid(
-              context,
-              _nonBatchTaskWorkers
-                  .map((w) => _multiTaskWorkerCard(w, loc))
-                  .toList()),
-        ],
-      ],
-
-      if (hasBatchTasks) ...[
-        const SizedBox(height: 16),
-        _totalComparisonBanner(loc),
-      ],
-
-      if (hasBatchTasks) ...[
-        const SizedBox(height: 16),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            icon: saving
-                ? const SizedBox(
-                    height: 16,
-                    width: 16,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white))
-                : const Icon(Icons.check_circle_outline,
-                    color: Colors.white, size: 18),
-            label: Text(saving ? loc.faWaSaving : loc.faWaSaveAllAllocations,
-                style: const TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.w700)),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: idaDark,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12))),
-            onPressed:
-                (saving || _unallocated.isNotEmpty) ? null : _saveAllocations,
-          ),
-        ),
-      ],
-    ];
-  }
-
-  // Every "single task" group (multi-worker, shared Farm/Work Type,
-  // rate defaults from morning amount, admin-gated edit) — Task 1,
-  // Task 2, etc. Distinct from the per-worker Multi Task lines below,
-  // which are single-worker, blank-rate, open to everyone.
-  List<_TaskGroup> get _batchTasks => groups.where((g) => g.isTask1).toList();
-
-  // Everyone present, minus whoever's covered by ANY single task above.
-  List<Map<String, dynamic>> get _nonBatchTaskWorkers {
-    final coveredIds = _batchTasks.expand((g) => g.workerIds).toSet();
-    return presentWorkers
-        .where((p) => !coveredIds.contains(p['worker_id']))
-        .toList();
-  }
-
-  // A worker's task lines beyond Task 1 — could be zero (not yet
-  // assigned), one, or several (split across farms/work types).
-  List<_TaskGroup> _linesFor(int workerId) =>
-      groups.skip(1).where((g) => g.workerIds.contains(workerId)).toList();
-
-  // Same reasoning as Dashboard's and Farm Attendance's grids: one
-  // column on mobile (unchanged), reflowing to 2-3 columns on wider
-  // screens. Cards are wrapped in a fixed-width SizedBox before going
-  // into the Wrap, since _multiTaskWorkerCard uses Expanded
-  // internally, which needs a bounded width - a bare Wrap gives
-  // unbounded width and would crash without this. runSpacing is 0
-  // because each card already carries its own bottom margin.
-  Widget _tileGrid(BuildContext context, List<Widget> cards) {
-    final columns = Responsive.gridColumns(context);
-    if (columns == 1) return Column(children: cards);
-    const spacing = 12.0;
-    return LayoutBuilder(builder: (context, constraints) {
-      final cardWidth =
-          (constraints.maxWidth - spacing * (columns - 1)) / columns;
-      return Wrap(
-        spacing: spacing,
-        runSpacing: 0,
-        children:
-            cards.map((c) => SizedBox(width: cardWidth, child: c)).toList(),
-      );
-    });
-  }
-
-  Widget _multiTaskWorkerCard(Map<String, dynamic> w, AppLocalizations loc) {
-    final workerId = w['worker_id'] as int;
-    final lines = _linesFor(workerId);
-    final morning = w['morning_amount'] != null
-        ? double.tryParse(w['morning_amount'].toString())
-        : null;
-    final subtotal = lines.fold(
-        0.0,
-        (s, g) =>
-            s +
-            (double.tryParse(g.rateCtrls[workerId]?.text.trim() ?? '') ?? 0));
-    final matches = morning == null ? null : (subtotal - morning).abs() < 0.01;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFE0E7D8))),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Icon(w['gender'] == 'M' ? Icons.male : Icons.female,
-              color: idaGreen, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-              child: Text(tl(context, w['name'] ?? ''),
-                  style: const TextStyle(
-                      fontSize: 13.5, fontWeight: FontWeight.w600),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1)),
-          if (morning != null)
-            Flexible(
-              child: Text(
-                  '₹${morning.toStringAsFixed(2)} ${loc.faWaThisMorningSuffix}',
-                  style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.grey.shade500,
-                      fontWeight: FontWeight.w500),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1),
-            ),
-        ]),
-        if (lines.isNotEmpty) ...[
-          const SizedBox(height: 6),
-          ...lines.map((g) {
-            final farmName = tl(
-                context,
-                farms.firstWhere((f) => f['id'] == g.farmId,
-                        orElse: () => {})['name'] ??
-                    '—');
-            final workTypeNameRaw = workTypes.firstWhere(
-                (wt) => wt['id'] == g.workTypeId,
-                orElse: () => {})['name'];
-            final workTypeBase =
-                workTypeNameRaw != null ? tl(context, workTypeNameRaw) : null;
-            final workTypeName = g.detailCtrl.text.trim().isEmpty
-                ? workTypeBase
-                : _withDetail(workTypeBase, g.detailCtrl.text);
-            final amount =
-                double.tryParse(g.rateCtrls[workerId]?.text.trim() ?? '') ?? 0;
-            return Padding(
-              padding: const EdgeInsets.only(left: 26, bottom: 4),
-              child: Row(children: [
-                Expanded(
-                    child: Text(
-                        '$farmName${workTypeName != null ? ' · $workTypeName' : ''}',
-                        style: TextStyle(
-                            fontSize: 12, color: Colors.grey.shade700),
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1)),
-                Text('₹${amount.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: idaDark)),
-              ]),
-            );
-          }),
-          Padding(
-            padding: const EdgeInsets.only(left: 26, top: 2),
-            child: Row(children: [
-              Text('${loc.faWaSubtotal}: ₹${subtotal.toStringAsFixed(2)}',
-                  style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: matches == false
-                          ? Colors.orange.shade800
-                          : idaGreen)),
-              if (matches == false)
-                const Padding(
-                    padding: EdgeInsets.only(left: 6),
-                    child: Icon(Icons.error_outline,
-                        size: 13, color: Colors.orange)),
-              if (matches == true)
-                const Padding(
-                    padding: EdgeInsets.only(left: 6),
-                    child: Icon(Icons.check_circle, size: 13, color: idaGreen)),
-            ]),
-          ),
-        ],
-        const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            icon: Icon(lines.isEmpty ? Icons.add : Icons.edit_outlined,
-                size: 15, color: idaGreen),
-            label: Text(lines.isEmpty ? loc.faWaAssignTask : loc.faWaEditTasks,
-                style: const TextStyle(
-                    color: idaGreen,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12.5)),
-            style: OutlinedButton.styleFrom(
-                foregroundColor: idaGreen,
-                side: const BorderSide(color: idaGreen),
-                padding: const EdgeInsets.symmetric(vertical: 8)),
-            onPressed: () => _openMultiTaskSheet(workerId),
-          ),
-        ),
-        const SizedBox(height: 6),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            icon: const Icon(Icons.person_off_outlined,
-                size: 15, color: Color(0xFFC0392B)),
-            label: Text(loc.faWaDidNotWork,
-                style: const TextStyle(
-                    color: Color(0xFFC0392B),
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12.5)),
-            style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFC0392B),
-                side: const BorderSide(color: Color(0xFFC0392B)),
-                padding: const EdgeInsets.symmetric(vertical: 8)),
-            onPressed: () => _showDidNotWorkDialog(workerId, w['name'] ?? ''),
-          ),
-        ),
-      ]),
-    );
-  }
-
-  void _showDidNotWorkDialog(int workerId, String workerName) {
+  // ══════════════════════════ build ══════════════════════════
+  @override
+  Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context)!;
-    final reasonCtrl = TextEditingController();
-    bool submitting = false;
-    String? validationError;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text('${loc.faWaDidNotWork} — ${tl(context, workerName)}',
-              style:
-                  const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-          content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  loc.faWaDidNotWorkHint,
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: reasonCtrl,
-                  autofocus: true,
-                  maxLines: 2,
-                  decoration: InputDecoration(
-                      labelText: loc.faWaReasonLabel,
-                      isDense: true,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10))),
-                ),
-                if (validationError != null) ...[
-                  const SizedBox(height: 10),
-                  Text(validationError!,
-                      style: const TextStyle(
-                          color: Color(0xFFC0392B), fontSize: 12)),
-                ],
-              ]),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFC0392B)),
-              onPressed: submitting
-                  ? null
-                  : () async {
-                      if (reasonCtrl.text.trim().isEmpty) {
-                        setDialogState(
-                            () => validationError = loc.faWaReasonLabel);
-                        return;
-                      }
-                      setDialogState(() {
-                        submitting = true;
-                        validationError = null;
-                      });
-                      // Wrapped end to end - same reasoning as Add Missed
-                      // Worker's fix: an unexpected failure here must never
-                      // leave the button stuck spinning forever.
-                      try {
-                        final res = await Api.post(
-                          '/attendance/day/$_dateStr/did-not-work',
-                          body: {
-                            'worker_id': workerId,
-                            'reason': reasonCtrl.text.trim()
-                          },
-                        );
-                        if (res.statusCode == 200) {
-                          if (ctx.mounted) Navigator.pop(ctx);
-                          // Clean up any local draft groups this worker was
-                          // part of, so the UI doesn't still show them
-                          // half-assigned to a task after they've been removed
-                          // from the day entirely.
-                          setState(() {
-                            for (final g in groups) {
-                              if (g.workerIds.remove(workerId)) {
-                                g.rateCtrls.remove(workerId)?.dispose();
-                                g.noteCtrls.remove(workerId)?.dispose();
-                              }
-                            }
-                            groups.removeWhere((g) => g.workerIds.isEmpty);
-                          });
-                          await _saveDraft();
-                          await _loadDay();
-                        } else {
-                          setDialogState(() {
-                            submitting = false;
-                            validationError = Api.responseError(res);
-                          });
-                        }
-                      } catch (e) {
-                        setDialogState(() {
-                          submitting = false;
-                          validationError = 'Could not reach server: ${Api.errorText(e)}';
-                        });
-                      }
-                    },
-              child: submitting
-                  ? const SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : Text(loc.faWaDidNotWork,
-                      style: const TextStyle(color: Colors.white)),
-            ),
-          ],
+    Widget body;
+    Widget? bottom;
+    if (loading) {
+      body = const Center(child: CircularProgressIndicator(color: attGreen));
+    } else if (!_attOpen) {
+      body = Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const OfflineStatusBar(),
+            Text(error ?? loc.faWaMustApproveFirst,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: error != null ? Colors.red : Colors.grey.shade600,
+                    fontSize: 14)),
+          ]),
         ),
-      ),
-    );
-  }
-
-  Future<void> _showAddMissedWorkerDialog() async {
-    final loc = AppLocalizations.of(context)!;
-    final res = await Api.get('/farm-workers');
-    if (res.statusCode != 200) return;
-    final allWorkers = List<Map<String, dynamic>>.from(jsonDecode(res.body));
-    final presentIds = presentWorkers.map((p) => p['worker_id']).toSet();
-    // Only workers NOT already on today's present list - by definition,
-    // this dialog exists specifically for someone missing from it.
-    final available = allWorkers
-        .where((w) => !presentIds.contains(w['id']))
-        .toList()
-      ..sort((a, b) => (a['name'] ?? '')
-          .toString()
-          .toLowerCase()
-          .compareTo((b['name'] ?? '').toString().toLowerCase()));
-    if (available.isEmpty || !mounted) return;
-
-    int? selectedWorkerId = available.first['id'];
-    int? selectedFarmId = farms.isNotEmpty ? farms.first['id'] : null;
-    int? selectedWorkTypeId;
-    // Defaults to the selected worker's daily_wage, same fallback the
-    // existing Assign Task sheet already uses for a worker with no
-    // morning_amount - matching the established pattern rather than
-    // leaving this blank, which is what silently broke submission
-    // before (an empty rate parsed to null, and the button did
-    // nothing with zero feedback).
-    final rateCtrl = TextEditingController(
-        text: available.first['daily_wage']?.toString() ?? '');
-    bool rateManuallyEdited = false;
-    final reasonCtrl = TextEditingController();
-    bool submitting = false;
-    String? validationError;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(loc.faWaAddMissedWorker,
-              style:
-                  const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-          content: SingleChildScrollView(
-            child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(loc.faWaAddMissedWorkerHint,
-                      style:
-                          TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                  const SizedBox(height: 14),
-                  DropdownButtonFormField<int>(
-                    value: selectedWorkerId,
-                    decoration: InputDecoration(
-                        labelText: loc.faWaWorkerLabel,
-                        isDense: true,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10))),
-                    items: available
-                        .map<DropdownMenuItem<int>>((w) => DropdownMenuItem(
-                            value: w['id'],
-                            child: Text(tl(context, w['name'] ?? ''))))
-                        .toList(),
-                    onChanged: (v) => setDialogState(() {
-                      selectedWorkerId = v;
-                      // Update the default rate to match the newly-selected
-                      // worker - but only if the field hasn't been manually
-                      // touched, per "defaulted... unless changed".
-                      if (!rateManuallyEdited) {
-                        final w = available.firstWhere((w) => w['id'] == v,
-                            orElse: () => {});
-                        rateCtrl.text = w['daily_wage']?.toString() ?? '';
-                      }
-                    }),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<int>(
-                    value: selectedFarmId,
-                    decoration: InputDecoration(
-                        labelText: loc.faWaFarmLabel,
-                        isDense: true,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10))),
-                    items: farms
-                        .map<DropdownMenuItem<int>>((f) => DropdownMenuItem(
-                            value: f['id'],
-                            child: Text(tl(context, f['name'] ?? ''))))
-                        .toList(),
-                    onChanged: (v) => setDialogState(() => selectedFarmId = v),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<int>(
-                    value: selectedWorkTypeId,
-                    decoration: InputDecoration(
-                        labelText: loc.faWaWorkTypeOptionalLabel,
-                        isDense: true,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10))),
-                    items: workTypes
-                        .map<DropdownMenuItem<int>>((wt) => DropdownMenuItem(
-                            value: wt['id'],
-                            child: Text(tl(context, wt['name'] ?? ''))))
-                        .toList(),
-                    onChanged: (v) =>
-                        setDialogState(() => selectedWorkTypeId = v),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: rateCtrl,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    onChanged: (_) => rateManuallyEdited = true,
-                    decoration: InputDecoration(
-                        labelText: loc.faWaRateLabel,
-                        isDense: true,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10))),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: reasonCtrl,
-                    maxLines: 2,
-                    decoration: InputDecoration(
-                        labelText: loc.faWaReasonLabel,
-                        isDense: true,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10))),
-                  ),
-                  if (validationError != null) ...[
-                    const SizedBox(height: 10),
-                    Text(validationError!,
-                        style: const TextStyle(
-                            color: Color(0xFFC0392B), fontSize: 12)),
-                  ],
-                ]),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx), child: Text(loc.cancel)),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: idaGreen),
-              onPressed: submitting
-                  ? null
-                  : () async {
-                      final rate = double.tryParse(rateCtrl.text.trim());
-                      // Visible feedback on every validation failure - the
-                      // previous version returned silently here, which is
-                      // exactly what made a missing rate look like the button
-                      // simply did nothing.
-                      if (selectedWorkerId == null) {
-                        setDialogState(
-                            () => validationError = loc.faWaWorkerLabel);
-                        return;
-                      }
-                      if (selectedFarmId == null) {
-                        setDialogState(
-                            () => validationError = loc.faWaFarmLabel);
-                        return;
-                      }
-                      if (rate == null) {
-                        setDialogState(
-                            () => validationError = loc.faWaRateLabel);
-                        return;
-                      }
-                      if (reasonCtrl.text.trim().isEmpty) {
-                        setDialogState(
-                            () => validationError = loc.faWaReasonLabel);
-                        return;
-                      }
-                      setDialogState(() {
-                        submitting = true;
-                        validationError = null;
-                      });
-                      // Wrapped end to end - a network hiccup, timeout, or any
-                      // other unexpected failure here must never leave the
-                      // button stuck showing its spinner forever with
-                      // submitting stuck true and no way to retry or see why.
-                      try {
-                        final res2 = await Api.post(
-                          '/attendance/day/$_dateStr/retroactive-add',
-                          body: {
-                            'worker_id': selectedWorkerId,
-                            'farm_id': selectedFarmId,
-                            'work_type_id': selectedWorkTypeId,
-                            'rate': rate,
-                            'reason': reasonCtrl.text.trim(),
-                          },
-                        );
-                        if (res2.statusCode == 200) {
-                          if (ctx.mounted) Navigator.pop(ctx);
-                          await _loadDay();
-                        } else {
-                          setDialogState(() {
-                            submitting = false;
-                            validationError = Api.responseError(res2);
-                          });
-                        }
-                      } catch (e) {
-                        setDialogState(() {
-                          submitting = false;
-                          validationError = 'Could not reach server: ${Api.errorText(e)}';
-                        });
-                      }
-                    },
-              child: submitting
-                  ? const SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : Text(loc.save, style: const TextStyle(color: Colors.white)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _groupCard(_TaskGroup g, AppLocalizations loc) {
-    final farmName = tl(
-        context,
-        farms.firstWhere((f) => f['id'] == g.farmId,
-                orElse: () => {})['name'] ??
-            '—');
-    final workTypeNameRaw = workTypes.firstWhere((w) => w['id'] == g.workTypeId,
-        orElse: () => {})['name'];
-    final workTypeName =
-        workTypeNameRaw != null ? tl(context, workTypeNameRaw) : null;
-    final total = g.workerIds.fold(0.0,
-        (s, id) => s + (double.tryParse(g.rateCtrls[id]?.text ?? '') ?? 0));
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFE0E7D8))),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Expanded(
-            child: Text(
-                '$farmName${workTypeName != null ? ' · $workTypeName' : ''}'
-                '${g.crop != null && g.farmId != null && _cropText(g.crop, _farmCrops[g.farmId] ?? []).isNotEmpty ? ' · ${_cropText(g.crop, _farmCrops[g.farmId] ?? [])}' : ''}',
-                style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                    color: idaGreen)),
-          ),
-          Text('₹${total.toStringAsFixed(2)}',
-              style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w700, color: idaDark)),
-          IconButton(
-              icon:
-                  const Icon(Icons.edit_outlined, size: 18, color: Colors.grey),
-              onPressed: () => _editGroup(g),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints()),
-        ]),
-        if (g.detailCtrl.text.trim().isNotEmpty) ...[
-          const SizedBox(height: 4),
-          Text('${loc.faWorkDetail}: ${g.detailCtrl.text.trim()}',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey.shade800,
-                  fontStyle: FontStyle.italic)),
-        ],
-        const SizedBox(height: 6),
-        Text(
-            (g.workerIds.toList()
-                  ..sort((a, b) => (presentWorkers.firstWhere(
-                              (p) => p['worker_id'] == a,
-                              orElse: () => {})['name'] ??
-                          '')
-                      .toString()
-                      .toLowerCase()
-                      .compareTo((presentWorkers.firstWhere(
-                                  (p) => p['worker_id'] == b,
-                                  orElse: () => {})['name'] ??
-                              '')
-                          .toString()
-                          .toLowerCase())))
-                .map((id) => tl(
-                    context, presentWorkers.firstWhere((p) => p['worker_id'] == id, orElse: () => {})['name'] ?? ''))
-                .join(', '),
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-      ]),
-    );
-  }
-
-  Widget _totalComparisonBanner(AppLocalizations loc) {
-    final total = _liveTotal;
-    final expected = expectedTotalWage;
-    final diff = expected != null ? total - expected : null;
-    final matches = diff == null ? null : diff.abs() < 0.01;
-    String label;
-    if (expected == null) {
-      label = '${loc.faWaAllocatedSoFarPrefix}: ₹${total.toStringAsFixed(2)}';
-    } else if (matches == true) {
-      label =
-          '${loc.faWaAllocatedSoFarPrefix}: ₹${total.toStringAsFixed(2)} — ${loc.faWaMatchesExpectedSuffix} ₹${expected.toStringAsFixed(2)} ${loc.faWaExpectedSuffix}';
-    } else if (diff! > 0) {
-      label =
-          '${loc.faWaAllocatedSoFarPrefix}: ₹${total.toStringAsFixed(2)} — ₹${diff.toStringAsFixed(2)} ${loc.faWaExcessOverSuffix} ₹${expected.toStringAsFixed(2)} ${loc.faWaExpectedSuffix}';
+      );
+    } else if (_canBuild) {
+      body = _builderBody(loc);
+      bottom = _builderBar();
     } else {
-      label =
-          '${loc.faWaAllocatedSoFarPrefix}: ₹${total.toStringAsFixed(2)} — ₹${diff.abs().toStringAsFixed(2)} ${loc.faWaLessThanSuffix} ₹${expected.toStringAsFixed(2)} ${loc.faWaExpectedSuffix}';
+      body = _sheetBody(loc);
+      bottom = _bulkBar();
     }
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: matches == false
-            ? const Color(0xFFFEF3DC)
-            : const Color(0xFFE8F5E2),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(children: [
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: matches == false ? const Color(0xFF92600A) : idaDark),
+    return Scaffold(
+      backgroundColor: const Color(0xFFF4F7F2),
+      appBar: AppBar(
+        backgroundColor: attDark,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Text(
+            '${loc.faWaTitle} · ${DateFormat('dd MMM').format(widget.attendanceDate)}',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        actions: [
+          if (!loading && _attOpen && _canBuild)
+            IconButton(
+              icon: const Icon(Icons.content_copy_outlined),
+              tooltip: 'Copy yesterday',
+              onPressed: busy == null ? _copyYesterday : null,
+            ),
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'Change log',
+            onPressed: () async {
+              await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) =>
+                          AttendanceChangeLogScreen(date: widget.attendanceDate)));
+              if (mounted) _loadDay();
+            },
           ),
-        ),
-        if (matches == true)
-          const Icon(Icons.check_circle, color: idaGreen, size: 18),
-        if (matches == false)
-          const Icon(Icons.error_outline, color: Color(0xFF92600A), size: 18),
-      ]),
-    );
-  }
-
-  // Men / women split for the review (Oct 2026): gender from the present
-  // list, else from the allocation row.
-  String _genderOf(dynamic workerId, [dynamic fallback]) {
-    final p = presentWorkers.firstWhere((p) => p['worker_id'] == workerId,
-        orElse: () => <String, dynamic>{});
-    final g = (p['gender'] ?? fallback)?.toString();
-    return g == 'M' || g == 'F' ? g! : 'X';
-  }
-
-  String _rs(double v) =>
-      '₹${v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2)}';
-
-  String _genderLabel(AppLocalizations loc, String g) =>
-      g == 'M' ? loc.faMaleFull : g == 'F' ? loc.faFemaleFull : '—';
-
-  Widget _genderHead(String text, String? amount, {bool small = false}) =>
-      Container(
-        margin: EdgeInsets.only(top: small ? 4 : 6, bottom: small ? 0 : 6),
-        padding: EdgeInsets.symmetric(horizontal: small ? 14 : 10, vertical: small ? 5 : 7),
-        decoration: BoxDecoration(
-            color: const Color(0xFFEEF4E8),
-            borderRadius: BorderRadius.circular(small ? 0 : 8)),
-        child: Row(children: [
-          Expanded(
-            child: Text(text,
-                style: TextStyle(
-                    fontSize: small ? 11.5 : 12,
-                    fontWeight: FontWeight.w800,
-                    color: idaDark,
-                    letterSpacing: 0.3)),
-          ),
-          if (amount != null)
-            Text(amount,
-                style: TextStyle(
-                    fontSize: small ? 12 : 13,
-                    fontWeight: FontWeight.w800,
-                    color: idaDark)),
-        ]),
-      );
-
-  // Men / women / all × people, morning pay, allocated pay.
-  Widget _genderSplitCard(AppLocalizations loc) {
-    double morningOf(Map p) =>
-        double.tryParse((p['morning_amount'] ?? p['daily_wage'])?.toString() ?? '') ?? 0;
-    double allocOf(Map a) => double.tryParse(a['total_wage']?.toString() ?? '') ?? 0;
-    final rows = <(String, int, double, double)>[];
-    for (final g in ['M', 'F']) {
-      final ps = presentWorkers.where((p) => _genderOf(p['worker_id']) == g);
-      rows.add((
-        _genderLabel(loc, g),
-        ps.length,
-        ps.fold(0.0, (t, p) => t + morningOf(p)),
-        savedAllocations
-            .where((a) => _genderOf(a['worker_id'], a['worker_gender']) == g)
-            .fold(0.0, (t, a) => t + allocOf(a)),
-      ));
-    }
-    rows.add((
-      'All',
-      presentWorkers.length,
-      presentWorkers.fold(0.0, (t, p) => t + morningOf(p)),
-      savedAllocations.fold(0.0, (t, a) => t + allocOf(a)),
-    ));
-    const head = TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF6B7280));
-    Widget cell(String t, {bool bold = false, Color? color, TextAlign align = TextAlign.right}) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Text(t,
-              textAlign: align,
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
-                  color: color ?? idaDark)),
-        );
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFE0E7D8))),
-      child: Table(
-        columnWidths: const {
-          0: FlexColumnWidth(1.3),
-          1: FlexColumnWidth(0.8),
-          2: FlexColumnWidth(1.2),
-          3: FlexColumnWidth(1.2),
-        },
-        children: [
-          const TableRow(children: [
-            SizedBox(),
-            Text('People', textAlign: TextAlign.right, style: head),
-            Text('Morning', textAlign: TextAlign.right, style: head),
-            Text('Allocated', textAlign: TextAlign.right, style: head),
-          ]),
-          for (var i = 0; i < rows.length; i++)
-            TableRow(children: [
-              cell(rows[i].$1, bold: i == rows.length - 1, align: TextAlign.left),
-              cell('${rows[i].$2}', bold: i == rows.length - 1),
-              cell(_rs(rows[i].$3), bold: i == rows.length - 1),
-              cell(_rs(rows[i].$4),
-                  bold: true,
-                  color: (rows[i].$4 - rows[i].$3).abs() > 0.005
-                      ? const Color(0xFF92600A)
-                      : idaGreen),
-            ]),
         ],
       ),
+      body: Responsive.constrainedContent(context, body),
+      bottomNavigationBar: bottom,
     );
   }
 
-  Widget _readOnlyAllocations(AppLocalizations loc) {
-    final groupsByTask = <String, List<Map<String, dynamic>>>{};
-    for (final a in savedAllocations) {
-      final key = '${a['farm_name'] ?? ''}·${a['work_type_name'] ?? '—'}';
-      groupsByTask.putIfAbsent(key, () => []).add(a);
-    }
-    for (final list in groupsByTask.values) {
-      list.sort((a, b) => (a['worker_name'] ?? '')
-          .toString()
-          .toLowerCase()
-          .compareTo((b['worker_name'] ?? '').toString().toLowerCase()));
-    }
-    final sortedPerWorker = List<Map<String, dynamic>>.from(perWorker)
-      ..sort((a, b) => (a['name'] ?? '')
-          .toString()
-          .toLowerCase()
-          .compareTo((b['name'] ?? '').toString().toLowerCase()));
-    final total = savedAllocations.fold(
-        0.0, (s, a) => s + (double.tryParse(a['total_wage'].toString()) ?? 0));
-    double allocOf(Map a) => double.tryParse(a['total_wage']?.toString() ?? '') ?? 0;
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _genderSplitCard(loc),
-      if (perWorker.isNotEmpty) ...[
-        Text(loc.faWaRemarksHeader,
-            style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF6B7280),
-                letterSpacing: 0.6)),
-        const SizedBox(height: 4),
-        for (final g in ['M', 'F', 'X'])
-          if (sortedPerWorker.any((pw) => _genderOf(pw['worker_id']) == g)) ...[
-            _genderHead(
-                '${_genderLabel(loc, g).toUpperCase()} (${sortedPerWorker.where((pw) => _genderOf(pw['worker_id']) == g).length})',
-                null),
-            _tileGrid(
-                context,
-                sortedPerWorker
-                    .where((pw) => _genderOf(pw['worker_id']) == g)
-                    .map((pw) => _remarkRow(pw, loc))
-                    .toList()),
-          ],
-        const SizedBox(height: 18),
-      ],
-      Row(children: [
-        Text(loc.faWaAllocationsHeader,
-            style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF6B7280),
-                letterSpacing: 0.6)),
-        const Spacer(),
-        Text('${loc.faWaTotalPrefix}: ₹${total.toStringAsFixed(2)}',
-            style: const TextStyle(
-                fontSize: 12.5, fontWeight: FontWeight.w700, color: idaGreen)),
-      ]),
-      const SizedBox(height: 10),
-      ...groupsByTask.entries.map((entry) {
-        final parts = entry.key.split('·');
-        final farmName = tl(context, parts[0]);
-        final baseWorkType =
-            parts.length > 1 && parts[1] != '—' ? tl(context, parts[1]) : null;
-        final details = <String>[];
-        for (final a in entry.value) {
-          final d = (a['work_detail'] ?? '').toString().trim();
-          if (d.isNotEmpty && !details.contains(d)) details.add(d);
-        }
-        final workTypeName = details.isEmpty
-            ? baseWorkType
-            : _withDetail(baseWorkType, details.join('; '));
-        Widget personTile(Map<String, dynamic> a) {
-          final canMarkDidNotWork = canWriteAlloc &&
-              (allocationStatus == 'pending' ||
-                  (allocationStatus == 'approved' && isAdmin));
-          return ListTile(
-            dense: true,
-            title: Text(tl(context, a['worker_name'] ?? ''),
-                style: const TextStyle(
-                    fontSize: 13.5, fontWeight: FontWeight.w600)),
-            subtitle: a['notes'] != null && a['notes'].toString().isNotEmpty
-                ? Text(a['notes'],
-                    style: const TextStyle(fontSize: 11, color: Colors.orange))
-                : null,
-            trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text('₹${a['total_wage']}',
-                  style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: idaGreen)),
-              if (canMarkDidNotWork)
-                IconButton(
-                  icon: const Icon(Icons.person_off_outlined,
-                      size: 18, color: Color(0xFFC0392B)),
-                  tooltip: loc.faWaDidNotWork,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  onPressed: () => _showDidNotWorkDialog(
-                      a['worker_id'], a['worker_name'] ?? ''),
-                )
-              else
-                const SizedBox(width: 4),
-            ]),
-          );
-        }
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFE0E7D8))),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
-              child: Row(children: [
-                Expanded(
-                  child: Text(
-                      '$farmName${workTypeName != null ? ' · $workTypeName' : ''}',
-                      style: const TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: idaGreen)),
-                ),
-                Text(_rs(entry.value.fold(0.0, (t, a) => t + allocOf(a))),
-                    style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w800,
-                        color: idaGreen)),
-              ]),
-            ),
-            const Divider(height: 1),
-            for (final g in ['M', 'F', 'X'])
-              if (entry.value.any((a) => _genderOf(a['worker_id'], a['worker_gender']) == g)) ...[
-                _genderHead(
-                    '${_genderLabel(loc, g)} (${entry.value.where((a) => _genderOf(a['worker_id'], a['worker_gender']) == g).length})',
-                    _rs(entry.value
-                        .where((a) => _genderOf(a['worker_id'], a['worker_gender']) == g)
-                        .fold(0.0, (t, a) => t + allocOf(a))),
-                    small: true),
-                ...entry.value
-                    .where((a) => _genderOf(a['worker_id'], a['worker_gender']) == g)
-                    .map(personTile),
-              ],
-          ]),
-        );
-      }),
-      if (canReopenDay) ...[
-        const SizedBox(height: 16),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            icon: const Icon(Icons.person_add_alt_1, size: 16, color: idaGreen),
-            label: Text(loc.faWaAddMissedWorker,
-                style: const TextStyle(
-                    color: idaGreen,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13)),
-            style: OutlinedButton.styleFrom(
-                foregroundColor: idaGreen,
-                side: const BorderSide(color: idaGreen),
-                padding: const EdgeInsets.symmetric(vertical: 10)),
-            onPressed: _showAddMissedWorkerDialog,
-          ),
-        ),
-      ],
+  // ══════════════════════════ BUILDER (before / until submitted) ══════════════════════════
+  Widget _topMessages(AppLocalizations loc) {
+    return Column(children: [
+      const OfflineStatusBar(),
+      _offlineNotice(loc),
+      if (allocationStatus == 'returned')
+        _box(
+            'The work allocation was returned${(allocationAdminNote ?? '').isNotEmpty ? ': "$allocationAdminNote"' : '.'} Fix it and submit again.',
+            bg: const Color(0xFFFDE8E8),
+            fg: const Color(0xFFC0392B),
+            icon: Icons.undo),
+      if (error != null)
+        _box(error!,
+            bg: const Color(0xFFFDE8E8),
+            fg: const Color(0xFFC0392B),
+            icon: Icons.error_outline),
+      if (notice != null)
+        _box(notice!,
+            bg: const Color(0xFFE8F5E2),
+            fg: const Color(0xFF2C5E17),
+            icon: Icons.check_circle_outline),
     ]);
   }
 
-  Widget _remarkRow(Map<String, dynamic> pw, AppLocalizations loc) {
-    final remark = pw['remark'] as String?;
-    final diff =
-        pw['diff'] != null ? double.tryParse(pw['diff'].toString()) : null;
-    final breakNotes = List<String>.from(pw['break_notes'] ?? []);
-
-    Color bg;
-    Color fg;
-    String label;
-    switch (remark) {
-      case 'same':
-        bg = const Color(0xFFE8F5E2);
-        fg = idaGreen;
-        label = loc.faWaRemarkSame;
-        break;
-      case 'excess':
-        bg = const Color(0xFFFEF3DC);
-        fg = const Color(0xFF92600A);
-        label = '${loc.faWaRemarkExcess} ₹${diff?.toStringAsFixed(2)}';
-        break;
-      case 'less':
-        bg = const Color(0xFFFDE8E8);
-        fg = const Color(0xFFC0392B);
-        label = '${loc.faWaRemarkLess} ₹${diff?.abs().toStringAsFixed(2)}';
-        break;
-      case 'unallocated':
-        bg = const Color(0xFFFDE8E8);
-        fg = const Color(0xFFC0392B);
-        label = loc.faWaRemarkUnallocated;
-        break;
-      default:
-        bg = const Color(0xFFF4F7F2);
-        fg = Colors.grey.shade600;
-        label = loc.faWaRemarkNoMorning;
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFE0E7D8))),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Expanded(
-              child: Text(tl(context, pw['name'] ?? ''),
-                  style: const TextStyle(
-                      fontSize: 13.5, fontWeight: FontWeight.w600),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1)),
-          Flexible(
-            child: Text(
-              pw['morning_amount'] != null
-                  ? '₹${pw['morning_amount']} → ₹${pw['allocated_total'] ?? '—'}'
-                  : '₹${pw['allocated_total'] ?? '—'}',
-              style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
-            ),
-          ),
+  Widget _builderBody(AppLocalizations loc) {
+    final e = _entries;
+    final real = tasks.where((t) => t.workers.isNotEmpty).length;
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+        child: _topMessages(loc),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+        child: Row(children: [
+          _pill('Workers · ${presentWorkers.length}', tab == 0,
+              () => setState(() => tab = 0)),
+          _pill('Tasks · $real', tab == 1, () => setState(() => tab = 1)),
         ]),
-        const SizedBox(height: 6),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration:
-              BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
-          child: Text(label,
-              style: TextStyle(
-                  fontSize: 11.5, fontWeight: FontWeight.w700, color: fg)),
+      ),
+      Expanded(
+        child: RefreshIndicator(
+          color: attGreen,
+          onRefresh: _loadDay,
+          child: tab == 0 ? _workersList(e) : _tasksList(e),
         ),
-        if (breakNotes.isNotEmpty) ...[
-          const SizedBox(height: 6),
-          ...breakNotes.map((n) => Row(children: [
-                const Icon(Icons.timer_off_outlined,
-                    size: 13, color: Colors.orange),
-                const SizedBox(width: 4),
-                Expanded(
-                    child: Text('${loc.faWaBreakAttendanceNotePrefix}: $n',
-                        style: const TextStyle(
-                            fontSize: 11,
-                            color: Colors.orange,
-                            fontStyle: FontStyle.italic))),
-              ])),
+      ),
+    ]);
+  }
+
+  Widget _workersList(Map<int, List<(_Task, double)>> e) {
+    int cnt(String s) =>
+        presentWorkers.where((p) => _stateOf(e, _int(p['worker_id'])) == s).length;
+    final counts = {
+      'todo': cnt('todo'),
+      'done': cnt('done'),
+      'split': cnt('split'),
+      'all': presentWorkers.length,
+    };
+    final shown = presentWorkers.where((p) {
+      final s = q.trim().toLowerCase();
+      if (s.isNotEmpty && !'${p['name']}'.toLowerCase().contains(s)) return false;
+      return status == 'all' || _stateOf(e, _int(p['worker_id'])) == status;
+    }).toList();
+    final allOn = shown.isNotEmpty &&
+        shown.every((p) => sel.contains(_int(p['worker_id'])));
+    void selectShown(bool Function(Map) pred) => setState(() {
+          for (final p in shown.where(pred)) {
+            sel.add(_int(p['worker_id']));
+          }
+        });
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
+      children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: [
+            for (final f in const [
+              ['todo', 'To do'],
+              ['done', 'Done'],
+              ['split', 'Split'],
+              ['all', 'All']
+            ])
+              _pill('${f[1]} ${counts[f[0]]}', status == f[0],
+                  () => setState(() => status = f[0])),
+          ]),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _searchCtrl,
+          onChanged: (v) => setState(() => q = v),
+          decoration: InputDecoration(
+              hintText: 'Find by name',
+              prefixIcon: const Icon(Icons.search, size: 20),
+              isDense: true,
+              filled: true,
+              fillColor: Colors.white,
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
+        ),
+        const SizedBox(height: 6),
+        Wrap(spacing: 6, children: [
+          OutlinedButton(
+              onPressed: shown.isEmpty
+                  ? null
+                  : () => allOn
+                      ? setState(() => sel.clear())
+                      : selectShown((_) => true),
+              child: Text(allOn ? 'Clear' : 'Select all')),
+          OutlinedButton(
+              onPressed: () => selectShown((p) => p['gender'] == 'M'),
+              child: const Text('Men')),
+          OutlinedButton(
+              onPressed: () => selectShown((p) => p['gender'] == 'F'),
+              child: const Text('Women')),
+        ]),
+        if (leaveWorkers.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: _box(
+                '${leaveWorkers.length} paid, not working · ${attRs(leaveWorkers.fold<double>(0, (a, p) => a + _wage(p)))}. They are not allocated; the pay shows as leave with pay.',
+                bg: attAmberBg,
+                fg: attAmberFg,
+                icon: Icons.event_busy_outlined),
+          ),
+        const SizedBox(height: 6),
+        if (presentWorkers.isEmpty)
+          const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: Text('No one is on work today.'))),
+        if (presentWorkers.isNotEmpty && shown.isEmpty)
+          Padding(
+              padding: const EdgeInsets.all(24),
+              child: Center(
+                  child: Text(status == 'todo'
+                      ? 'Everyone is allocated.'
+                      : 'No one here.'))),
+        for (final p in shown) _workerTile(p, e),
+      ],
+    );
+  }
+
+  Widget _workerTile(Map<String, dynamic> p, Map<int, List<(_Task, double)>> e) {
+    final id = _int(p['worker_id']);
+    final st = _stateOf(e, id);
+    final es = e[id] ?? [];
+    final tot = _totalOf(e, id);
+    final wage = _wage(p);
+    final mismatch = st != 'todo' && (tot - wage).abs() > 0.005;
+    final on = sel.contains(id);
+    final kind = '${p['kind'] ?? 'present'}';
+    return InkWell(
+      onTap: () => _toggle(id),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.fromLTRB(4, 6, 10, 6),
+        decoration: BoxDecoration(
+            color: on ? const Color(0xFFEEF6E8) : Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: on ? attGreen : const Color(0xFFE0E7D8))),
+        child: Row(children: [
+          Checkbox(
+              value: on,
+              activeColor: attGreen,
+              onChanged: (_) => _toggle(id)),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Flexible(
+                  child: Text(tl(context, '${p['name']}'),
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 14.5, fontWeight: FontWeight.w700)),
+                ),
+                if (attIsPerm(p)) const AttPermTag(),
+                if (attIsPaidAbsent(p)) const AttPaidTag(),
+              ]),
+              Text(
+                  '${p['gender'] == 'F' ? 'Woman' : 'Man'} · ${attRs(wage)}${kind != 'present' ? ' · ${attKindTag(kind).text}' : ''}',
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+            ]),
+          ),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            if (st == 'todo')
+              const AttChip(
+                  text: 'Not allocated',
+                  bg: Color(0xFFFDE6D2),
+                  fg: Color(0xFF8C3F06)),
+            if (st == 'done')
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 130),
+                child: AttChip(
+                    text: _workName(es[0].$1),
+                    bg: const Color(0xFFE3F0DA),
+                    fg: attGreen),
+              ),
+            if (st == 'split')
+              AttChip(
+                  text: 'Split in ${es.length}',
+                  bg: const Color(0xFFDBE9FB),
+                  fg: const Color(0xFF17467F)),
+            if (mismatch)
+              Text('${attRs(tot)} of ${attRs(wage)}',
+                  style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                      color: attAmberFg)),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  Widget _tasksList(Map<int, List<(_Task, double)>> e) {
+    final real = tasks.where((t) => t.workers.isNotEmpty).toList();
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 24),
+      children: [
+        _checkCard(e),
+        if (real.isEmpty)
+          const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(
+                  child: Text(
+                      'No tasks yet. On the Workers tab, tick the people and press Assign.',
+                      textAlign: TextAlign.center))),
+        for (final t in real) _taskCard(t, e),
+      ],
+    );
+  }
+
+  Widget _checkCard(Map<int, List<(_Task, double)>> e) {
+    final wageTotal = attRound2(
+        presentWorkers.fold<double>(0, (a, p) => a + _wage(p)));
+    final allocTotal = attRound2(presentWorkers.fold<double>(
+        0, (a, p) => a + _totalOf(e, _int(p['worker_id']))));
+    final todo = presentWorkers
+        .where((p) => _stateOf(e, _int(p['worker_id'])) == 'todo')
+        .toList();
+    final stillWage = attRound2(todo.fold<double>(0, (a, p) => a + _wage(p)));
+    final off = presentWorkers.where((p) {
+      final id = _int(p['worker_id']);
+      return _stateOf(e, id) != 'todo' &&
+          (_totalOf(e, id) - _wage(p)).abs() > 0.005;
+    }).toList();
+    final byFarm = <String, double>{};
+    for (final t in tasks) {
+      if (t.workers.isEmpty) continue;
+      final a = t.workers.fold<double>(0, (s, w) => s + attNum(w.amount.text));
+      final n = _farmName(t.farmId);
+      byFarm[n] = (byFarm[n] ?? 0) + a;
+    }
+    return _card(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Check before submit',
+            style: TextStyle(
+                fontSize: 15, fontWeight: FontWeight.w800, color: attDark)),
+        const SizedBox(height: 6),
+        _kv('Pay of people on work', attRs(wageTotal)),
+        _kv('Allocated so far', attRs(allocTotal)),
+        _kv('Still to allocate',
+            todo.isEmpty ? 'None' : '${todo.length} · ${attRs(stillWage)}',
+            color: todo.isEmpty ? attGreen : const Color(0xFFB3500A)),
+        if (off.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+                color: const Color(0xFFFFF8E8),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFF0DBA6))),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                  '${off.length} ${off.length == 1 ? 'person differs' : 'people differ'} from their pay. This is allowed, the approver will see it.',
+                  style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: attAmberFg)),
+              for (final p in off)
+                Text(
+                    '${tl(context, '${p['name']}')}: ${attRs(_totalOf(e, _int(p['worker_id'])))} of ${attRs(_wage(p))}',
+                    style: const TextStyle(fontSize: 12, color: attAmberFg)),
+            ]),
+          ),
+        if (byFarm.isNotEmpty) ...[
+          const Divider(height: 18),
+          const Text('BY FARM',
+              style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: .5,
+                  color: Color(0xFF6B7280))),
+          for (final en in byFarm.entries) _kv(en.key, attRs(attRound2(en.value))),
         ],
       ]),
     );
   }
-}
 
-// ── Bottom sheet: build/edit one task group ─────────────────────────
-// ── One sheet per worker for Multi Task: add as many Farm + Work Type
-// lines as needed, "+" at the bottom, one Save for all of them. ─────
-class _SheetLine {
-  int? farmId;
-  int? workTypeId;
-  final TextEditingController rateCtrl;
-  final TextEditingController noteCtrl;
-  final TextEditingController detailCtrl;
-  _SheetLine(
-      {this.farmId, this.workTypeId, String? rate, String? note, String? detail})
-      : rateCtrl = TextEditingController(text: rate ?? ''),
-        noteCtrl = TextEditingController(text: note ?? ''),
-        detailCtrl = TextEditingController(text: detail ?? '');
-
-  void dispose() {
-    rateCtrl.dispose();
-    noteCtrl.dispose();
-    detailCtrl.dispose();
-  }
-}
-
-class _MultiTaskWorkerSheet extends StatefulWidget {
-  final int workerId;
-  final String workerName;
-  final String? workerGender;
-  final double? morningAmount;
-  final List farms;
-  final List workTypes;
-  final Color idaGreen;
-  final List<_TaskGroup> existingGroups;
-  final ValueChanged<List<_TaskGroup>> onSave;
-
-  const _MultiTaskWorkerSheet({
-    required this.workerId,
-    required this.workerName,
-    required this.workerGender,
-    required this.morningAmount,
-    required this.farms,
-    required this.workTypes,
-    required this.idaGreen,
-    required this.existingGroups,
-    required this.onSave,
-  });
-
-  @override
-  State<_MultiTaskWorkerSheet> createState() => _MultiTaskWorkerSheetState();
-}
-
-class _MultiTaskWorkerSheetState extends State<_MultiTaskWorkerSheet> {
-  static const idaDark = Color(0xFF1E4012);
-  late List<_SheetLine> lines;
-  String? _saveError;
-
-  @override
-  void initState() {
-    super.initState();
-    lines = widget.existingGroups
-        .map((g) => _SheetLine(
-              farmId: g.farmId,
-              workTypeId: g.workTypeId,
-              rate: g.rateCtrls[widget.workerId]?.text,
-              note: g.noteCtrls[widget.workerId]?.text,
-              detail: g.detailCtrl.text,
-            ))
-        .toList();
-    if (lines.isEmpty) lines.add(_SheetLine());
+  Widget _taskCard(_Task t, Map<int, List<(_Task, double)>> e) {
+    final total = attRound2(t.workers.fold<double>(0, (s, w) => s + attNum(w.amount.text)));
+    final n = t.workers.length;
+    return _card(
+      border: const Color(0xFFCFE0C2),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(_workName(t),
+                  style: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w800, color: attDark)),
+              Text(
+                  '${_farmName(t.farmId)} · $n ${n == 1 ? 'person' : 'people'}${t.detail.trim().isNotEmpty ? ' · ${t.detail.trim()}' : ''}',
+                  style: const TextStyle(fontSize: 12.5, color: Color(0xFF6B7280))),
+            ]),
+          ),
+          Text(attRs(total),
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+        ]),
+        const SizedBox(height: 6),
+        Wrap(spacing: 6, runSpacing: 0, children: [
+          OutlinedButton.icon(
+              onPressed: () => _editTask(t),
+              icon: const Icon(Icons.edit_outlined, size: 15),
+              label: const Text('Edit')),
+          if (sel.isNotEmpty)
+            OutlinedButton.icon(
+                onPressed: () => _addSelectedTo(t),
+                icon: const Icon(Icons.add, size: 15),
+                label: Text('Add ${sel.length} selected')),
+          TextButton.icon(
+              onPressed: () => _deleteTask(t),
+              icon: const Icon(Icons.delete_outline,
+                  size: 16, color: Color(0xFFC0392B)),
+              label: const Text('Delete',
+                  style: TextStyle(color: Color(0xFFC0392B)))),
+        ]),
+        const Divider(height: 14),
+        for (final w in t.workers) _taskWorkerRow(t, w, e),
+      ]),
+    );
   }
 
-  @override
-  void dispose() {
-    for (final l in lines) l.dispose();
-    super.dispose();
-  }
-
-  void _addLine() => setState(() => lines.add(_SheetLine()));
-
-  void _removeLine(_SheetLine line) {
-    setState(() {
-      lines.remove(line);
-      line.dispose();
-      if (lines.isEmpty) lines.add(_SheetLine());
-    });
-  }
-
-  Future<void> _breakAttendance(_SheetLine line) async {
-    final tempRate = TextEditingController(text: line.rateCtrl.text);
-    final tempNote = TextEditingController(text: line.noteCtrl.text);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        final loc = AppLocalizations.of(ctx)!;
-        return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(
-              '${loc.faWaBreakAttendanceTitlePrefix} — ${tl(context, widget.workerName)}',
-              style:
-                  const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text(loc.faWaBreakHint,
-                style: const TextStyle(fontSize: 12.5, color: Colors.grey)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: tempRate,
+  Widget _taskWorkerRow(_Task t, _TW w, Map<int, List<(_Task, double)>> e) {
+    final p = _person(w.workerId);
+    final split = (e[w.workerId]?.length ?? 0) > 1;
+    final tot = _totalOf(e, w.workerId);
+    final wage = _wageOf(w.workerId);
+    final bad = (tot - wage).abs() > 0.005;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Row(children: [
+              Flexible(
+                child: Text(_nameOf(w.workerId),
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w700)),
+              ),
+              if (p != null && attIsPerm(p)) const AttPermTag(),
+              if (split)
+                const Padding(
+                  padding: EdgeInsets.only(left: 6),
+                  child: AttChip(
+                      text: 'split',
+                      bg: Color(0xFFDBE9FB),
+                      fg: Color(0xFF17467F)),
+                ),
+            ]),
+          ),
+          SizedBox(
+            width: 96,
+            child: TextField(
+              controller: w.amount,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+              onChanged: (_) {
+                setState(() {});
+                _persist();
+              },
               decoration: InputDecoration(
-                  labelText: loc.faWaReducedAmountLabel,
+                  prefixText: '₹',
+                  isDense: true,
                   border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10))),
+                      borderRadius: BorderRadius.circular(8))),
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: tempNote,
-              maxLines: 2,
-              decoration: InputDecoration(
-                  hintText: loc.faWaReasonHint,
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10))),
+          ),
+          IconButton(
+            tooltip: 'Take out of this task',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.close, size: 18),
+            onPressed: () => _removeFrom(t, w.workerId),
+          ),
+        ]),
+        if (split && bad)
+          Row(children: [
+            Text('${attRs(tot)} of ${attRs(wage)}',
+                style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: attAmberFg)),
+            TextButton(
+              style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8)),
+              onPressed: () {
+                _rebalance(w.workerId);
+                _after();
+              },
+              child: const Text('Split equally',
+                  style: TextStyle(fontWeight: FontWeight.w800)),
             ),
           ]),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: Text(loc.cancel)),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange.shade700),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(loc.faWaApply,
-                  style: const TextStyle(color: Colors.white)),
-            ),
-          ],
-        );
-      },
+      ]),
     );
-    if (confirmed == true) {
-      setState(() {
-        line.rateCtrl.text = tempRate.text;
-        line.noteCtrl.text = tempNote.text;
-      });
-    }
   }
 
-  double get _subtotal => lines.fold(
-      0.0, (s, l) => s + (double.tryParse(l.rateCtrl.text.trim()) ?? 0));
+  Widget _builderBar() {
+    final e = _entries;
+    final todo = presentWorkers
+        .where((p) => _stateOf(e, _int(p['worker_id'])) == 'todo')
+        .length;
+    final off = presentWorkers.where((p) {
+      final id = _int(p['worker_id']);
+      return _stateOf(e, id) != 'todo' && (_totalOf(e, id) - _wage(p)).abs() > 0.005;
+    }).length;
+    final hint = todo > 0
+        ? '$todo still to allocate'
+        : off > 0
+            ? '$off differ from their pay (allowed)'
+            : 'Everyone is allocated';
+    final working = busy != null;
+    return Material(
+      elevation: 8,
+      color: Colors.white,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(hint,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: todo > 0 ? const Color(0xFF8C3F06) : attGreen)),
+            const SizedBox(height: 6),
+            Row(children: [
+              OutlinedButton.icon(
+                onPressed: working ? null : () => _save(false),
+                icon: const Icon(Icons.save_outlined, size: 17),
+                label: Text(busy == 'draft' ? 'Saving…' : 'Draft'),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: sel.isEmpty ? null : _assignSheet,
+                  child: Text(sel.isEmpty ? 'Assign…' : 'Assign ${sel.length}…'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: attGreen,
+                      padding: const EdgeInsets.symmetric(vertical: 12)),
+                  onPressed: working ? null : () => _save(true),
+                  child: Text(busy == 'submit' ? 'Sending…' : 'Submit',
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
 
-  void _save() {
-    final loc = AppLocalizations.of(context)!;
-    final validLines = lines.where((l) => l.farmId != null).toList();
-    if (validLines.isEmpty) {
-      setState(() => _saveError = loc.faWaErrAddFarm);
-      return;
-    }
-    for (final l in validLines) {
-      if (double.tryParse(l.rateCtrl.text.trim()) == null) {
-        setState(() => _saveError = loc.faWaErrAmountEveryLine);
-        return;
-      }
-    }
-    final newGroups = validLines.map((l) {
-      final g = _TaskGroup()..isTask1 = false;
-      g.farmId = l.farmId;
-      g.workTypeId = l.workTypeId;
-      g.workerIds.add(widget.workerId);
-      g.rateCtrls[widget.workerId] =
-          TextEditingController(text: l.rateCtrl.text);
-      g.noteCtrls[widget.workerId] =
-          TextEditingController(text: l.noteCtrl.text);
-      g.detailCtrl.text = l.detailCtrl.text.trim();
-      return g;
+  // ══════════════════════════ SHEET (submitted / approved) ══════════════════════════
+  List<({Map<String, dynamic> p, int id, List<Map<String, dynamic>> tasks, double wage, double total, Map<String, dynamic>? change})>
+      _rows() {
+    return [
+      for (final p in presentWorkers)
+        (() {
+          final id = _int(p['worker_id']);
+          final ts = savedAllocations.where((a) => _int(a['worker_id']) == id).toList();
+          Map<String, dynamic>? ch;
+          for (final a in amendments) {
+            if (_int(a['worker_id']) == id) ch = a;
+          }
+          return (
+            p: p,
+            id: id,
+            tasks: ts,
+            wage: _wage(p),
+            total: attRound2(ts.fold<double>(
+                0, (s, a) => s + attNum(a['total_wage'] ?? a['wage_snapshot']))),
+            change: ch,
+          );
+        })()
+    ];
+  }
+
+  String _taskLine(Map a) {
+    final w = '${a['work_type_name'] ?? 'Work'}';
+    final d = '${a['work_detail'] ?? ''}'.trim();
+    return '${d.isEmpty ? w : '$w — $d'} · ${a['farm_name'] ?? ''}';
+  }
+
+  Widget _sheetBody(AppLocalizations loc) {
+    final rows = _rows();
+    final none = rows.where((r) => r.tasks.isEmpty).length;
+    final split = rows.where((r) => r.tasks.length > 1).length;
+    final changed = rows.where((r) => r.change != null).length;
+    final shown = rows.where((r) {
+      final s = q.trim().toLowerCase();
+      if (s.isNotEmpty && !'${r.p['name']}'.toLowerCase().contains(s)) return false;
+      if (filter == 'none') return r.tasks.isEmpty;
+      if (filter == 'split') return r.tasks.length > 1;
+      if (filter == 'changed') return r.change != null;
+      return true;
     }).toList();
-    widget.onSave(newGroups);
-    Navigator.pop(context);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final loc = AppLocalizations.of(context)!;
-    return DraggableScrollableSheet(
-      initialChildSize: 0.85,
-      minChildSize: 0.5,
-      maxChildSize: 0.95,
-      builder: (ctx, scrollCtrl) => Container(
-        decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-        padding:
-            EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: Column(children: [
-          Container(
-              margin: const EdgeInsets.symmetric(vertical: 10),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2))),
-          Expanded(
-            child: ListView(
-              controller: scrollCtrl,
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              children: [
-                Row(children: [
-                  Icon(widget.workerGender == 'M' ? Icons.male : Icons.female,
-                      color: idaDark, size: 18),
-                  const SizedBox(width: 6),
-                  Expanded(
+    final allocated = attRound2(rows.fold<double>(0, (s, r) => s + r.total));
+    final wageTotal = attRound2(rows.fold<double>(0, (s, r) => s + r.wage));
+    final byFarm = <String, double>{};
+    for (final a in savedAllocations) {
+      final n = '${a['farm_name'] ?? 'Farm ${a['farm_id']}'}';
+      byFarm[n] = (byFarm[n] ?? 0) + attNum(a['total_wage'] ?? a['wage_snapshot']);
+    }
+    final filters = [
+      ['all', 'All ${rows.length}'],
+      ['none', 'Not allocated $none'],
+      ['split', 'Split $split'],
+      if (pendAlloc > 0) ['changed', 'Changed $changed'],
+    ];
+    return RefreshIndicator(
+      color: attGreen,
+      onRefresh: _loadDay,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 24),
+        children: [
+          const OfflineStatusBar(),
+          _offlineNotice(loc),
+          if (error != null)
+            _box(error!,
+                bg: const Color(0xFFFDE8E8),
+                fg: const Color(0xFFC0392B),
+                icon: Icons.error_outline),
+          if (notice != null)
+            _box(notice!,
+                bg: const Color(0xFFE8F5E2),
+                fg: const Color(0xFF2C5E17),
+                icon: Icons.check_circle_outline),
+          if (allocationStatus == null)
+            const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(
                     child: Text(
-                        '${loc.faWaAssignTaskTitlePrefix} — ${tl(context, widget.workerName)}',
-                        style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: idaDark),
-                        overflow: TextOverflow.ellipsis),
-                  ),
-                  if (widget.morningAmount != null)
-                    Text(
-                        '₹${widget.morningAmount!.toStringAsFixed(2)} ${loc.faWaThisMorningSuffix}',
-                        style: TextStyle(
-                            fontSize: 11.5,
-                            color: Colors.grey.shade500,
-                            fontWeight: FontWeight.w600)),
-                ]),
-                const SizedBox(height: 4),
-                Text(loc.faWaWorkTypeAddAnotherHeader,
-                    style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF6B7280),
-                        letterSpacing: 0.6)),
-                const SizedBox(height: 10),
-                ...lines.map((line) => Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                          color: const Color(0xFFF4F7F2),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: const Color(0xFFE0E7D8))),
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(children: [
-                              Expanded(
-                                child: DropdownButtonFormField<int>(
-                                  value: widget.farms
-                                          .any((f) => f['id'] == line.farmId)
-                                      ? line.farmId
-                                      : null,
-                                  decoration: InputDecoration(
-                                      labelText: loc.faWaFarmDropdownLabel,
-                                      isDense: true,
-                                      filled: true,
-                                      fillColor: Colors.white,
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                              horizontal: 10, vertical: 10),
-                                      border: OutlineInputBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(8))),
-                                  items: widget.farms
-                                      .map<DropdownMenuItem<int>>((f) =>
-                                          DropdownMenuItem(
-                                              value: f['id'],
-                                              child: Text(
-                                                  tl(context, f['name']),
-                                                  style: const TextStyle(
-                                                      fontSize: 13))))
-                                      .toList(),
-                                  onChanged: (v) =>
-                                      setState(() => line.farmId = v),
-                                ),
-                              ),
-                              IconButton(
-                                  icon: const Icon(Icons.close,
-                                      size: 18, color: Colors.red),
-                                  onPressed: () => _removeLine(line),
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints()),
-                            ]),
-                            const SizedBox(height: 8),
-                            DropdownButtonFormField<int>(
-                              value: widget.workTypes
-                                      .any((w) => w['id'] == line.workTypeId)
-                                  ? line.workTypeId
-                                  : null,
-                              decoration: InputDecoration(
-                                  labelText: loc.faWaWorkTypeDropdownLabel,
-                                  isDense: true,
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 10),
-                                  border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(8))),
-                              items: widget.workTypes
-                                  .map<DropdownMenuItem<int>>((w) =>
-                                      DropdownMenuItem(
-                                          value: w['id'],
-                                          child: Text(tl(context, w['name']),
-                                              style: const TextStyle(
-                                                  fontSize: 13))))
-                                  .toList(),
-                              onChanged: (v) =>
-                                  setState(() => line.workTypeId = v),
-                            ),
-                            const SizedBox(height: 8),
-                            _WorkDetailField(
-                                controller: line.detailCtrl,
-                                options: _detailOptionsOf(
-                                    widget.workTypes, line.workTypeId)),
-                            const SizedBox(height: 8),
-                            Row(children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: line.rateCtrl,
-                                  keyboardType:
-                                      const TextInputType.numberWithOptions(
-                                          decimal: true),
-                                  onChanged: (_) => setState(() {}),
-                                  style: const TextStyle(fontSize: 13),
-                                  decoration: InputDecoration(
-                                      labelText: loc.faWaRateLabel,
-                                      hintText: loc.faWaEnterAmountHint,
-                                      hintStyle: const TextStyle(
-                                          fontSize: 12, color: Colors.orange),
-                                      isDense: true,
-                                      filled: true,
-                                      fillColor: Colors.white,
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                              horizontal: 10, vertical: 10),
-                                      border: OutlineInputBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(8))),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              TextButton.icon(
-                                onPressed: () => _breakAttendance(line),
-                                icon: const Icon(Icons.timer_off_outlined,
-                                    size: 15, color: Colors.orange),
-                                label: Text(loc.faWaBreakShort,
-                                    style: const TextStyle(
-                                        fontSize: 11.5, color: Colors.orange)),
-                                style: TextButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 6)),
-                              ),
-                            ]),
-                            if (line.noteCtrl.text.isNotEmpty) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                  '${loc.faWaNotePrefix}: ${line.noteCtrl.text}',
-                                  style: const TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.orange,
-                                      fontStyle: FontStyle.italic)),
-                            ],
-                          ]),
-                    )),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    icon: Icon(Icons.add, size: 18, color: widget.idaGreen),
-                    label: Text(loc.faWaAddAnotherWorkType,
-                        style: TextStyle(
-                            color: widget.idaGreen,
-                            fontWeight: FontWeight.w600)),
-                    style: OutlinedButton.styleFrom(
-                        foregroundColor: widget.idaGreen,
-                        side: BorderSide(color: widget.idaGreen),
-                        padding: const EdgeInsets.symmetric(vertical: 12)),
-                    onPressed: _addLine,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                      color: const Color(0xFFE8F5E2),
-                      borderRadius: BorderRadius.circular(10)),
-                  child: Row(children: [
-                    Expanded(
-                        child: Text(loc.faWaSubtotal,
-                            style: const TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w600,
-                                color: idaDark))),
-                    Text(
-                        '₹${_subtotal.toStringAsFixed(2)}${widget.morningAmount != null ? ' / ₹${widget.morningAmount!.toStringAsFixed(2)}' : ''}',
-                        style: const TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w700,
-                            color: idaDark)),
-                  ]),
-                ),
-                const SizedBox(height: 14),
-                if (_saveError != null) ...[
-                  Text(_saveError!,
-                      style:
-                          const TextStyle(color: Colors.red, fontSize: 12.5)),
-                  const SizedBox(height: 8),
-                ],
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: widget.idaGreen,
-                        padding: const EdgeInsets.symmetric(vertical: 13)),
-                    onPressed: _save,
-                    child: Text(loc.faWaSaveAllAllocations,
-                        style: const TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.w700)),
-                  ),
-                ),
-              ],
+                        "Work hasn't been allocated yet, and you can't allocate it.",
+                        textAlign: TextAlign.center))),
+          if (allocationStatus == 'returned')
+            _box('Returned for correction: "${allocationAdminNote ?? ''}"',
+                bg: const Color(0xFFFDE8E8),
+                fg: const Color(0xFFC0392B),
+                icon: Icons.undo),
+          if (pendAlloc > 0)
+            _box(
+                '$pendAlloc ${pendAlloc == 1 ? 'change is' : 'changes are'} waiting for re-approval. Everything else stays approved.',
+                bg: attAmberBg,
+                fg: attAmberFg,
+                icon: Icons.schedule),
+          if (allocationStatus == 'approved')
+            _box(
+                'Work allocation approved. This day is complete.${(allocationAdminNote ?? '').isNotEmpty ? ' Earlier changes were rejected: "$allocationAdminNote".' : ''}',
+                bg: const Color(0xFFE8F5E2),
+                fg: const Color(0xFF2C5E17),
+                icon: Icons.check_circle_outline),
+          if (allocationStatus == 'pending' && pendAlloc == 0 && !canApproveAlloc)
+            _box('Waiting for approval. A reviewer will check this allocation.',
+                bg: attAmberBg, fg: attAmberFg, icon: Icons.schedule),
+          if (allocationStatus == 'pending' && pendAlloc == 0 && canApproveAlloc)
+            _firstDecisionCard(),
+          if (allocationStatus == 'pending' && pendAlloc > 0 && canApproveAlloc)
+            _changeReviewCard(),
+          if (allocationStatus != null) ...[
+            if (none > 0)
+              _box(
+                  '$none ${none == 1 ? 'person is' : 'people are'} on work but not allocated to any task.',
+                  bg: const Color(0xFFFFF4EC),
+                  fg: const Color(0xFF8C3F06),
+                  icon: Icons.warning_amber_rounded,
+                  action: _mayChange
+                      ? TextButton(
+                          onPressed: () => setState(() => filter = 'none'),
+                          child: const Text('Show them'))
+                      : null),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                for (final f in filters)
+                  _pill(f[1], filter == f[0], () => setState(() => filter = f[0])),
+              ]),
             ),
-          ),
-        ]),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => q = v),
+              decoration: InputDecoration(
+                  hintText: 'Search worker',
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  isDense: true,
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10))),
+            ),
+            if (_mayChange)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: shown.isEmpty
+                      ? null
+                      : () => setState(() {
+                            final all = shown.every((r) => sel.contains(r.id));
+                            if (all) {
+                              sel.clear();
+                            } else {
+                              sel.addAll(shown.map((r) => r.id));
+                            }
+                          }),
+                  child: Text(shown.isNotEmpty && shown.every((r) => sel.contains(r.id))
+                      ? 'Clear selection'
+                      : 'Select all shown'),
+                ),
+              ),
+            const SizedBox(height: 4),
+            if (shown.isEmpty)
+              const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: Text('No one here.'))),
+            for (final r in shown) _sheetRow(r),
+            const SizedBox(height: 6),
+            _card(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Summary',
+                    style: TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w800, color: attDark)),
+                const SizedBox(height: 4),
+                _kv('Pay of people on work', attRs(wageTotal)),
+                _kv('Allocated', attRs(allocated)),
+                if (byFarm.isNotEmpty) ...[
+                  const Divider(height: 16),
+                  for (final en in byFarm.entries)
+                    _kv(en.key, attRs(attRound2(en.value))),
+                ],
+              ]),
+            ),
+            if (!canCorrectDay && _tracked)
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text(
+                    'You can view this day. Changing an approved day needs the "Correct approved day" permission.',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+              ),
+          ],
+        ],
       ),
     );
   }
-}
 
-class _TaskGroupSheet extends StatefulWidget {
-  final _TaskGroup group;
-  final List farms;
-  final List workTypes;
-  final List<Map<String, dynamic>> allPresent;
-  final List<Map<String, dynamic>> unallocatedExcludingThisGroup;
-  final Color idaGreen;
-  final bool prefillRate;
-  final bool isAdmin;
-  final String title;
-  final ValueChanged<_TaskGroup> onSave;
-  final VoidCallback? onDelete;
-
-  const _TaskGroupSheet({
-    required this.group,
-    required this.farms,
-    required this.workTypes,
-    required this.allPresent,
-    required this.unallocatedExcludingThisGroup,
-    required this.idaGreen,
-    required this.isAdmin,
-    required this.onSave,
-    this.prefillRate = true,
-    this.title = 'Task Group',
-    this.onDelete,
-  });
-
-  @override
-  State<_TaskGroupSheet> createState() => _TaskGroupSheetState();
-}
-
-class _TaskGroupSheetState extends State<_TaskGroupSheet> {
-  static const idaDark = Color(0xFF1E4012);
-  int? farmId;
-  int? workTypeId;
-  String? _saveError;
-
-  @override
-  void initState() {
-    super.initState();
-    farmId = widget.group.farmId;
-    workTypeId = widget.group.workTypeId;
-  }
-
-  void _toggleWorker(int id) {
-    setState(() {
-      if (widget.group.workerIds.contains(id)) {
-        widget.group.workerIds.remove(id);
-        widget.group.rateCtrls.remove(id)?.dispose();
-        widget.group.noteCtrls.remove(id)?.dispose();
-      } else {
-        widget.group.workerIds.add(id);
-        final w = widget.allPresent
-            .firstWhere((p) => p['worker_id'] == id, orElse: () => {});
-        widget.group.rateCtrls[id] = TextEditingController(
-            text: widget.prefillRate
-                ? (w['morning_amount']?.toString() ??
-                    w['daily_wage']?.toString() ??
-                    '')
-                : '');
-        widget.group.noteCtrls[id] = TextEditingController();
-      }
-    });
-  }
-
-  Future<void> _breakAttendance(int workerId, String name) async {
-    final rateCtrl = widget.group.rateCtrls[workerId]!;
-    final noteCtrl = widget.group.noteCtrls[workerId]!;
-    final tempRate = TextEditingController(text: rateCtrl.text);
-    final tempNote = TextEditingController(
-        text: noteCtrl.text.isNotEmpty ? noteCtrl.text : '');
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        final loc = AppLocalizations.of(ctx)!;
-        return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(
-              '${loc.faWaBreakAttendanceTitlePrefix} — ${tl(context, name)}',
-              style:
-                  const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text(loc.faWaBreakHint,
-                style: const TextStyle(fontSize: 12.5, color: Colors.grey)),
-            const SizedBox(height: 12),
-            TextField(
-              controller: tempRate,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              decoration: InputDecoration(
-                  labelText: loc.faWaReducedAmountLabel,
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10))),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: tempNote,
-              maxLines: 2,
-              decoration: InputDecoration(
-                  hintText: loc.faWaReasonHint,
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10))),
-            ),
+  Widget _sheetRow(({Map<String, dynamic> p, int id, List<Map<String, dynamic>> tasks, double wage, double total, Map<String, dynamic>? change}) r) {
+    final kind = '${r.p['kind'] ?? 'present'}';
+    final diff = r.tasks.isNotEmpty && (r.total - r.wage).abs() > 0.005;
+    final on = sel.contains(r.id);
+    final ch = r.change;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.fromLTRB(6, 8, 10, 8),
+      decoration: BoxDecoration(
+          color: ch != null
+              ? const Color(0xFFFFF8E8)
+              : (on ? const Color(0xFFEEF6E8) : Colors.white),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: on ? attGreen : const Color(0xFFE0E7D8))),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (_mayChange)
+          Checkbox(
+              value: on,
+              activeColor: attGreen,
+              onChanged: (_) => _toggle(r.id))
+        else
+          const SizedBox(width: 8),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Flexible(
+                child: Text(tl(context, '${r.p['name']}'),
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 14.5, fontWeight: FontWeight.w700)),
+              ),
+              if (attIsPerm(r.p)) const AttPermTag(),
+              const Spacer(),
+              Text(attRs(r.total),
+                  style: const TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w800)),
+              if (diff)
+                Text(' of ${attRs(r.wage)}',
+                    style: const TextStyle(fontSize: 11.5, color: attAmberFg)),
+            ]),
+            if (kind != 'present')
+              Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: AttChip.kind(kind)),
+            if (r.tasks.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: AttChip(
+                    text: 'Not allocated',
+                    bg: Color(0xFFFDE6D2),
+                    fg: Color(0xFF8C3F06)),
+              ),
+            for (final a in r.tasks)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Row(children: [
+                  Expanded(
+                      child: Text(_taskLine(a),
+                          style: const TextStyle(fontSize: 13))),
+                  if (r.tasks.length > 1)
+                    Text(attRs(attNum(a['total_wage'] ?? a['wage_snapshot'])),
+                        style: const TextStyle(
+                            fontSize: 12.5, fontWeight: FontWeight.w800)),
+                ]),
+              ),
+            if (ch != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                    '${(ch['reason'] ?? '').toString().isNotEmpty ? '"${ch['reason']}"' : ''}${ch['created_by_name'] != null ? ' · ${ch['created_by_name']}' : ''} · waiting approval',
+                    style: const TextStyle(fontSize: 12, color: attAmberFg)),
+              ),
+            if (_mayChange)
+              Wrap(spacing: 6, children: [
+                TextButton(
+                    onPressed: busy != null ? null : () => _changeSheet(r.id),
+                    child: const Text('Change')),
+                if (ch != null)
+                  TextButton.icon(
+                      onPressed: busy != null ? null : () => _undo(ch),
+                      icon: const Icon(Icons.undo, size: 15),
+                      label: const Text('Undo')),
+              ]),
           ]),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: Text(loc.cancel)),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange.shade700),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(loc.faWaApply,
-                  style: const TextStyle(color: Colors.white)),
-            ),
-          ],
-        );
-      },
+        ),
+      ]),
     );
-    if (confirmed == true) {
-      setState(() {
-        rateCtrl.text = tempRate.text;
-        noteCtrl.text = tempNote.text;
-      });
+  }
+
+  Widget? _bulkBar() {
+    if (!_mayChange || sel.isEmpty || loading || !_attOpen || _canBuild) return null;
+    final rows = _rows().where((r) => sel.contains(r.id)).toList();
+    final any = rows.any((r) => r.tasks.isNotEmpty);
+    return Material(
+      elevation: 8,
+      color: attDark,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          child: Row(children: [
+            Text('${sel.length} selected',
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w800)),
+            const Spacer(),
+            TextButton(
+                onPressed: busy != null ? null : _bulkAssign,
+                child: const Text('Assign to task…',
+                    style: TextStyle(color: Colors.white))),
+            TextButton(
+                onPressed: (busy != null || !any) ? null : _bulkRemove,
+                child: Text('Remove',
+                    style: TextStyle(
+                        color: any ? Colors.white : Colors.white38))),
+            IconButton(
+                icon: const Icon(Icons.close, color: Color(0xFFCFE3C0)),
+                onPressed: () => setState(() => sel.clear())),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  // ── approver: first submission ──
+  Widget _firstDecisionCard() {
+    return _card(
+      border: const Color(0xFFEEC46B),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const Text('Approve this allocation?',
+            style: TextStyle(
+                fontSize: 15, fontWeight: FontWeight.w800, color: attDark)),
+        const SizedBox(height: 4),
+        const Text(
+            'Check who did which work and the amounts. Approve to finish the day. Return sends it back to be corrected, say what is wrong.',
+            style: TextStyle(fontSize: 12.5, color: Color(0xFF5F6A58))),
+        const SizedBox(height: 10),
+        Row(children: [
+          Expanded(
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFC0392B),
+                  side: const BorderSide(color: Color(0xFFC0392B))),
+              onPressed: busy != null
+                  ? null
+                  : () async {
+                      final n = await attAskReason(context,
+                          title: 'Return for correction',
+                          help: 'Say what is wrong, so it can be fixed.',
+                          confirm: 'Return',
+                          danger: true,
+                          quick: const []);
+                      if (n != null) _decide('reject', note: n);
+                    },
+              child: const Text('Return'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: attGreen),
+              onPressed: busy != null ? null : () => _decide('approve'),
+              child: const Text('Approve',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w700)),
+            ),
+          ),
+        ]),
+      ]),
+    );
+  }
+
+  // ── approver: changes after approval ──
+  String _amendText(Map a) {
+    final now = a['alloc_now'];
+    if (now is! List || now.isEmpty) return 'Taken off work allocation';
+    String wn(dynamic id) {
+      for (final w in workTypes) {
+        if (w is Map && w['id'] == id) return '${w['name']}';
+      }
+      return 'Work';
+    }
+
+    String fn(dynamic id) {
+      for (final f in farms) {
+        if (f is Map && f['id'] == id) return '${f['name']}';
+      }
+      return 'farm';
+    }
+
+    return now
+        .whereType<Map>()
+        .map((x) =>
+            '${wn(x['work_type_id'])} @ ${fn(x['farm_id'])} ${attRs(attNum(x['amount']))}')
+        .join(' + ');
+  }
+
+  Widget _changeReviewCard() {
+    final blocked = pendAtt > 0;
+    return _card(
+      border: const Color(0xFFEEC46B),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('Changes to approve · ${amendments.length}',
+            style: const TextStyle(
+                fontSize: 15, fontWeight: FontWeight.w800, color: attDark)),
+        if (blocked) ...[
+          const SizedBox(height: 6),
+          Text(
+              'Attendance changes are waiting too. Decide those first (step 1).',
+              style: const TextStyle(fontSize: 12.5, color: attAmberFg)),
+          Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Go to attendance'))),
+        ],
+        const SizedBox(height: 6),
+        for (final a in amendments)
+          Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+                color: const Color(0xFFFFFAF0),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFF0DBA6))),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(tl(context, '${a['worker_name'] ?? ''}'),
+                  style: const TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w700)),
+              Text(_amendText(a), style: const TextStyle(fontSize: 13)),
+              if ((a['reason'] ?? '').toString().isNotEmpty)
+                Text(
+                    '"${a['reason']}"${a['created_by_name'] != null ? ' · ${a['created_by_name']}' : ''}',
+                    style: const TextStyle(
+                        fontSize: 12, color: Color(0xFF6B7280))),
+              Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                TextButton(
+                    onPressed: (busy != null || blocked)
+                        ? null
+                        : () => _rejectIds([_int(a['id'])]),
+                    child: const Text('Reject',
+                        style: TextStyle(color: Color(0xFFC0392B)))),
+                TextButton(
+                    onPressed: (busy != null || blocked)
+                        ? null
+                        : () => _decide('approve', ids: [_int(a['id'])]),
+                    child: const Text('Approve')),
+              ]),
+            ]),
+          ),
+        Row(children: [
+          Expanded(
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFC0392B),
+                  side: const BorderSide(color: Color(0xFFC0392B))),
+              onPressed: (busy != null || blocked) ? null : () => _rejectIds(null),
+              child: const Text('Reject all'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: attGreen),
+              onPressed: (busy != null || blocked) ? null : () => _decide('approve'),
+              child: const Text('Approve all',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w700)),
+            ),
+          ),
+        ]),
+      ]),
+    );
+  }
+
+  Future<void> _rejectIds(List<int>? ids) async {
+    final n = await attAskReason(context,
+        title: 'Reject ${ids == null ? 'all changes' : 'this change'}',
+        help: 'Say why, so the person knows what to fix.',
+        confirm: 'Reject',
+        danger: true,
+        quick: const []);
+    if (n != null) _decide('reject', note: n, ids: ids);
+  }
+
+  Future<void> _decide(String decision, {String? note, List<int>? ids}) async {
+    setState(() {
+      busy = 'decide';
+      error = null;
+    });
+    try {
+      final res = await Api.patch('/attendance/day/$_dateStr/allocation-decision',
+          body: {
+            'decision': decision,
+            if (note != null) 'note': note,
+            if (ids != null) 'ids': ids,
+          });
+      if (res.statusCode == 200) {
+        await _loadDay();
+      } else {
+        setState(() => error = Api.responseError(res));
+      }
+    } catch (e) {
+      setState(() => error = '${AppLocalizations.of(context)!.faErrServer}: ${Api.errorText(e)}');
+    } finally {
+      if (mounted) setState(() => busy = null);
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final loc = AppLocalizations.of(context)!;
-    return DraggableScrollableSheet(
-      initialChildSize: 0.85,
-      minChildSize: 0.5,
-      maxChildSize: 0.95,
-      builder: (ctx, scrollCtrl) => Container(
-        decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-        padding:
-            EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: Column(children: [
+  Future<void> _undo(Map<String, dynamic> ch) async {
+    setState(() {
+      busy = 'save';
+      error = null;
+    });
+    try {
+      final res = await Api.post(
+          '/attendance/day/$_dateStr/amendments/${_int(ch['id'])}/undo');
+      if (res.statusCode == 200) {
+        sel.clear();
+        await _loadDay();
+      } else {
+        setState(() => error = Api.responseError(res));
+      }
+    } catch (e) {
+      setState(() => error = Api.errorText(e));
+    } finally {
+      if (mounted) setState(() => busy = null);
+    }
+  }
+
+  Future<bool> _postAmend(String reason, List<Map<String, dynamic>> changes) async {
+    setState(() {
+      busy = 'save';
+      error = null;
+      notice = null;
+    });
+    try {
+      final res = await Api.post('/attendance/day/$_dateStr/allocation-amend',
+          body: {'reason': reason, 'changes': changes});
+      if (res.statusCode == 200) {
+        sel.clear();
+        await _loadDay();
+        if (mounted) setState(() => notice = 'Saved. The changed people go back to the approver.');
+        return true;
+      }
+      setState(() => error = Api.responseError(res));
+    } catch (e) {
+      setState(() => error = Api.errorText(e));
+    } finally {
+      if (mounted) setState(() => busy = null);
+    }
+    return false;
+  }
+
+  Map<String, dynamic> _taskMap(_Spec s, {bool withAmount = false}) => {
+        'farm_id': s.farmId,
+        'work_type_id': s.workTypeId,
+        'work_detail': s.detail.text.trim().isEmpty ? null : s.detail.text.trim(),
+        if (withAmount) 'amount': attNum(s.amount.text),
+        ..._cycleFields(s.crop, s.farmId),
+      };
+
+  // One person: edit their tasks and amounts.
+  Future<void> _changeSheet(int workerId) async {
+    final r = _rows().firstWhere((x) => x.id == workerId);
+    final wage = r.wage;
+    final specs = r.tasks.isNotEmpty
+        ? [
+            for (final a in r.tasks)
+              _Spec(
+                  farmId: _int(a['farm_id']),
+                  workTypeId: a['work_type_id'] == null ? null : _int(a['work_type_id']),
+                  workTypeName: a['work_type_name']?.toString(),
+                  crop: '${a['cycle_type'] ?? ''}'.isEmpty
+                      ? ''
+                      : (a['cycle_type'] == 'none'
+                          ? 'none:x'
+                          : '${a['cycle_type']}:${a['cycle_id'] ?? ''}'),
+                  detailText: '${a['work_detail'] ?? ''}',
+                  amountText: attFmt(attNum(a['total_wage'] ?? a['wage_snapshot'])))
+          ]
+        : [_Spec(amountText: attFmt(wage))];
+    final reason = TextEditingController();
+    String? err;
+    final go = await _sheet<bool>((ctx, setSheet) {
+      final total = attRound2(specs.fold<double>(0, (s, x) => s + attNum(x.amount.text)));
+      final bal = attRound2(wage - total);
+      return [
+        Text('Change work · ${tl(context, '${r.p['name']}')}',
+            style: const TextStyle(
+                fontSize: 17, fontWeight: FontWeight.w800, color: attDark)),
+        const SizedBox(height: 4),
+        Text(
+            'Pay for the day is ${attRs(wage)}. Put them in one task, or several (same or different farms) and type the amount for each. It goes back to the approver; the rest of the day stays approved.',
+            style: const TextStyle(fontSize: 12.5, color: Color(0xFF5F6A58))),
+        const SizedBox(height: 12),
+        for (var i = 0; i < specs.length; i++)
           Container(
-              margin: const EdgeInsets.symmetric(vertical: 10),
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2))),
-          Expanded(
-            child: ListView(
-              controller: scrollCtrl,
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              children: [
-                Row(children: [
-                  Expanded(
-                    child: Text(widget.title,
-                        style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: idaDark),
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1),
-                  ),
-                  if (widget.onDelete != null)
-                    TextButton.icon(
-                      onPressed: () {
-                        widget.onDelete!();
-                        Navigator.pop(context);
-                      },
-                      icon: const Icon(Icons.delete_outline,
-                          size: 16, color: Colors.red),
-                      label: Text(loc.faWaRemove,
-                          style: const TextStyle(
-                              color: Colors.red, fontSize: 12.5)),
-                    ),
-                ]),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<int>(
-                  value: widget.farms.any((f) => f['id'] == farmId)
-                      ? farmId
-                      : null,
-                  decoration: InputDecoration(
-                      labelText: loc.faWaFarmDropdownLabel,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10))),
-                  items: widget.farms
-                      .map<DropdownMenuItem<int>>((f) => DropdownMenuItem(
-                          value: f['id'],
-                          child: Text(tl(context, f['name']),
-                              style: const TextStyle(fontSize: 13))))
-                      .toList(),
-                  onChanged: (v) => setState(() {
-                    farmId = v;
-                    widget.group.farmId = v;
-                  }),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<int>(
-                  value: widget.workTypes.any((w) => w['id'] == workTypeId)
-                      ? workTypeId
-                      : null,
-                  decoration: InputDecoration(
-                      labelText: loc.faWaWorkTypeDropdownLabel,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10))),
-                  items: widget.workTypes
-                      .map<DropdownMenuItem<int>>((w) => DropdownMenuItem(
-                          value: w['id'],
-                          child: Text(tl(context, w['name']),
-                              style: const TextStyle(fontSize: 13))))
-                      .toList(),
-                  onChanged: (v) => setState(() {
-                    workTypeId = v;
-                    widget.group.workTypeId = v;
-                  }),
-                ),
-                const SizedBox(height: 12),
-                _WorkDetailField(
-                    controller: widget.group.detailCtrl,
-                    options: _detailOptionsOf(widget.workTypes, workTypeId)),
-                const SizedBox(height: 16),
-                Text(loc.faWaWorkersForThisTask,
-                    style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF6B7280),
-                        letterSpacing: 0.6)),
-                const SizedBox(height: 8),
-                ...widget.unallocatedExcludingThisGroup.map((w) {
-                  final id = w['worker_id'] as int;
-                  final selected = widget.group.workerIds.contains(id);
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    decoration: BoxDecoration(
-                      color: selected ? const Color(0xFFE8F5E2) : Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                          color: selected
-                              ? widget.idaGreen
-                              : const Color(0xFFE0E7D8)),
-                    ),
-                    child: Column(children: [
-                      CheckboxListTile(
-                        dense: true,
-                        value: selected,
-                        activeColor: widget.idaGreen,
-                        controlAffinity: ListTileControlAffinity.leading,
-                        title: Text(tl(context, w['name'] ?? ''),
-                            style: const TextStyle(
-                                fontSize: 13.5, fontWeight: FontWeight.w600)),
-                        subtitle: Text(
-                            w['gender'] == 'M'
-                                ? loc.faMaleFull
-                                : loc.faFemaleFull,
-                            style: TextStyle(
-                                fontSize: 11, color: Colors.grey.shade600)),
-                        onChanged: (_) => _toggleWorker(id),
-                      ),
-                      if (selected)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                          child: Row(children: [
-                            Expanded(
-                              child: TextField(
-                                controller: widget.group.rateCtrls[id],
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                        decimal: true),
-                                onChanged: (_) => setState(() {}),
-                                enabled: !widget.prefillRate || widget.isAdmin,
-                                style: const TextStyle(fontSize: 13),
-                                decoration: InputDecoration(
-                                  labelText: loc.faWaRateLabel,
-                                  hintText: widget.prefillRate
-                                      ? null
-                                      : loc.faWaEnterAmountHint,
-                                  helperText:
-                                      widget.prefillRate && !widget.isAdmin
-                                          ? loc.faWaSetThisMorningHint
-                                          : null,
-                                  helperStyle: const TextStyle(
-                                      fontSize: 10, color: Colors.grey),
-                                  labelStyle: const TextStyle(fontSize: 11),
-                                  hintStyle: const TextStyle(
-                                      fontSize: 12, color: Colors.orange),
-                                  isDense: true,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 10),
-                                  border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                      borderSide: const BorderSide(
-                                          color: Color(0xFFE0E7D8))),
-                                  filled: true,
-                                  fillColor:
-                                      (widget.prefillRate && !widget.isAdmin)
-                                          ? const Color(0xFFF4F7F2)
-                                          : Colors.white,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            TextButton.icon(
-                              onPressed: () =>
-                                  _breakAttendance(id, w['name'] ?? ''),
-                              icon: const Icon(Icons.timer_off_outlined,
-                                  size: 15, color: Colors.orange),
-                              label: Text(loc.faWaBreakAttendanceLong,
-                                  style: const TextStyle(
-                                      fontSize: 11.5, color: Colors.orange)),
-                              style: TextButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6)),
-                            ),
-                          ]),
-                        ),
-                      if (selected &&
-                          (widget.group.noteCtrls[id]?.text.isNotEmpty ??
-                              false))
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                                '${loc.faWaNotePrefix}: ${widget.group.noteCtrls[id]!.text}',
-                                style: const TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.orange,
-                                    fontStyle: FontStyle.italic)),
-                          ),
-                        ),
-                    ]),
-                  );
-                }),
-                const SizedBox(height: 16),
-                if (_saveError != null) ...[
-                  Text(_saveError!,
-                      style:
-                          const TextStyle(color: Colors.red, fontSize: 12.5)),
-                  const SizedBox(height: 8),
-                ],
+            key: ObjectKey(specs[i]),
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFE0E7D8))),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              _TaskFields(
+                  key: ObjectKey(specs[i]),
+                  spec: specs[i],
+                  farms: farms,
+                  workTypes: workTypes,
+                  loadCrops: _cropsOn,
+                  showErr: err != null,
+                  onChanged: () => setSheet(() => err = null)),
+              const SizedBox(height: 8),
+              Row(children: [
                 SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: widget.idaGreen,
-                        padding: const EdgeInsets.symmetric(vertical: 13)),
-                    onPressed: () {
-                      if (farmId == null) {
-                        setState(() => _saveError = loc.faWaErrSelectFarm);
-                        return;
-                      }
-                      if (widget.group.workerIds.isEmpty) {
-                        setState(() => _saveError = loc.faWaErrSelectOneWorker);
-                        return;
-                      }
-                      final missingAmount = widget.group.workerIds.where((id) =>
-                          double.tryParse(
-                              widget.group.rateCtrls[id]?.text.trim() ?? '') ==
-                          null);
-                      if (missingAmount.isNotEmpty) {
-                        setState(
-                            () => _saveError = loc.faWaErrAmountEveryWorker);
-                        return;
-                      }
-                      widget.onSave(widget.group);
-                      Navigator.pop(context);
-                    },
-                    child: Text(loc.faWaSaveThisTaskGroup,
-                        style: const TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.w700)),
+                  width: 120,
+                  child: TextField(
+                    controller: specs[i].amount,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    textAlign: TextAlign.right,
+                    onChanged: (_) => setSheet(() => err = null),
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                    decoration: InputDecoration(
+                        prefixText: '₹',
+                        labelText: 'Amount',
+                        isDense: true,
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8))),
                   ),
                 ),
-              ],
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () => setSheet(() {
+                    specs.removeAt(i);
+                    if (specs.length == 1) specs[0].amount.text = attFmt(wage);
+                  }),
+                  icon: const Icon(Icons.close, size: 16),
+                  label: Text(specs.length == 1 ? 'Take off work' : 'Remove task'),
+                ),
+              ]),
+            ]),
+          ),
+        Wrap(spacing: 6, children: [
+          OutlinedButton.icon(
+            onPressed: () => setSheet(() {
+              specs.add(_Spec());
+              final p = attEqualSplit(wage, specs.length);
+              for (var i = 0; i < specs.length; i++) {
+                specs[i].amount.text = p[i];
+              }
+            }),
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text('Add another task'),
+          ),
+          if (specs.length > 1)
+            OutlinedButton(
+              onPressed: () => setSheet(() {
+                final p = attEqualSplit(wage, specs.length);
+                for (var i = 0; i < specs.length; i++) {
+                  specs[i].amount.text = p[i];
+                }
+              }),
+              child: const Text('Split equally'),
+            ),
+        ]),
+        const SizedBox(height: 6),
+        Text(
+            '${attRs(total)} of ${attRs(wage)}${bal.abs() >= 0.005 ? ' · ${bal > 0 ? 'left' : 'over'} ${attRs(bal.abs())}' : ' · balanced'}',
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: bal.abs() < 0.005 ? attGreen : attAmberFg)),
+        const SizedBox(height: 10),
+        _reasonField(reason, setSheet, null),
+        if (err != null) _errText(err!),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(
+              child: OutlinedButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel'))),
+          const SizedBox(width: 10),
+          Expanded(
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: attGreen),
+              onPressed: () async {
+                if (reason.text.trim().isEmpty) {
+                  setSheet(() => err = 'Write a short reason first.');
+                  return;
+                }
+                for (final s in specs) {
+                  final e = await _checkSpec(s);
+                  if (e != null) {
+                    setSheet(() => err = e);
+                    return;
+                  }
+                  if (s.amount.text.trim().isEmpty ||
+                      double.tryParse(s.amount.text.trim()) == null) {
+                    setSheet(() => err = 'Type an amount for every task.');
+                    return;
+                  }
+                }
+                if (ctx.mounted) Navigator.pop(ctx, true);
+              },
+              child: const Text('Save change',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w700)),
             ),
           ),
         ]),
-      ),
-    );
+      ];
+    });
+    if (go == true && mounted) {
+      await _postAmend(reason.text.trim(), [
+        {
+          'worker_id': workerId,
+          'tasks': [for (final s in specs) _taskMap(s, withAmount: true)],
+        }
+      ]);
+    }
+  }
+
+  // Many people to one task (replaces what they had, at their full pay).
+  Future<void> _bulkAssign() async {
+    final ids = sel.toList();
+    final spec = _Spec();
+    final reason = TextEditingController();
+    String? err;
+    final replacing = _rows().where((r) => sel.contains(r.id) && r.tasks.isNotEmpty).length;
+    final go = await _sheet<bool>((ctx, setSheet) => [
+          Text('Assign ${ids.length} ${ids.length == 1 ? 'person' : 'people'} to a task',
+              style: const TextStyle(
+                  fontSize: 17, fontWeight: FontWeight.w800, color: attDark)),
+          const SizedBox(height: 4),
+          Text(
+              'Each person gets this one task for their full pay. ${replacing > 0 ? '$replacing ${replacing == 1 ? 'person' : 'people'} already had work; it is replaced. ' : ''}For a split between tasks, use Change on that person.',
+              style: const TextStyle(fontSize: 12.5, color: Color(0xFF5F6A58))),
+          const SizedBox(height: 12),
+          _TaskFields(
+              spec: spec,
+              farms: farms,
+              workTypes: workTypes,
+              loadCrops: _cropsOn,
+              showErr: err != null,
+              onChanged: () => setSheet(() => err = null)),
+          const SizedBox(height: 10),
+          _reasonField(reason, setSheet, null),
+          if (err != null) _errText(err!),
+          const SizedBox(height: 12),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: attGreen,
+                padding: const EdgeInsets.symmetric(vertical: 14)),
+            onPressed: () async {
+              final e = await _checkSpec(spec);
+              if (e != null) {
+                setSheet(() => err = e);
+                return;
+              }
+              if (reason.text.trim().isEmpty) {
+                setSheet(() => err = 'Write a short reason first.');
+                return;
+              }
+              if (ctx.mounted) Navigator.pop(ctx, true);
+            },
+            child: const Text('Assign',
+                style:
+                    TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+          ),
+        ]);
+    if (go == true && mounted) {
+      final task = _taskMap(spec);
+      await _postAmend(reason.text.trim(), [
+        for (final id in ids) {'worker_id': id, 'tasks': [task]}
+      ]);
+    }
+  }
+
+  Future<void> _bulkRemove() async {
+    final ids = _rows()
+        .where((r) => sel.contains(r.id) && r.tasks.isNotEmpty)
+        .map((r) => r.id)
+        .toList();
+    if (ids.isEmpty) return;
+    final reason = await attAskReason(context,
+        title: 'Remove ${ids.length == 1 ? _nameOf(ids.first) : '${ids.length} people'} from work',
+        help:
+            "Their work is taken out of the allocation. They stay on today's attendance, so allocate them again or remove them in step 1.",
+        confirm: 'Remove from work',
+        danger: true,
+        quick: const ['Wrong entry', 'Went home', 'Not well']);
+    if (reason == null || !mounted) return;
+    await _postAmend(reason, [
+      for (final id in ids) {'worker_id': id, 'tasks': <Map<String, dynamic>>[]}
+    ]);
   }
 }

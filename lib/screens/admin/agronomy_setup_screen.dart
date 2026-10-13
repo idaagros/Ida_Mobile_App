@@ -21,6 +21,7 @@ import '../agronomy/agronomy_common.dart';
 import '../agronomy/product_editor_screen.dart';
 import '../agronomy/stage_editor_screen.dart';
 import '../agronomy/step_editor_screen.dart';
+import 'admin_common.dart' show MasterStatusToggle, isRowActive;
 
 class AgronomySetupScreen extends StatefulWidget {
   const AgronomySetupScreen({super.key});
@@ -34,7 +35,8 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
   List varieties = [];
   List steps = [];
   List stages = [];
-  List products = [];
+  List products = []; // ALL products (active and inactive) for the Products list
+  bool showInactive = false; // Products list: Active / Inactive switch
   int? varietyId;
   bool loading = true;
   bool canEdit = false; // Add or Update on Crop planning
@@ -66,7 +68,7 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
         AgriApi.get('/agri/crop-varieties'),
         AgriApi.get('/agri/spray-schedule-templates'),
         AgriApi.get('/agri/crop-stage-templates'),
-        AgriApi.get('/agri/products'),
+        AgriApi.get('/agri/products?all=1'),
       ]);
       if (!mounted) return;
       setState(() {
@@ -74,7 +76,9 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
         steps = r[1] as List;
         stages = r[2] as List;
         products = r[3] as List;
-        varietyId ??= varieties.isNotEmpty ? toI(varieties.first['id']) : null;
+        if (varietyId == null || !varieties.any((v) => toI(v['id']) == varietyId)) {
+          varietyId = varieties.isNotEmpty ? toI(varieties.first['id']) : null;
+        }
         error = null;
         loading = false;
       });
@@ -124,7 +128,7 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
     await Navigator.push(
         context,
         MaterialPageRoute(
-            builder: (_) => StepEditorScreen(variety: variety!, steps: vSteps, step: step, products: products, canEdit: canEdit, canDelete: canDelete)));
+            builder: (_) => StepEditorScreen(variety: variety!, steps: vSteps, step: step, products: products.where(isRowActive).toList(), canEdit: canEdit, canDelete: canDelete)));
     _load();
   }
 
@@ -143,7 +147,7 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context)!;
-    final needsCount = products.where((p) => p['needs_check'] == true).length;
+    final needsCount = products.where((p) => isRowActive(p) && p['needs_check'] == true).length;
     return Scaffold(
       backgroundColor: agBg,
       appBar: AppBar(
@@ -168,7 +172,7 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
           child: Row(children: [
             _topTab('Crop plans (${varieties.length})', 'plans'),
             const SizedBox(width: 6),
-            _topTab('Products (${products.length})${needsCount > 0 ? ' · $needsCount to check' : ''}', 'products'),
+            _topTab('Products (${products.where(isRowActive).length})${needsCount > 0 ? ' · $needsCount to check' : ''}', 'products'),
           ]),
         ),
         Expanded(
@@ -446,8 +450,10 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
 
   // ── Products ───────────────────────────────────────────────────────
   Widget _products(int needsCount) {
+    final loc = AppLocalizations.of(context)!;
     final s = q.trim().toLowerCase();
     final list = products.where((p) {
+      if (isRowActive(p) == showInactive) return false;
       if (kindFilter != 'all' && p['product_type'] != kindFilter) return false;
       if (needsOnly && p['needs_check'] != true) return false;
       if (s.isEmpty) return true;
@@ -456,6 +462,16 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
     }).toList();
     return ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 96), children: [
       if (error != null) _errorBox(),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: MasterStatusToggle(
+          showInactive: showInactive,
+          activeCount: products.where(isRowActive).length,
+          inactiveCount: products.where((p) => !isRowActive(p)).length,
+          onChanged: (v) => setState(() => showInactive = v),
+        ),
+      ),
+      const SizedBox(height: 10),
       TextField(
         decoration: agInput('Find a product or brand').copyWith(prefixIcon: const Icon(Icons.search)),
         onChanged: (v) => setState(() => q = v),
@@ -486,7 +502,7 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
         ]),
       ),
       const SizedBox(height: 10),
-      if (list.isEmpty) _emptyText(products.isEmpty ? 'No products yet.' : 'No product matches these filters.'),
+      if (list.isEmpty) _emptyText(products.isEmpty ? 'No products yet.' : (products.where((p) => isRowActive(p) != showInactive).isEmpty ? (showInactive ? loc.miNoneInactive : loc.miNoneActive) : 'No product matches these filters.')),
       for (final p in list)
         InkWell(
           onTap: () => _openProduct(p as Map),
@@ -504,9 +520,9 @@ class _AgronomySetupScreenState extends State<AgronomySetupScreen> {
                       const SizedBox(width: 6),
                       const SmallChip('Check', bg: Color(0xFFFCEFD2), fg: Color(0xFF7A4D00)),
                     ],
-                    if (p['is_active'] == false) ...[
+                    if (!isRowActive(p)) ...[
                       const SizedBox(width: 6),
-                      const SmallChip('Off', bg: Color(0xFFECEEE8)),
+                      SmallChip(loc.miInactive, bg: const Color(0xFFECEEE8)),
                     ],
                   ]),
                   const SizedBox(height: 5),

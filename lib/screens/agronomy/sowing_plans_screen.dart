@@ -91,7 +91,8 @@ class _SowingPlansScreenState extends State<SowingPlansScreen> {
     try {
       final p = await AdminApi.get('/agri/sowing-plans?limit=200');
       final f = await AdminApi.get('/farms');
-      final v = await AdminApi.get('/agri/crop-varieties');
+      // all=1: names of inactive crops still resolve for old plans; the pickers filter to active ones
+      final v = await AdminApi.get('/agri/crop-varieties?all=1');
       final plans = _maps(p is Map ? p['data'] : p);
       final calcs = await Future.wait(plans.map((x) => AdminApi.get('/agri/sowing-plans/${x['id']}/calculations').catchError((_) => null)));
       if (!mounted) return;
@@ -238,6 +239,9 @@ class _SowingPlansScreenState extends State<SowingPlansScreen> {
 }
 
 // ── One plan (or a new one) ───────────────────────────────────────────
+// A variety that can be picked for new work: it is active and so is its crop.
+bool _pickable(Map v) => isRowActive(v) && !(v['crop_is_active'] == 0 || v['crop_is_active'] == false);
+
 class SowingPlanScreen extends StatefulWidget {
   final Map<String, dynamic>? plan;
   final List<Map<String, dynamic>> farms;
@@ -448,7 +452,7 @@ class _SowingPlanScreenState extends State<SowingPlanScreen> {
                   value: _varietyId,
                   isExpanded: true,
                   decoration: aInput('Crop · variety'),
-                  items: [for (final v in _seasonal) DropdownMenuItem<int>(value: int.tryParse('${v['id']}') ?? 0, child: Text('${v['crop_name']} · ${v['name']}', overflow: TextOverflow.ellipsis))],
+                  items: [for (final v in _seasonal.where(_pickable)) DropdownMenuItem<int>(value: int.tryParse('${v['id']}') ?? 0, child: Text('${v['crop_name']} · ${v['name']}', overflow: TextOverflow.ellipsis))],
                   onChanged: (v) {
                     setState(() {
                       _varietyId = v;
@@ -827,7 +831,7 @@ class _AddCompanionSheetState extends State<_AddCompanionSheet> {
               value: _variety,
               isExpanded: true,
               decoration: aInput('Companion crop · variety'),
-              items: [for (final v in widget.seasonal) DropdownMenuItem<int>(value: int.tryParse('${v['id']}') ?? 0, child: Text('${v['crop_name']} · ${v['name']}', overflow: TextOverflow.ellipsis))],
+              items: [for (final v in widget.seasonal.where(_pickable)) DropdownMenuItem<int>(value: int.tryParse('${v['id']}') ?? 0, child: Text('${v['crop_name']} · ${v['name']}', overflow: TextOverflow.ellipsis))],
               onChanged: (v) => setState(() => _variety = v),
             ),
             const SizedBox(height: 10),
@@ -970,10 +974,10 @@ class _LinesSheetState extends State<_LinesSheet> {
                       ),
                   ]),
                   DropdownButtonFormField<int>(
-                    value: _lines[i].variety,
+                    value: widget.varieties.any((x) => int.tryParse('${x['id']}') == _lines[i].variety) ? _lines[i].variety : null,
                     isExpanded: true,
                     decoration: aInput('Crop'),
-                    items: [for (final v in widget.varieties) DropdownMenuItem<int>(value: int.tryParse('${v['id']}') ?? 0, child: Text('${v['crop_name']} · ${v['name']}', overflow: TextOverflow.ellipsis))],
+                    items: [for (final v in widget.varieties.where((x) => _pickable(x) || int.tryParse('${x['id']}') == _lines[i].variety)) DropdownMenuItem<int>(value: int.tryParse('${v['id']}') ?? 0, child: Text('${v['crop_name']} · ${v['name']}', overflow: TextOverflow.ellipsis))],
                     onChanged: (v) => setState(() => _lines[i].variety = v),
                   ),
                   const SizedBox(height: 8),

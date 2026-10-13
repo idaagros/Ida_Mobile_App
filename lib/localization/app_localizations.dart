@@ -561,6 +561,27 @@ class AppLocalizations {
   String get offNoSaved => _t('off_no_saved');
   String get offAllocSaved => _t('off_alloc_saved');
 
+  // ── Master lists: inactive / delete ─────────────────────────
+  String get miActive => _t('mi_active');
+  String get miInactive => _t('mi_inactive');
+  String get miMarkInactive => _t('mi_mark_inactive');
+  String get miMakeActive => _t('mi_make_active');
+  String get miMarkedInactive => _t('mi_marked_inactive');
+  String get miMadeActive => _t('mi_made_active');
+  String get miDeleteTitle => _t('mi_delete_title');
+  String miDeleteBody(String name) =>
+      _t('mi_delete_body').replaceAll('{name}', name);
+  String get miDeleted => _t('mi_deleted');
+  String miUsedTimes(int n) => _t('mi_used_times').replaceAll('{n}', '$n');
+  String get miNoneInactive => _t('mi_none_inactive');
+  String get miNoneActive => _t('mi_none_active');
+  String get miEditParty => _t('mi_edit_party');
+  String get miEditDestination => _t('mi_edit_destination');
+  String get miEditTractor => _t('mi_edit_tractor');
+  String get miEditCrop => _t('mi_edit_crop');
+  String get miEditVariety => _t('mi_edit_variety');
+  String get miCropInactive => _t('mi_crop_inactive');
+
   static const Map<String, Map<String, String>> _localizedValues = {
     'en': {
       'save': 'Save',
@@ -1092,6 +1113,24 @@ class AppLocalizations {
       'off_open_list': 'Open list',
       'off_no_saved': 'No saved data yet. Open this screen once with signal first.',
       'off_alloc_saved': 'Your allocation is saved on this phone and will be sent automatically.',
+      'mi_active': 'Active',
+      'mi_inactive': 'Inactive',
+      'mi_mark_inactive': 'Mark inactive',
+      'mi_make_active': 'Make active',
+      'mi_marked_inactive': 'Marked inactive',
+      'mi_made_active': 'Made active',
+      'mi_delete_title': 'Delete?',
+      'mi_delete_body': 'Delete "{name}" for good? This cannot be undone.',
+      'mi_deleted': 'Deleted',
+      'mi_used_times': 'Used {n} times - mark inactive instead.',
+      'mi_none_inactive': 'Nothing is inactive',
+      'mi_none_active': 'Nothing is active here',
+      'mi_edit_party': 'Edit Party',
+      'mi_edit_destination': 'Edit Destination',
+      'mi_edit_tractor': 'Edit Tractor',
+      'mi_edit_crop': 'Edit Crop',
+      'mi_edit_variety': 'Edit Variety',
+      'mi_crop_inactive': 'Crop inactive',
     },
     'mr': {
       'save': 'जतन करा',
@@ -1619,6 +1658,24 @@ class AppLocalizations {
       'off_open_list': 'यादी उघडा',
       'off_no_saved': 'अजून जतन केलेली माहिती नाही. आधी एकदा नेटवर्क असताना ही स्क्रीन उघडा.',
       'off_alloc_saved': 'तुमचे काम वाटप या फोनमध्ये जतन झाले आहे आणि आपोआप पाठवले जाईल.',
+      'mi_active': 'सक्रिय',
+      'mi_inactive': 'निष्क्रिय',
+      'mi_mark_inactive': 'निष्क्रिय करा',
+      'mi_make_active': 'सक्रिय करा',
+      'mi_marked_inactive': 'निष्क्रिय केले',
+      'mi_made_active': 'सक्रिय केले',
+      'mi_delete_title': 'हटवायचे?',
+      'mi_delete_body': '"{name}" कायमचे हटवायचे? हे परत करता येणार नाही.',
+      'mi_deleted': 'हटवले',
+      'mi_used_times': '{n} वेळा वापरले - त्याऐवजी निष्क्रिय करा.',
+      'mi_none_inactive': 'काहीही निष्क्रिय नाही',
+      'mi_none_active': 'येथे काहीही सक्रिय नाही',
+      'mi_edit_party': 'पार्टी बदला',
+      'mi_edit_destination': 'गंतव्य बदला',
+      'mi_edit_tractor': 'ट्रॅक्टर बदला',
+      'mi_edit_crop': 'पीक बदला',
+      'mi_edit_variety': 'वाण बदला',
+      'mi_crop_inactive': 'पीक निष्क्रिय',
     },
   };
 

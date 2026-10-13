@@ -116,6 +116,14 @@ class ApiService {
     return hasReopenAccess(perms, moduleKey);
   }
 
+  /// Correct level (change an approved attendance day; the changes go back to
+  /// the approver). Reopen implies it. Admin always.
+  static Future<bool> canCorrect(String moduleKey) async {
+    if (await isAdmin()) return true;
+    final perms = await getPermissions();
+    return hasCorrectAccess(perms, moduleKey);
+  }
+
   /// Add OR update on one section - what the server's
   /// requireFixedSectionAny(module, scope, ['add','update']) accepts
   /// (farm attendance: marking = 'attendance', allocating = 'allocation').

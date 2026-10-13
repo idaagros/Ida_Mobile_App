@@ -57,8 +57,8 @@ const List<(String, String, List<(String, String, String)>)> kPermGroups = [
   ]),
 ];
 
-const List<String> kLevelOrder = ['view', 'add', 'update', 'delete', 'approve', 'reopen'];
-const Map<String, String> kLevelLabels = {'view': 'View', 'add': 'Add', 'update': 'Edit', 'delete': 'Delete', 'approve': 'Approve', 'reopen': 'Reopen / correct'};
+const List<String> kLevelOrder = ['view', 'add', 'update', 'delete', 'approve', 'correct', 'reopen'];
+const Map<String, String> kLevelLabels = {'view': 'View', 'add': 'Add', 'update': 'Edit', 'delete': 'Delete', 'approve': 'Approve', 'correct': 'Correct approved day', 'reopen': 'Reopen'};
 
 String _shortName(String module) {
   for (final g in kPermGroups) {
@@ -141,7 +141,7 @@ class _UserFormScreenState extends State<UserFormScreen> {
       final List<String> levels;
       if (e.level == 'edit') {
         final sup = moduleSupportedLevels(e.module);
-        levels = ['add', 'update', 'delete', for (final l in const ['approve', 'reopen']) if (sup.contains(l)) l];
+        levels = ['add', 'update', 'delete', for (final l in const ['approve', 'correct', 'reopen']) if (sup.contains(l)) l];
       } else {
         levels = [e.level];
       }
@@ -496,7 +496,7 @@ class _UserFormScreenState extends State<UserFormScreen> {
   Widget _levelChip(String module, String level, bool on) {
     final color = level == 'approve'
         ? aBlue
-        : (level == 'delete' ? const Color(0xFFB3392B) : (level == 'reopen' ? const Color(0xFF8A5628) : aGreen));
+        : (level == 'delete' ? const Color(0xFFB3392B) : (level == 'reopen' ? const Color(0xFF8A5628) : (level == 'correct' ? const Color(0xFFB07A1E) : aGreen)));
     return Semantics(
       checked: on,
       label: '${_shortName(module)}: ${kLevelLabels[level]}',

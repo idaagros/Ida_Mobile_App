@@ -94,7 +94,8 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
             all.where((v) => v['crop_type'] == 'seasonal').toList();
       }
       if (results[2].statusCode == 200) {
-        orchardBlocks = jsonDecode(results[2].body)['data'] ?? [];
+        final ob = jsonDecode(results[2].body);
+        orchardBlocks = ob is List ? ob : (ob is Map ? (ob['data'] ?? []) : []);
       }
     } catch (e) {
       debugPrint('Load error: $e');

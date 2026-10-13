@@ -11,6 +11,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import '../../localization/app_localizations.dart';
 import '../../services/api_client.dart';
 import '../../services/api_service.dart';
 
@@ -283,4 +284,207 @@ Future<bool> aConfirm(BuildContext context, String title, String body, {String y
     ),
   );
   return r == true;
+}
+
+// ─── Master lists: Active / Inactive and Delete-if-never-used ────────────
+//
+// Shared by the management screens (farms, workers, work types, crops,
+// varieties, parties, destinations, tractors, products, orchard blocks).
+// The lists are loaded with ?all=1; each row has is_active (0/1) and, with
+// ?all=1, used_count (how many records use it).
+
+/// True unless the row says it is inactive (is_active 0 / false).
+bool isRowActive(dynamic row) {
+  if (row is! Map) return true;
+  final v = row['is_active'];
+  if (v == null) return true;
+  return v == 1 || v == true || v == '1' || v == 'true';
+}
+
+/// How many records use this row (null when the list did not say).
+int? usedCountOf(dynamic row) {
+  if (row is! Map) return null;
+  final v = row['used_count'];
+  if (v is int) return v;
+  if (v is num) return v.toInt();
+  return int.tryParse('${v ?? ''}');
+}
+
+/// Segmented "Active / Inactive" chips shown above a master list.
+class MasterStatusToggle extends StatelessWidget {
+  final bool showInactive;
+  final int activeCount;
+  final int inactiveCount;
+  final ValueChanged<bool> onChanged;
+  const MasterStatusToggle({super.key, required this.showInactive, required this.activeCount, required this.inactiveCount, required this.onChanged});
+  @override
+  Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context)!;
+    return AFilterChips<bool>(
+      options: [(false, loc.miActive, activeCount), (true, loc.miInactive, inactiveCount)],
+      value: showInactive,
+      onChanged: onChanged,
+    );
+  }
+}
+
+/// "Mark inactive / Make active" and "Delete" buttons for one master row,
+/// to sit at the bottom of its edit dialog or screen. [path] is the row's
+/// own URL (for example /farms/5): PATCH {is_active} and DELETE go there.
+/// [onDone] runs after either succeeded (the caller closes its dialog and
+/// reloads the list); a failure shows the server's words under the buttons.
+class MasterLifecycle extends StatefulWidget {
+  final String path;
+  final String module; // permission module (update / delete levels)
+  final String itemName;
+  final bool isActive;
+  final int? usedCount;
+  final void Function(String message) onDone;
+  const MasterLifecycle({
+    super.key,
+    required this.path,
+    required this.module,
+    required this.itemName,
+    required this.isActive,
+    required this.usedCount,
+    required this.onDone,
+  });
+  @override
+  State<MasterLifecycle> createState() => _MasterLifecycleState();
+}
+
+class _MasterLifecycleState extends State<MasterLifecycle> {
+  bool _canUpdate = false;
+  bool _canDelete = false;
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPerms();
+  }
+
+  Future<void> _loadPerms() async {
+    final u = await ApiService.canUpdate(widget.module);
+    final d = await ApiService.canDelete(widget.module);
+    if (!mounted) return;
+    setState(() {
+      _canUpdate = u;
+      _canDelete = d;
+    });
+  }
+
+  Future<void> _toggle() async {
+    final loc = AppLocalizations.of(context)!;
+    final msg = widget.isActive ? loc.miMarkedInactive : loc.miMadeActive;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final res = await Api.patch(widget.path, body: {'is_active': !widget.isActive});
+      if (!mounted) return;
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        setState(() => _busy = false);
+        widget.onDone(msg);
+      } else {
+        setState(() {
+          _busy = false;
+          _error = Api.responseError(res);
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = Api.errorText(e);
+      });
+    }
+  }
+
+  Future<void> _delete() async {
+    final loc = AppLocalizations.of(context)!;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(loc.miDeleteTitle),
+        content: Text(loc.miDeleteBody(widget.itemName)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(loc.cancel)),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: aRed),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(loc.delete),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final res = await Api.delete(widget.path);
+      if (!mounted) return;
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        setState(() => _busy = false);
+        widget.onDone(loc.miDeleted);
+      } else {
+        setState(() {
+          _busy = false;
+          _error = Api.responseError(res);
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = Api.errorText(e);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_canUpdate && !_canDelete) return const SizedBox.shrink();
+    final loc = AppLocalizations.of(context)!;
+    final used = widget.usedCount ?? 0;
+    final inUse = used > 0;
+    final canDeleteNow = _canDelete && !inUse && !_busy;
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Divider(height: 1),
+        const SizedBox(height: 12),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          if (_canUpdate)
+            OutlinedButton.icon(
+              style: aSecondary(height: 40),
+              onPressed: _busy ? null : _toggle,
+              icon: Icon(widget.isActive ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 18),
+              label: Text(widget.isActive ? loc.miMarkInactive : loc.miMakeActive),
+            ),
+          OutlinedButton.icon(
+            style: aSecondary(height: 40, fg: aRed),
+            onPressed: canDeleteNow ? _delete : null,
+            icon: const Icon(Icons.delete_outline, size: 18),
+            label: Text(loc.delete),
+          ),
+        ]),
+        if (inUse && _canDelete)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(loc.miUsedTimes(used), style: const TextStyle(fontSize: 12.5, color: aMuted)),
+          ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(_error!, style: const TextStyle(fontSize: 12.5, color: aRed)),
+          ),
+      ]),
+    );
+  }
 }

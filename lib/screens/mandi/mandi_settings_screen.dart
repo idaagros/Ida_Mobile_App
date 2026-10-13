@@ -326,7 +326,7 @@ class _CommoditiesTabState extends State<_CommoditiesTab> {
       if (widget.mayAdd) s = Map<String, dynamic>.from(await MandiApi.get('/mandi/commodities/suggestions'));
       List<Map<String, dynamic>> c = [];
       try {
-        c = List<Map<String, dynamic>>.from(await MandiApi.get('/agri/crops'));
+        c = List<Map<String, dynamic>>.from(await MandiApi.get('/agri/crops?all=1'));
       } catch (_) {}
       if (!mounted) return;
       setState(() {
@@ -413,12 +413,13 @@ class _CommoditiesTabState extends State<_CommoditiesTab> {
               ),
               const SizedBox(height: 8),
               DropdownButtonFormField<int?>(
-                value: cropId,
+                value: crops.any((c) => c['id'] == cropId) ? cropId : null,
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Our crop (optional)'),
                 items: [
                   const DropdownMenuItem<int?>(value: null, child: Text('— none —')),
-                  ...crops.map((c) => DropdownMenuItem<int?>(value: c['id'] as int, child: Text(c['name'].toString()))),
+                  // active crops, plus this commodity's own crop if it was marked inactive since
+                  ...crops.where((c) => c['is_active'] == null || c['is_active'] == 1 || c['is_active'] == true || c['id'] == cropId).map((c) => DropdownMenuItem<int?>(value: c['id'] as int, child: Text(c['name'].toString()))),
                 ],
                 onChanged: (v) => setD(() {
                   cropId = v;
@@ -673,7 +674,7 @@ class _MspTabState extends State<_MspTab> {
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               DropdownButtonFormField<int>(
-                value: commodityId,
+                value: commodities.any((c) => c['id'] == commodityId) ? commodityId : null,
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Commodity'),
                 items: commodities.map((c) => DropdownMenuItem(value: c['id'] as int, child: Text(c['display_name'].toString()))).toList(),

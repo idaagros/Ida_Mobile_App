@@ -14,6 +14,7 @@ import '../localization/transliterate.dart';
 import '../services/api_service.dart';
 import '../services/api_client.dart';
 import '../services/responsive.dart';
+import 'admin/admin_common.dart' show AChip, MasterStatusToggle, isRowActive;
 
 class OrchardBlocksScreen extends StatefulWidget {
   const OrchardBlocksScreen({super.key});
@@ -31,8 +32,30 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
   bool loading = true;
   bool _canAddAgri = false;
 
-  List get perennialVarieties =>
-      varieties.where((v) => v['crop_type'] == 'perennial').toList();
+  // Active / Inactive switch above the list (default Active). An orchard
+  // block is "inactive" when its status is 'removed'.
+  bool showInactive = false;
+  bool _blockInactive(dynamic b) => b['status'] == 'removed';
+
+  // Varieties to pick for a NEW block: perennial and active (the crop too).
+  List get perennialVarieties => varieties
+      .where((v) =>
+          v['crop_type'] == 'perennial' &&
+          isRowActive(v) &&
+          !(v['crop_is_active'] == 0 || v['crop_is_active'] == false))
+      .toList();
+
+  // Dropdown rows: the picks, plus this block's own variety / farm when it
+  // is inactive now (an edited block still shows its names).
+  List _varietyItems(int? currentId) => varieties
+      .where((v) =>
+          v['crop_type'] == 'perennial' &&
+          (v['id'] == currentId ||
+              (isRowActive(v) &&
+                  !(v['crop_is_active'] == 0 || v['crop_is_active'] == false))))
+      .toList();
+  List _farmItems(int? currentId) =>
+      farms.where((f) => isRowActive(f) || f['id'] == currentId).toList();
 
   @override
   void initState() {
@@ -47,9 +70,11 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
     setState(() => loading = true);
     try {
       final results = await Future.wait([
-        Api.get('/farms'),
-        Api.get('/agri/crop-varieties'),
-        Api.get('/agri/orchard-blocks'),
+        // all=1 so an existing block whose farm / variety is now inactive
+        // still shows its name; pickers filter to active ones below
+        Api.get('/farms?all=1'),
+        Api.get('/agri/crop-varieties?all=1'),
+        Api.get('/agri/orchard-blocks?all=1'),
       ]);
       if (results[0].statusCode == 200) farms = jsonDecode(results[0].body);
       if (results[1].statusCode == 200) varieties = jsonDecode(results[1].body);
@@ -75,12 +100,13 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
   // ── Orchard Block dialog ─────────────────────────────────────────
   void _showOrchardBlockDialog({Map? block}) {
     final loc = AppLocalizations.of(context)!;
-    if (perennialVarieties.isEmpty) {
+    if (block == null && perennialVarieties.isEmpty) {
       _showSnack('Add a perennial crop variety first', isError: true);
       return;
     }
+    final activeFarms = farms.where(isRowActive).toList();
     int? farmId =
-        block?['farm_id'] ?? (farms.isNotEmpty ? farms.first['id'] : null);
+        block?['farm_id'] ?? (activeFarms.isNotEmpty ? activeFarms.first['id'] : null);
     int? varietyId =
         block?['crop_variety_id'] ?? perennialVarieties.first['id'];
     DateTime plantingDate = block != null
@@ -112,12 +138,12 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               DropdownButtonFormField<int>(
-                value: farmId,
+                value: _farmItems(block?['farm_id']).any((f) => f['id'] == farmId) ? farmId : null,
                 decoration: InputDecoration(
                     labelText: loc.agriFarmLabel,
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10))),
-                items: farms
+                items: _farmItems(block?['farm_id'])
                     .map<DropdownMenuItem<int>>((f) => DropdownMenuItem(
                         value: f['id'], child: Text(tl(context, f['name']))))
                     .toList(),
@@ -127,12 +153,12 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<int>(
-                value: varietyId,
+                value: _varietyItems(block?['crop_variety_id']).any((v) => v['id'] == varietyId) ? varietyId : null,
                 decoration: InputDecoration(
                     labelText: '${loc.agriVarietyLabel} (${loc.agriPerennial})',
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10))),
-                items: perennialVarieties
+                items: _varietyItems(block?['crop_variety_id'])
                     .map<DropdownMenuItem<int>>((v) => DropdownMenuItem(
                         value: v['id'],
                         child: Text(
@@ -295,6 +321,8 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context)!;
+    final shown =
+        orchardBlocks.where((b) => _blockInactive(b) == showInactive).toList();
     return Scaffold(
       backgroundColor: const Color(0xFFF4F7F2),
       appBar: AppBar(
@@ -311,19 +339,35 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
               onPressed: () => _showOrchardBlockDialog(),
               child: const Icon(Icons.add, color: Colors.white),
             ),
-      body: Responsive.constrainedContent(
+      body: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: MasterStatusToggle(
+              showInactive: showInactive,
+              activeCount: orchardBlocks.where((b) => !_blockInactive(b)).length,
+              inactiveCount: orchardBlocks.where(_blockInactive).length,
+              onChanged: (v) => setState(() => showInactive = v),
+            ),
+          ),
+        ),
+        Expanded(child: Responsive.constrainedContent(
           context,
           loading
               ? const Center(child: CircularProgressIndicator(color: idaGreen))
-              : orchardBlocks.isEmpty
-                  ? _empty(loc.agriNoOrchardBlocksYet)
+              : shown.isEmpty
+                  ? _empty(orchardBlocks.isEmpty
+                      ? loc.agriNoOrchardBlocksYet
+                      : (showInactive ? loc.miNoneInactive : loc.miNoneActive))
                   : ListView.separated(
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
-                      itemCount: orchardBlocks.length,
+                      itemCount: shown.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 8),
                       itemBuilder: (_, i) {
-                        final b = orchardBlocks[i];
+                        final b = shown[i];
                         return _row(
+                          inactive: _blockInactive(b),
                           title:
                               '${tl(context, b['farm_name'])} — ${tl(context, b['crop_variety_name'])}',
                           subtitle:
@@ -331,11 +375,16 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
                           onTap: () => _showOrchardBlockDialog(block: b),
                         );
                       },
-                    )),
+                    ))),
+      ]),
     );
   }
 
-  Widget _row({required String title, String? subtitle, VoidCallback? onTap}) {
+  Widget _row(
+      {required String title,
+      String? subtitle,
+      VoidCallback? onTap,
+      bool inactive = false}) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -350,8 +399,10 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(title,
-                  style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: inactive ? Colors.grey : Colors.black87),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1),
               if (subtitle != null && subtitle.isNotEmpty) ...[
@@ -363,6 +414,10 @@ class _OrchardBlocksScreenState extends State<OrchardBlocksScreen> {
               ],
             ]),
           ),
+          if (inactive) ...[
+            AChip(AppLocalizations.of(context)!.miInactive),
+            const SizedBox(width: 6),
+          ],
           if (onTap != null)
             const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
         ]),

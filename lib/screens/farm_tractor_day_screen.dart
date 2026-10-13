@@ -472,6 +472,20 @@ class _TractorCardState extends State<_TractorCard> {
 }
 
 // ── Add / change a job ────────────────────────────────────────────────
+// Dropdown rows for a farm / work type list (active ones only, as the server
+// sends them), plus the record's own pick when it was marked inactive since,
+// so an existing job still shows its name.
+List<DropdownMenuItem<int>> _pickItems(List list, int? current, dynamic currentName) {
+  final items = <DropdownMenuItem<int>>[
+    for (final x in list)
+      if (toI(x['id']) != null) DropdownMenuItem<int>(value: toI(x['id']), child: Text('${x['name']}')),
+  ];
+  if (current != null && !items.any((i) => i.value == current)) {
+    items.add(DropdownMenuItem<int>(value: current, child: Text('${currentName ?? '—'}')));
+  }
+  return items;
+}
+
 class _JobForm extends StatefulWidget {
   final String date;
   final List<Map> tractors;
@@ -674,7 +688,7 @@ class _JobFormState extends State<_JobForm> {
           const SizedBox(height: 8),
         ],
         DropdownButtonFormField<int>(
-          value: tractorId,
+          value: widget.tractors.any((x) => toI(x['id']) == tractorId) ? tractorId : null,
           isExpanded: true,
           decoration: agInput('Tractor'),
           items: [for (final x in widget.tractors) DropdownMenuItem(value: toI(x['id']), child: Text(_tractorLabel(x)))],
@@ -689,7 +703,7 @@ class _JobFormState extends State<_JobForm> {
           value: farmId,
           isExpanded: true,
           decoration: agInput('Farm'),
-          items: [for (final f in widget.farms) DropdownMenuItem(value: toI(f['id']), child: Text('${f['name']}'))],
+          items: _pickItems(widget.farms, farmId, widget.job?['farm_name'] ?? widget.continues?['farm_name']),
           onChanged: locked ? null : (v) => setState(() => farmId = v),
         ),
         const SizedBox(height: 12),
@@ -697,7 +711,7 @@ class _JobFormState extends State<_JobForm> {
           value: workTypeId,
           isExpanded: true,
           decoration: agInput('Work'),
-          items: [for (final w in widget.workTypes) DropdownMenuItem(value: toI(w['id']), child: Text('${w['name']}'))],
+          items: _pickItems(widget.workTypes, workTypeId, widget.job?['work_type_name'] ?? widget.continues?['work_type_name']),
           onChanged: locked ? null : (v) => setState(() {
                 workTypeId = v;
                 billingUnit = null;
