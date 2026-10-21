@@ -40,6 +40,7 @@ import 'sector_picker_screen.dart';
 import 'needs_attention_screen.dart';
 import 'weather_screen.dart';
 import 'mandi/mandi_prices_screen.dart';
+import 'raw_material/raw_material_screen.dart';
 import 'electricity_bill_projection_screen.dart';
 import '../localization/app_localizations.dart';
 import '../localization/app_locale.dart';
@@ -690,6 +691,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     _can('factory') ||
                     _can('machine') ||
                     _can('machine_pf') ||
+                    _can('raw_material') ||
                     _can('outward_register')) ...[
                   _sectionHeader(
                       AppLocalizations.of(context)!.sectionDailyEntries),
@@ -812,6 +814,21 @@ class _DashboardScreenState extends State<DashboardScreen>
                           MaterialPageRoute(
                               builder: (_) =>
                                   const OutwardRegisterListScreen())),
+                    ),
+                  if (_can('raw_material'))
+                    _tile(
+                      icon: Icons.scale_outlined,
+                      label: AppLocalizations.of(context)!
+                          .moduleLabel('raw_material', 'Raw Material & Dues'),
+                      sub: AppLocalizations.of(context)!.moduleDescription(
+                          'raw_material',
+                          'Raw material received and amount owed to each supplier'),
+                      iconBg: const Color(0xFFFFF1E0),
+                      iconColor: const Color(0xFFB8650A),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const RawMaterialScreen())),
                     ),
                 ]),
 

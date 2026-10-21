@@ -21,6 +21,7 @@ dependencies:
   open_filex: ^4.5.0
   # Share.shareXFiles works the same as in 9.x.
   share_plus: ^10.1.4
+  pdf: ^3.11.1
   image: ^4.1.7
   url_launcher: ^6.3.0
   camera: ^0.11.0

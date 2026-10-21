@@ -78,6 +78,15 @@ const List<Map<String, String>> kModuleDefinitions = [
     'icon': 'eco',
   },
   {
+    'key': 'raw_material',
+    'levels': 'view',
+    'label': 'Raw Material & Supplier Dues',
+    'description':
+        'Raw material received and the amount owed to each supplier, with the supplier ledger (read from Tally)',
+    'route': '/raw-material',
+    'icon': 'scale',
+  },
+  {
     'key': 'mandi_prices',
     'levels': 'view,add,update,delete',
     'label': 'Mandi Prices',
@@ -265,6 +274,7 @@ const List<String> kFactoryModuleKeys = [
   'machine_pf',
   'outward_register',
   'daily_report',
+  'raw_material',
   'reports_analytics',
   'payroll',
   'transport',

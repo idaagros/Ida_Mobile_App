@@ -36,6 +36,7 @@ const List<(String, String, List<(String, String, String)>)> kPermGroups = [
     ('machine_maintenance', 'Machine maintenance', ''),
     ('tractor_maintenance', 'Tractor maintenance', ''),
     ('daily_report', 'Daily reading report', ''),
+    ('raw_material', 'Raw material & dues', 'from Tally'),
   ]),
   ('office', 'Office', [
     ('reports_analytics', 'Reports & analytics', 'report tiles'),

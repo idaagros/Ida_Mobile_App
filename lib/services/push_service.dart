@@ -44,6 +44,7 @@ import '../screens/notifications_screen.dart';
 import '../screens/otp_approvals_screen.dart';
 import '../screens/outward_register_review_screen.dart';
 import '../screens/outward_register_screen.dart';
+import '../screens/raw_material/raw_material_screen.dart';
 import '../screens/tractor_screen.dart';
 import '../screens/work_allocation_screen.dart';
 
@@ -313,6 +314,9 @@ class PushService {
         break;
       case 'machine_pf':
         screen = returned ? MachinePfScreen(returnedRecordId: id, adminNote: note) : const MachinePfScreen();
+        break;
+      case 'raw_material':
+        screen = const RawMaterialScreen();
         break;
       case 'factory':
         screen = const FactoryRunScreen();
