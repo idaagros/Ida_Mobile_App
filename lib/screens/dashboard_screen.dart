@@ -28,6 +28,7 @@ import 'admin/farm_masters_screen.dart';
 import 'farm_picker_screen.dart';
 import 'tv_dashboard_screen.dart';
 import 'attendance_screen.dart';
+import 'farm_day_screen.dart';
 import 'farm_tractor_day_screen.dart';
 import 'admin/crop_masters_screen.dart';
 import 'admin/agronomy_setup_screen.dart';
@@ -1003,6 +1004,18 @@ class _DashboardScreenState extends State<DashboardScreen>
                             context,
                             MaterialPageRoute(
                                 builder: (_) => const AttendanceScreen())),
+                      ),
+                    if (_can('farm_attendance'))
+                      _tile(
+                        icon: Icons.fact_check_outlined,
+                        label: "Today's work (new)",
+                        sub: 'Attendance and work allocation on one screen, one approval',
+                        iconBg: const Color(0xFFE8F5E2),
+                        iconColor: idaGreen,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const FarmDayScreen())),
                       ),
                     if (_can('farm_masters')) ...[
                       _tile(
