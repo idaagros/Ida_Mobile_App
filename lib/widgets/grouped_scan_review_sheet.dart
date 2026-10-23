@@ -49,6 +49,12 @@ class GroupedScanReviewSheet extends StatefulWidget {
   // row with no OCR-read amount would actually apply, rather than
   // leaving the field looking blank/broken.
   final String? Function(Map<String, dynamic>)? fallbackRateOf;
+  // Used by the spoken allocation (Oct 2026): own heading, no rate box (the pay comes from
+  // each worker's day wage), and every task must have a farm before it can be confirmed.
+  final String title;
+  final String hint;
+  final bool showRate;
+  final bool requireFarm;
 
   const GroupedScanReviewSheet({
     super.key,
@@ -61,6 +67,10 @@ class GroupedScanReviewSheet extends StatefulWidget {
     required this.workerIdOf,
     required this.workerNameOf,
     this.fallbackRateOf,
+    this.title = 'Review Scanned List',
+    this.hint = 'check each Farm/Work Type and match before confirming',
+    this.showRate = true,
+    this.requireFarm = false,
   });
 
   @override
@@ -149,11 +159,11 @@ class _GroupedScanReviewSheetState extends State<GroupedScanReviewSheet> {
             child: Row(children: [
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('Review Scanned List',
+                  Text(widget.title,
                       style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: idaDark)),
                   const SizedBox(height: 2),
                   Text(
-                      '${sections.length} task${sections.length == 1 ? '' : 's'} detected — check each Farm/Work Type and match before confirming',
+                      '${sections.length} task${sections.length == 1 ? '' : 's'} detected — ${widget.hint}',
                       style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
                 ]),
               ),
@@ -184,7 +194,9 @@ class _GroupedScanReviewSheetState extends State<GroupedScanReviewSheet> {
                 style: ElevatedButton.styleFrom(
                     backgroundColor: widget.idaGreen,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                onPressed: () {
+                onPressed: widget.requireFarm && sections.any((x) => x.farmId == null && x.entries.any((e) => e.selectedWorkerId != null))
+                    ? null
+                    : () {
                   final confirmed = sections
                       .map((s) => ConfirmedSection(farmId: s.farmId, workTypeId: s.workTypeId, entries: s.entries))
                       .toList();
@@ -308,14 +320,20 @@ class _GroupedScanReviewSheetState extends State<GroupedScanReviewSheet> {
           ],
           onChanged: (v) => _changeMatch(entry, v),
         ),
+        if (entry.selectedWorkerId != null && entry.matchScore < 0.8)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text('Not sure about this one — please check the name',
+                style: TextStyle(fontSize: 10.5, color: Colors.orange.shade700)),
+          ),
         if (lowConfidence && entry.selectedWorkerId == null)
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text('No confident match — please pick manually',
                 style: TextStyle(fontSize: 10.5, color: Colors.orange.shade700)),
           ),
-        const SizedBox(height: 6),
-        TextField(
+        if (widget.showRate) const SizedBox(height: 6),
+        if (widget.showRate) TextField(
           controller: entry.amountCtrl,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           style: const TextStyle(fontSize: 12),

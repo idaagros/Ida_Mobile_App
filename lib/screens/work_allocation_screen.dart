@@ -39,8 +39,18 @@ import '../widgets/att_parts.dart';
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
 import '../services/responsive.dart';
-import 'admin/admin_common.dart' show isRowActive;
+import '../widgets/voice_allocation_sheet.dart';
+import '../widgets/grouped_scan_review_sheet.dart';
 import 'attendance_change_log_screen.dart';
+
+// A master row is active unless it says otherwise (inactive farms / work types are
+// only offered when they are already picked).
+bool _waIsActive(dynamic row) {
+  if (row is! Map) return true;
+  final v = row['is_active'];
+  if (v == null) return true;
+  return v == 1 || v == true || v == '1' || v == 'true';
+}
 
 class WorkAllocationScreen extends StatefulWidget {
   final DateTime attendanceDate;
@@ -271,10 +281,10 @@ class _TaskFieldsState extends State<_TaskFields> {
   Widget build(BuildContext context) {
     final s = widget.spec;
     final farmItems = widget.farms
-        .where((f) => isRowActive(f) || f['id'] == s.farmId)
+        .where((f) => _waIsActive(f) || f['id'] == s.farmId)
         .toList();
     final workItems = widget.workTypes
-        .where((w) => isRowActive(w) || w['id'] == s.workTypeId)
+        .where((w) => _waIsActive(w) || w['id'] == s.workTypeId)
         .toList();
     final farmVal = farmItems.any((f) => f['id'] == s.farmId) ? s.farmId : null;
     final workVal =
@@ -804,11 +814,11 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
     }
   }
 
-  Future<void> _assignSheet() async {
-    if (sel.isEmpty) return;
-    final spec = _Spec();
+  Future<void> _assignSheet({_Spec? preset, List<int>? presetIds}) async {
+    if (preset == null && sel.isEmpty) return;
+    final spec = preset ?? _Spec();
     String? err;
-    final ids = sel.toList();
+    final ids = presetIds ?? sel.toList();
     final ok = await _sheet<bool>((ctx, setSheet) => [
           Text('Assign ${ids.length} ${ids.length == 1 ? 'person' : 'people'} to a task',
               style: const TextStyle(
@@ -851,9 +861,62 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
       _addPeople(t, ids);
       final msg =
           '${ids.length} ${ids.length == 1 ? 'person' : 'people'} added to ${_workName(t)} · ${_farmName(t.farmId)}.';
-      sel.clear();
+      if (preset == null) sel.clear();
       _after(msg: msg);
     }
+  }
+
+  // ── Speak the allocation (Oct 2026) ──
+  // The phone listens, the server matches the words, this screen shows a review sheet,
+  // and only then are the tasks added - exactly like picking people and pressing Assign.
+  Future<void> _voiceAllocate() async {
+    final draft = await showModalBottomSheet<VoiceDraft>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (_) => VoiceAllocationSheet(dateStr: _dateStr, idaGreen: attGreen),
+    );
+    if (draft == null || !mounted) return;
+    final confirmed = await showModalBottomSheet<List<ConfirmedSection>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => GroupedScanReviewSheet(
+        sections: draft.sections,
+        unclassified: draft.unclassified,
+        candidateWorkers: presentWorkers,
+        farms: farms.map<Map<String, dynamic>>((f) => Map<String, dynamic>.from(f as Map)).toList(),
+        workTypes: workTypes.map<Map<String, dynamic>>((w) => Map<String, dynamic>.from(w as Map)).toList(),
+        idaGreen: attGreen,
+        workerIdOf: (w) => _int(w['worker_id']),
+        workerNameOf: (w) => '${w['name'] ?? ''}',
+        title: 'Review spoken allocation',
+        hint: 'check each farm, work and name, then confirm',
+        showRate: false,
+        requireFarm: true,
+      ),
+    );
+    if (confirmed == null || !mounted) return;
+    var added = 0;
+    for (final c in confirmed) {
+      final ids = c.entries.where((e) => e.selectedWorkerId != null).map((e) => e.selectedWorkerId!).toList();
+      if (ids.isEmpty || c.farmId == null) continue;
+      final spec = _Spec(farmId: c.farmId, workTypeId: c.workTypeId);
+      final needs = await _checkSpec(spec);
+      if (needs != null) {
+        // a farm with more than one crop: the person picks the crop (or General farm work)
+        final before = tasks.fold<int>(0, (a, t) => a + t.workers.length);
+        await _assignSheet(preset: spec, presetIds: ids);
+        added += tasks.fold<int>(0, (a, t) => a + t.workers.length) - before;
+        continue;
+      }
+      final t = _taskFor(spec);
+      _addPeople(t, ids);
+      added += ids.length;
+    }
+    if (!mounted) return;
+    _after(msg: added == 0 ? 'Nothing was added.' : '$added ${added == 1 ? 'person' : 'people'} added by voice. Check the Tasks tab, then Draft or Submit.');
   }
 
   Future<void> _editTask(_Task t) async {
@@ -1333,6 +1396,12 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
             '${loc.faWaTitle} · ${DateFormat('dd MMM').format(widget.attendanceDate)}',
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
         actions: [
+          if (!loading && _attOpen && _canBuild)
+            IconButton(
+              icon: const Icon(Icons.mic_none),
+              tooltip: 'Speak the allocation',
+              onPressed: busy == null ? _voiceAllocate : null,
+            ),
           if (!loading && _attOpen && _canBuild)
             IconButton(
               icon: const Icon(Icons.content_copy_outlined),
