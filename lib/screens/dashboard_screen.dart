@@ -29,6 +29,7 @@ import 'farm_picker_screen.dart';
 import 'tv_dashboard_screen.dart';
 import 'attendance_screen.dart';
 import 'farm_day_screen.dart';
+import 'wages_screen.dart';
 import 'farm_tractor_day_screen.dart';
 import 'admin/crop_masters_screen.dart';
 import 'admin/agronomy_setup_screen.dart';
@@ -1016,6 +1017,18 @@ class _DashboardScreenState extends State<DashboardScreen>
                             context,
                             MaterialPageRoute(
                                 builder: (_) => const FarmDayScreen())),
+                      ),
+                    if (_can('farm_attendance'))
+                      _tile(
+                        icon: Icons.payments_outlined,
+                        label: 'Wages',
+                        sub: 'Ask who is to be paid how much — by name, day, week (Sun–Sat)',
+                        iconBg: const Color(0xFFE8F5E2),
+                        iconColor: idaGreen,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const WagesScreen())),
                       ),
                     if (_can('farm_masters')) ...[
                       _tile(

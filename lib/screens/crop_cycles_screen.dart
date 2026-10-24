@@ -19,6 +19,7 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'crop_calendar_screen.dart';
 import 'agri/cycle_common.dart';
+import 'agri/farm_voice_screen.dart';
 import 'agronomy/agronomy_common.dart' show AgriApi;
 import '../localization/app_localizations.dart';
 import '../localization/transliterate.dart';
@@ -611,6 +612,18 @@ class _CropCyclesScreenState extends State<CropCyclesScreen> {
         elevation: 0,
         title: Text(loc.agriCyclesTitle,
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+        actions: [
+          // Spray and harvest by voice (typed on the web) - admins only
+          if (isAdmin)
+            IconButton(
+              tooltip: 'Spray / harvest by voice',
+              icon: const Icon(Icons.mic),
+              onPressed: () async {
+                await Navigator.push(context, MaterialPageRoute(builder: (_) => const FarmVoiceScreen()));
+                if (mounted) _loadAll();
+              },
+            ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: idaGreen,

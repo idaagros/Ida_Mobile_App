@@ -17,6 +17,7 @@
 //        PATCH /attendance/day/:date/attendance-decision { decision, note, ids? }
 
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/responsive.dart';
@@ -25,6 +26,7 @@ import '../services/api_client.dart';
 import '../services/offline_queue.dart';
 import '../widgets/offline_status_bar.dart';
 import '../widgets/att_parts.dart';
+import '../widgets/voice_allocation_sheet.dart';
 import 'reports/report_builder_screen.dart';
 import 'work_allocation_screen.dart';
 import 'attendance_calendar_screen.dart';
@@ -272,6 +274,95 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   List<int> get _onIds => kinds.keys.where(_isOn).toList();
+
+  String _nameOfWorker(int id) {
+    for (final w in workers) {
+      if (w['id'] == id) return '${w['name']}';
+    }
+    return 'Worker $id';
+  }
+
+  // Speak who is present ("Raman, Rahul, Viju bhau half day, Neelu"). The person checks the list
+  // first; nothing is marked until they tap "Mark these".
+  Future<void> _voiceMark() async {
+    final res = await showModalBottomSheet<Map>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => VoiceAllocationSheet(dateStr: _dateStr, idaGreen: idaGreen, raw: true, all: true, attendance: true),
+    );
+    if (res == null || !mounted) return;
+    final items = <Map<String, dynamic>>[
+      for (final w in (res['workers'] as List? ?? []))
+        {
+          'id': (w['id'] as num).toInt(),
+          'kind': '${w['kind']}',
+          'sure': w['sure'] == true,
+          'alts': [for (final a in (w['alts'] as List? ?? [])) (a['id'] as num).toInt()],
+        }
+    ];
+    if (items.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No worker names were recognised. Try again.')));
+      return;
+    }
+    String kindText(String k) => k == 'half' ? ' · half day' : (k == 'paid_leave' ? ' · leave with pay' : '');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => StatefulBuilder(builder: (dctx, setD) {
+        return AlertDialog(
+          title: Text('Check: ${items.length} present'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Wrap(spacing: 6, runSpacing: 4, children: [
+                  for (final it in items)
+                    InputChip(
+                      backgroundColor: it['sure'] == true ? null : attAmberBg,
+                      label: Text('${_nameOfWorker(it['id'] as int)}${kindText('${it['kind']}')}${it['sure'] == true ? '' : ' ?'}'),
+                      onPressed: (it['alts'] as List).isNotEmpty || it['sure'] != true
+                          ? () async {
+                              final pick = await showDialog<int>(
+                                context: dctx,
+                                builder: (c2) => SimpleDialog(title: Text('Who is "${_nameOfWorker(it['id'] as int)}"?'), children: [
+                                  for (final id in [it['id'] as int, ...(it['alts'] as List).cast<int>()])
+                                    SimpleDialogOption(onPressed: () => Navigator.pop(c2, id), child: Text(_nameOfWorker(id))),
+                                ]),
+                              );
+                              if (pick != null) {
+                                setD(() {
+                                  it['id'] = pick;
+                                  it['sure'] = true;
+                                  it['alts'] = <int>[];
+                                });
+                              }
+                            }
+                          : null,
+                      onDeleted: () => setD(() => items.remove(it)),
+                    ),
+                ]),
+                const SizedBox(height: 10),
+                const Text('A name with ? may be someone else: tap it to choose. Nothing is marked until you tap Mark these.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ]),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dctx, false), child: const Text('Cancel')),
+            TextButton(onPressed: items.isEmpty ? null : () => Navigator.pop(dctx, true), child: const Text('Mark these')),
+          ],
+        );
+      }),
+    );
+    if (ok != true || !mounted) return;
+    for (final it in items) {
+      final id = it['id'] as int;
+      final k = '${it['kind']}';
+      // leave with pay = not working today (paid automatically when the worker is flagged Paid when absent)
+      _setKind(id, k == 'paid_leave' ? 'absent' : k);
+    }
+  }
 
   void _setKind(int id, String k) {
     setState(() {
@@ -1337,6 +1428,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   style: const TextStyle(color: idaGreen, fontSize: 12.5, fontWeight: FontWeight.w600)),
               style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 0)),
             ),
+            if (!kIsWeb)
+              TextButton.icon(
+                onPressed: _voiceMark,
+                icon: const Icon(Icons.mic, size: 16, color: idaGreen),
+                label: const Text('Speak names',
+                    style: TextStyle(color: idaGreen, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 0)),
+              ),
             TextButton.icon(
               onPressed: _showAddWorkerDialog,
               icon: const Icon(Icons.person_add_alt_1, size: 16, color: idaGreen),

@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import 'rm_common.dart';
 import 'rm_party_screen.dart';
+import 'rm_pay_screen.dart';
 
 class RawMaterialScreen extends StatefulWidget {
   const RawMaterialScreen({super.key});
@@ -202,6 +203,12 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
           else
             IconButton(icon: const Icon(Icons.refresh), tooltip: 'Refresh from Tally', onPressed: () => _refresh()),
           if (isAdmin)
+            IconButton(
+              icon: const Icon(Icons.currency_rupee),
+              tooltip: 'Pay a supplier (enters it in Tally)',
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RmPayScreen())),
+            ),
+          if (isAdmin)
             PopupMenuButton<String>(
               onSelected: (v) {
                 if (v == 'full') _refresh(full: true);
@@ -231,12 +238,14 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
                 _load();
               },
             ),
-            if (range == 'season' && isAdmin && status['season_start'] != null)
+            if (isAdmin && status['season_start'] != null)
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton(
                   onPressed: _changeSeason,
-                  child: Text('Season starts ${dmy(status['season_start'])} · change'),
+                  child: Text(status['season_custom'] == true
+                      ? 'Season starts ${dmy(status['season_start'])} · change'
+                      : 'Season start not set (showing from ${dmy(status['season_start'])}) · set it'),
                 ),
               ),
             if (items.length > 1) ...[

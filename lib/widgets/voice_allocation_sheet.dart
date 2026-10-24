@@ -25,7 +25,32 @@ class VoiceDraft {
 class VoiceAllocationSheet extends StatefulWidget {
   final String dateStr; // yyyy-MM-dd of the attendance day
   final Color idaGreen;
-  const VoiceAllocationSheet({super.key, required this.dateStr, required this.idaGreen});
+  // raw: hand the server's answer (a Map) straight back instead of building the old review sheet's draft.
+  final bool raw;
+  // all: anyone active can be named (Today's work). Otherwise only workers marked present that day.
+  final bool all;
+  // attendance: the words are only worker names (who is present), not farm / work.
+  final bool attendance;
+  // For other voice uses (factory, wages): a different server address + words shown on the sheet.
+  // The server's answer is handed back as it is (raw).
+  final String? endpoint;
+  final Map<String, dynamic>? extraBody;
+  final String? title;
+  final String? hint;
+  final String bodyKey; // the name the server expects for the spoken text
+  const VoiceAllocationSheet({
+    super.key,
+    required this.dateStr,
+    required this.idaGreen,
+    this.raw = false,
+    this.all = false,
+    this.attendance = false,
+    this.endpoint,
+    this.extraBody,
+    this.title,
+    this.hint,
+    this.bodyKey = 'transcript',
+  });
 
   @override
   State<VoiceAllocationSheet> createState() => _VoiceAllocationSheetState();
@@ -58,13 +83,15 @@ class _VoiceAllocationSheetState extends State<VoiceAllocationSheet> {
       _ready = await _speech.initialize(
         onStatus: (s) {
           if (!mounted) return;
-          if (s == 'done' || s == 'notListening') setState(() => _listening = false);
+          if (s == 'done' || s == 'notListening')
+            setState(() => _listening = false);
         },
         onError: (e) {
           if (!mounted) return;
           setState(() {
             _listening = false;
-            _error = 'Could not listen (${e.errorMsg}). You can type, or use the keyboard microphone.';
+            _error =
+                'Could not listen (${e.errorMsg}). You can type, or use the keyboard microphone.';
           });
         },
       );
@@ -72,7 +99,8 @@ class _VoiceAllocationSheetState extends State<VoiceAllocationSheet> {
       _ready = false;
     }
     if (!_ready && mounted) {
-      _error = 'Voice is not available on this phone right now. You can type, or use the keyboard microphone.';
+      _error =
+          'Voice is not available on this phone right now. You can type, or use the keyboard microphone.';
     }
     if (mounted) setState(() {});
   }
@@ -136,7 +164,22 @@ class _VoiceAllocationSheetState extends State<VoiceAllocationSheet> {
       _listening = false;
     });
     try {
-      final res = await Api.json('POST', '/voice-allocation/parse', body: {'date': widget.dateStr, 'transcript': said});
+      final res = await Api.json(
+          'POST',
+          widget.endpoint ??
+              (widget.attendance
+                  ? '/voice-allocation/attendance'
+                  : '/voice-allocation/parse'),
+          body: {
+            'date': widget.dateStr,
+            widget.bodyKey: said,
+            if (widget.all) 'all': true,
+            ...?widget.extraBody
+          });
+      if (widget.raw || widget.endpoint != null) {
+        if (mounted) Navigator.pop(context, res);
+        return;
+      }
       final secs = <ScanSection>[];
       for (final s in (res['sections'] as List? ?? [])) {
         final farm = s['farm'];
@@ -148,10 +191,13 @@ class _VoiceAllocationSheetState extends State<VoiceAllocationSheet> {
           workTypeLabel: wt == null ? 'Choose work type' : '${wt['name']}',
         );
         for (final w in (s['workers'] as List? ?? [])) {
-          final alts = (w['alts'] as List? ?? []).map((a) => '${a['name']}').toList();
+          final alts =
+              (w['alts'] as List? ?? []).map((a) => '${a['name']}').toList();
           final heard = '${w['heard']}';
           sec.entries.add(ScanWorkerEntry(
-            rawLine: alts.isEmpty ? heard : '$heard (could also be ${alts.join(' / ')})',
+            rawLine: alts.isEmpty
+                ? heard
+                : '$heard (could also be ${alts.join(' / ')})',
             selectedWorkerId: (w['id'] as num).toInt(),
             initialAmount: '',
             matchScore: w['sure'] == true ? 0.95 : 0.6,
@@ -163,7 +209,8 @@ class _VoiceAllocationSheetState extends State<VoiceAllocationSheet> {
       if (secs.isEmpty) {
         setState(() {
           _busy = false;
-          _error = 'No worker names were recognised among today\'s present workers. Check the words above, or try again.';
+          _error =
+              'No worker names were recognised among today\'s present workers. Check the words above, or try again.';
         });
         return;
       }
@@ -182,81 +229,121 @@ class _VoiceAllocationSheetState extends State<VoiceAllocationSheet> {
   Widget build(BuildContext context) {
     final green = widget.idaGreen;
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.fromLTRB(
+          16, 16, 16, 16 + MediaQuery.of(context).viewInsets.bottom),
       child: SingleChildScrollView(
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Row(children: [
-            const Expanded(
-              child: Text('Speak the allocation',
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF1E4012))),
-            ),
-            IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
-          ]),
-          const Text(
-              'Say the farm, then the work, then the workers. Then say the next farm and work, and so on. Example: "Choufuli, fer, Raman, Rahul, Neelu".',
-              style: TextStyle(fontSize: 12.5, color: Color(0xFF5F6A58))),
-          const SizedBox(height: 10),
-          Row(children: [
-            ChoiceChip(
-              label: const Text('हिन्दी'),
-              selected: _locale == 'hi_IN',
-              onSelected: _listening ? null : (_) => _setLocale('hi_IN'),
-            ),
-            const SizedBox(width: 8),
-            ChoiceChip(
-              label: const Text('English'),
-              selected: _locale == 'en_IN',
-              onSelected: _listening ? null : (_) => _setLocale('en_IN'),
-            ),
-          ]),
-          const SizedBox(height: 14),
-          Center(
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: _ready && !_busy ? _toggleListen : null,
-              child: Container(
-                width: 84,
-                height: 84,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: !_ready ? Colors.grey.shade400 : (_listening ? Colors.red.shade600 : green),
-                  boxShadow: _listening ? [BoxShadow(color: Colors.red.withOpacity(0.35), blurRadius: 18, spreadRadius: 4)] : null,
+        child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(children: [
+                Expanded(
+                  child: Text(
+                      widget.title ??
+                          (widget.attendance
+                              ? 'Speak who is present'
+                              : 'Speak the work'),
+                      style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF1E4012))),
                 ),
-                child: Icon(_listening ? Icons.stop : Icons.mic, color: Colors.white, size: 40),
+                IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context)),
+              ]),
+              Text(
+                  widget.hint ??
+                      (widget.attendance
+                          ? 'Say the names of everyone present. After a name you can say "half day" or "leave". Nicknames work too. Example: "Raman, Rahul, Viju bhau half day, Neelu".'
+                          : 'Say the farm, then the work, then the workers. Then say the next farm and work, and so on. After a name you can say "half day" or an amount. Example: "Choufuli, fer, Raman, Rahul, Neelu".'),
+                  style: const TextStyle(
+                      fontSize: 12.5, color: Color(0xFF5F6A58))),
+              const SizedBox(height: 10),
+              Row(children: [
+                ChoiceChip(
+                  label: const Text('हिन्दी'),
+                  selected: _locale == 'hi_IN',
+                  onSelected: _listening ? null : (_) => _setLocale('hi_IN'),
+                ),
+                const SizedBox(width: 8),
+                ChoiceChip(
+                  label: const Text('English'),
+                  selected: _locale == 'en_IN',
+                  onSelected: _listening ? null : (_) => _setLocale('en_IN'),
+                ),
+              ]),
+              const SizedBox(height: 14),
+              Center(
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: _ready && !_busy ? _toggleListen : null,
+                  child: Container(
+                    width: 84,
+                    height: 84,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: !_ready
+                          ? Colors.grey.shade400
+                          : (_listening ? Colors.red.shade600 : green),
+                      boxShadow: _listening
+                          ? [
+                              BoxShadow(
+                                  color: Colors.red.withOpacity(0.35),
+                                  blurRadius: 18,
+                                  spreadRadius: 4)
+                            ]
+                          : null,
+                    ),
+                    child: Icon(_listening ? Icons.stop : Icons.mic,
+                        color: Colors.white, size: 40),
+                  ),
+                ),
               ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Center(
-            child: Text(_listening ? 'Listening… tap to stop' : (_ready ? 'Tap and speak' : 'Microphone not available'),
-                style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700)),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _text,
-            minLines: 3,
-            maxLines: 6,
-            decoration: const InputDecoration(
-              labelText: 'What was heard (you can correct it)',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(_error!, style: TextStyle(fontSize: 12.5, color: Colors.orange.shade800)),
-            ),
-          const SizedBox(height: 12),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: green, padding: const EdgeInsets.symmetric(vertical: 14)),
-            onPressed: _busy ? null : _check,
-            child: Text(_busy ? 'Checking…' : 'Check and review',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-          ),
-          const SizedBox(height: 4),
-          const Text('Nothing is saved yet. You review everything on the next screen.',
-              textAlign: TextAlign.center, style: TextStyle(fontSize: 11.5, color: Color(0xFF5F6A58))),
-        ]),
+              const SizedBox(height: 6),
+              Center(
+                child: Text(
+                    _listening
+                        ? 'Listening… tap to stop'
+                        : (_ready
+                            ? 'Tap and speak'
+                            : 'Microphone not available'),
+                    style:
+                        TextStyle(fontSize: 12.5, color: Colors.grey.shade700)),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _text,
+                minLines: 3,
+                maxLines: 6,
+                decoration: const InputDecoration(
+                  labelText: 'What was heard (you can correct it)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(_error!,
+                      style: TextStyle(
+                          fontSize: 12.5, color: Colors.orange.shade800)),
+                ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: green,
+                    padding: const EdgeInsets.symmetric(vertical: 14)),
+                onPressed: _busy ? null : _check,
+                child: Text(_busy ? 'Checking…' : 'Check and review',
+                    style: const TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                  'Nothing is saved yet. You review everything on the next screen.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11.5, color: Color(0xFF5F6A58))),
+            ]),
       ),
     );
   }

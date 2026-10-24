@@ -9,11 +9,13 @@
 // It sits BESIDE the old Attendance / Work allocation screens and saves to the same data, so
 // reports and the old "Change after approval" flow keep working. Server: /farm-day (routes/farmDay.js).
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/api_client.dart';
 import '../services/responsive.dart';
 import '../widgets/att_parts.dart';
+import '../widgets/voice_allocation_sheet.dart';
 
 const Color _bgMen = Color(0xFFF1F6EC);
 const Color _bgWomen = Color(0xFFFBF2F4);
@@ -52,6 +54,22 @@ class _Opt {
   final int id;
   final String label;
   const _Opt(this.id, this.label);
+}
+
+class _VW {
+  int id;
+  bool sure;
+  bool half;
+  double? amount;
+  List<int> alts;
+  _VW({required this.id, required this.sure, required this.half, this.amount, required this.alts});
+}
+
+class _VSec {
+  int? farmId;
+  int? workId;
+  final List<_VW> ws = [];
+  _VSec({this.farmId, this.workId});
 }
 
 int _i(dynamic v) => v is num ? v.toInt() : int.tryParse('$v') ?? 0;
@@ -268,30 +286,10 @@ class _FarmDayScreenState extends State<FarmDayScreen> {
     );
     if (workId == null || !mounted) return;
 
-    String? cType;
-    int? cId;
-    final crops = _cropsOf(farmId);
-    if (crops.length == 1) {
-      cType = '${crops.first['cycle_type']}';
-      cId = _i(crops.first['cycle_id']);
-    } else if (crops.length > 1) {
-      final opts = [for (var k = 0; k < crops.length; k++) _Opt(k, '${crops[k]['label']}'), _Opt(crops.length, 'General farm work')];
-      final k = await _choose(
-        title: 'Which crop?',
-        subtitle: '${_farmName(farmId)} has more than one crop',
-        items: opts,
-        recentIds: const [],
-        allLabel: 'Crops on this farm',
-        search: false,
-      );
-      if (k == null || !mounted) return;
-      if (k == crops.length) {
-        cType = 'none';
-      } else {
-        cType = '${crops[k]['cycle_type']}';
-        cId = _i(crops[k]['cycle_id']);
-      }
-    }
+    final crop = await _pickCrop(farmId);
+    if (crop == null || !mounted) return;
+    final String? cType = crop.$1;
+    final int? cId = crop.$2;
 
     _Task? existing;
     for (final t in _tasks) {
@@ -305,6 +303,25 @@ class _FarmDayScreenState extends State<FarmDayScreen> {
       _addWorkers(target, ids);
       _farmFilter = null;
     });
+  }
+
+  // The crop a task is for: picked only when the farm has more than one. null = cancelled.
+  Future<(String?, int?)?> _pickCrop(int farmId) async {
+    final crops = _cropsOf(farmId);
+    if (crops.isEmpty) return (null, null);
+    if (crops.length == 1) return ('${crops.first['cycle_type']}', _i(crops.first['cycle_id']));
+    final opts = [for (var k = 0; k < crops.length; k++) _Opt(k, '${crops[k]['label']}'), _Opt(crops.length, 'General farm work')];
+    final k = await _choose(
+      title: 'Which crop?',
+      subtitle: '${_farmName(farmId)} has more than one crop',
+      items: opts,
+      recentIds: const [],
+      allLabel: 'Crops on this farm',
+      search: false,
+    );
+    if (k == null) return null;
+    if (k == crops.length) return ('none', null);
+    return ('${crops[k]['cycle_type']}', _i(crops[k]['cycle_id']));
   }
 
   Future<void> _addToTask(_Task t) async {
@@ -373,6 +390,150 @@ class _FarmDayScreenState extends State<FarmDayScreen> {
         noteOf: noteOf,
       ),
     );
+  }
+
+  // ── voice: "Choufuli, fer, Raman, Rahul, Neelu" ──────────────────────
+  // The words are matched on the server; the person checks the result here and nothing is
+  // added to the day until they tap "Add to the day".
+  Future<void> _voice() async {
+    if (!_editable) return;
+    final res = await showModalBottomSheet<Map>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => VoiceAllocationSheet(dateStr: _dateStr, idaGreen: attGreen, raw: true, all: true),
+    );
+    if (res == null || !mounted) return;
+    final secs = <_VSec>[];
+    for (final s in (res['sections'] as List? ?? [])) {
+      final sec = _VSec(
+        farmId: s['farm'] == null ? null : _i(s['farm']['id']),
+        workId: s['workType'] == null ? null : _i(s['workType']['id']),
+      );
+      for (final w in (s['workers'] as List? ?? [])) {
+        sec.ws.add(_VW(
+          id: _i(w['id']),
+          sure: w['sure'] == true,
+          half: w['half'] == true,
+          amount: w['amount'] == null ? null : _d(w['amount']),
+          alts: [for (final a in (w['alts'] as List? ?? [])) _i(a['id'])],
+        ));
+      }
+      if (sec.ws.isNotEmpty) secs.add(sec);
+    }
+    if (secs.isEmpty) {
+      _toast('No worker names were recognised. Try again, or add by tapping.');
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => StatefulBuilder(builder: (dctx, setD) {
+        Future<void> chooseFarm(_VSec sec) async {
+          final id = await _choose(
+              title: 'Which farm?', subtitle: 'For ${sec.ws.map((w) => _workerName(w.id)).join(', ')}',
+              items: [for (final f in _farms) _Opt(_i(f['id']), '${f['name']}')], recentIds: _recentFarms, allLabel: 'All farms');
+          if (id != null) setD(() => sec.farmId = id);
+        }
+
+        Future<void> chooseWork(_VSec sec) async {
+          final id = await _choose(
+              title: 'Which work?', subtitle: 'For ${sec.ws.map((w) => _workerName(w.id)).join(', ')}',
+              items: [for (final w in _works) _Opt(_i(w['id']), '${w['name']}')], recentIds: _recentWorks, allLabel: 'All work');
+          if (id != null) setD(() => sec.workId = id);
+        }
+
+        Future<void> chooseWorker(_VW w) async {
+          final pick = await showDialog<int>(
+            context: dctx,
+            builder: (c2) => SimpleDialog(title: Text('Who is "${_workerName(w.id)}"?'), children: [
+              for (final id in [w.id, ...w.alts])
+                SimpleDialogOption(onPressed: () => Navigator.pop(c2, id), child: Text(_workerName(id), style: const TextStyle(fontSize: 15))),
+            ]),
+          );
+          if (pick != null) setD(() {
+                w.id = pick;
+                w.sure = true;
+                w.alts = [];
+              });
+        }
+
+        return AlertDialog(
+          title: const Text('Check what was heard'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                for (final sec in secs) ...[
+                  Row(children: [
+                    Expanded(
+                      child: ActionChip(
+                        backgroundColor: sec.farmId == null ? const Color(0xFFFDE8E6) : const Color(0xFFE3F0DA),
+                        label: Text(sec.farmId == null ? 'Choose farm' : _farmName(sec.farmId!), overflow: TextOverflow.ellipsis),
+                        onPressed: () => chooseFarm(sec),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: ActionChip(
+                        backgroundColor: sec.workId == null ? const Color(0xFFFDE8E6) : const Color(0xFFE3F0DA),
+                        label: Text(sec.workId == null ? 'Choose work' : _workName(sec.workId!), overflow: TextOverflow.ellipsis),
+                        onPressed: () => chooseWork(sec),
+                      ),
+                    ),
+                  ]),
+                  Wrap(spacing: 6, children: [
+                    for (final w in sec.ws)
+                      InputChip(
+                        backgroundColor: w.sure ? null : attAmberBg,
+                        label: Text('${_workerName(w.id)}${w.half ? ' · half day' : ''}${w.amount != null ? ' · ${attRs(w.amount!)}' : ''}${w.sure ? '' : ' ?'}'),
+                        onPressed: w.alts.isNotEmpty || !w.sure ? () => chooseWorker(w) : null,
+                        onDeleted: () => setD(() => sec.ws.remove(w)),
+                      ),
+                  ]),
+                  const Divider(),
+                ],
+                const Text('A name with ? may be someone else: tap it to choose. Nothing is added until you tap Add to the day.', style: TextStyle(fontSize: 12, color: _muted)),
+              ]),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dctx, false), child: const Text('Cancel')),
+            TextButton(
+              onPressed: secs.any((s) => s.ws.isNotEmpty && (s.farmId == null || s.workId == null)) ? null : () => Navigator.pop(dctx, true),
+              child: const Text('Add to the day'),
+            ),
+          ],
+        );
+      }),
+    );
+    if (ok != true || !mounted) return;
+    for (final sec in secs) {
+      if (sec.ws.isEmpty || sec.farmId == null || sec.workId == null) continue;
+      final crop = await _pickCrop(sec.farmId!);
+      if (crop == null || !mounted) return;
+      _Task? task;
+      for (final t in _tasks) {
+        if (t.sameAs(sec.farmId!, sec.workId!, crop.$1, crop.$2)) task = t;
+      }
+      final target = task ?? _Task(id: _nextId++, farmId: sec.farmId!, workId: sec.workId!, cycleType: crop.$1, cycleId: crop.$2);
+      setState(() {
+        if (task == null) _tasks.add(target);
+        _addWorkers(target, [for (final w in sec.ws) w.id]);
+        for (final w in sec.ws) {
+          if (_placements(w.id).length != 1) continue; // shared between places: set it from the name
+          for (final l in target.lines) {
+            if (l.w != w.id) continue;
+            if (w.amount != null && w.amount! > 0) {
+              l.a = w.amount!;
+            } else if (w.half) {
+              l.a = attRound2(_wage(w.id) / 2);
+            }
+          }
+        }
+        _farmFilter = null;
+      });
+    }
   }
 
   // ── worker sheet: split / half day / change amount / remove ─────────
@@ -1132,6 +1293,18 @@ class _FarmDayScreenState extends State<FarmDayScreen> {
             label: const Text('New task', style: TextStyle(color: attDark, fontWeight: FontWeight.w700)),
           ),
         ),
+        if (!kIsWeb) ...[
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 52,
+            height: 48,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: attDark, padding: EdgeInsets.zero),
+              onPressed: _busy ? null : _voice,
+              child: const Icon(Icons.mic, color: Colors.white),
+            ),
+          ),
+        ],
         const SizedBox(width: 8),
         Expanded(
           child: ElevatedButton(
@@ -1291,7 +1464,7 @@ class _WorkersSheetState extends State<_WorkersSheet> {
         final f = '${w['gender']}' == 'F';
         if (f != _women) return false;
         final q = _q.trim().toLowerCase();
-        return q.isEmpty || '${w['name']}'.toLowerCase().contains(q);
+        return q.isEmpty || '${w['name']}'.toLowerCase().contains(q) || '${w['nickname'] ?? ''}'.toLowerCase().contains(q);
       }).toList();
 
   @override

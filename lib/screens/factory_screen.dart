@@ -6,6 +6,7 @@ import '../services/api_client.dart';
 import '../services/offline_queue.dart';
 import '../widgets/offline_notice.dart';
 import '../widgets/offline_status_bar.dart';
+import '../widgets/factory_live_card.dart';
 import '../localization/app_localizations.dart';
 // ── Downtime reason options ───────────────────────────────
 const _reasonOptions = [
@@ -308,6 +309,7 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
                                       fontWeight: FontWeight.w600)),
                             ),
                           _waitingNotices(),
+                          FactoryLiveCard(onChanged: _loadData),
                           // Date picker
                           GestureDetector(
                             onTap: _pickDate,

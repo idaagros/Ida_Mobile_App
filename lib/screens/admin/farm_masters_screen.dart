@@ -181,6 +181,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
     int? workTypeId,
     int? farmId,
     String? phone,
+    String? nickname,
     String? gender,
     bool? isPermanent,
     bool? paidWhenAbsent,
@@ -192,6 +193,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
         'work_type_id': workTypeId,
         'farm_id': farmId,
         'phone': phone,
+        'nickname': nickname,
         'gender': gender,
         if (isPermanent != null) 'is_permanent': isPermanent,
         if (paidWhenAbsent != null && _isAdmin) 'paid_when_absent': paidWhenAbsent,
@@ -489,6 +491,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
     final wageCtrl =
         TextEditingController(text: worker?['daily_wage']?.toString() ?? '');
     final phoneCtrl = TextEditingController(text: worker?['phone'] ?? '');
+    final nickCtrl = TextEditingController(text: worker?['nickname'] ?? '');
     int? farmId = worker?['farm_id'];
     int? workTypeId = worker?['work_type_id'];
     String? gender = worker?['gender'];
@@ -583,6 +586,16 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                             style: const TextStyle(fontSize: 13))))
                     .toList(),
                 onChanged: (v) => setDialogState(() => workTypeId = v),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: nickCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Nickname (optional, e.g. Viju bhau)',
+                  helperText: 'Voice recognises this name too',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -705,6 +718,7 @@ class _FarmMastersScreenState extends State<FarmMastersScreen> {
                   workTypeId: workTypeId,
                   farmId: farmId,
                   phone: phoneCtrl.text.trim(),
+                  nickname: nickCtrl.text.trim(),
                   gender: gender,
                   isPermanent: isPermanent,
                   paidWhenAbsent: paidWhenAbsent,
