@@ -8,6 +8,7 @@ import '../widgets/offline_notice.dart';
 import '../widgets/offline_status_bar.dart';
 import '../widgets/factory_live_card.dart';
 import '../localization/app_localizations.dart';
+import 'factory/pellet_production_screen.dart';
 // ── Downtime reason options ───────────────────────────────
 const _reasonOptions = [
   {'value': 'lunch', 'label': 'Lunch break', 'icon': '🍱'},
@@ -266,6 +267,10 @@ class _FactoryRunScreenState extends State<FactoryRunScreen> {
                       color: Color(0xFFF5A623)))),
         ]),
         actions: [
+          IconButton(
+              icon: const Icon(Icons.scale, color: Colors.white70),
+              tooltip: 'Pellet production',
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PelletProductionScreen()))),
           IconButton(
               icon: const Icon(Icons.refresh, color: Colors.white70),
               onPressed: _loadData)

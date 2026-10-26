@@ -397,6 +397,7 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
   String status = 'todo'; // builder: todo | done | split | all
   String filter = 'all'; // sheet: all | none | split | changed
   String q = '';
+  String sheetView = 'person'; // approval sheet view: person | farm | work
   int tab = 0; // 0 workers, 1 tasks
   final TextEditingController _searchCtrl = TextEditingController();
 
@@ -2027,6 +2028,8 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
                           onPressed: () => setState(() => filter = 'none'),
                           child: const Text('Show them'))
                       : null),
+            _viewPills(),
+            if (sheetView == 'person') ...[
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(children: [
@@ -2072,6 +2075,7 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
                   padding: EdgeInsets.all(24),
                   child: Center(child: Text('No one here.'))),
             for (final r in shown) _sheetRow(r),
+            ] else ..._groupCards(rows),
             const SizedBox(height: 6),
             _card(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -2099,6 +2103,141 @@ class _WorkAllocationScreenState extends State<WorkAllocationScreen> {
         ],
       ),
     );
+  }
+
+  // ── approval sheet: the same day seen by person, by farm or by work type (read-only) ──
+  Widget _viewPills() {
+    Widget tab(String v, String label) {
+      final on = sheetView == v;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() => sheetView = v),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 9),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: on ? attGreen : Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: on ? attGreen : const Color(0xFFE0E7D8)),
+            ),
+            child: Text(label,
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: on ? Colors.white : attDark)),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(children: [
+        tab('person', 'By person'),
+        const SizedBox(width: 6),
+        tab('farm', 'By farm'),
+        const SizedBox(width: 6),
+        tab('work', 'By work type'),
+      ]),
+    );
+  }
+
+  List<Widget> _groupCards(
+      List<({Map<String, dynamic> p, int id, List<Map<String, dynamic>> tasks, double wage, double total, Map<String, dynamic>? change})> rows) {
+    final byFarm = sheetView == 'farm';
+    final nameOf = {for (final r in rows) r.id: '${r.p['name']}'};
+    final changed = {for (final r in rows) if (r.change != null) r.id};
+    // group -> worker -> {amount, lines}
+    final groups = <String, Map<int, ({double amt, List<String> lines})>>{};
+    for (final a in savedAllocations) {
+      final id = _int(a['worker_id']);
+      final farm = '${a['farm_name'] ?? 'Farm ${a['farm_id']}'}';
+      final work = '${a['work_type_name'] ?? 'Work'}';
+      final detail = '${a['work_detail'] ?? ''}'.trim();
+      final key = byFarm ? farm : work;
+      final line = byFarm ? (detail.isEmpty ? work : '$work — $detail') : (detail.isEmpty ? farm : '$farm — $detail');
+      final amt = attNum(a['total_wage'] ?? a['wage_snapshot']);
+      final g = groups.putIfAbsent(key, () => {});
+      final cur = g[id];
+      g[id] = (amt: (cur?.amt ?? 0) + amt, lines: [...(cur?.lines ?? const <String>[]), line]);
+    }
+    final notAlloc = rows.where((r) => r.tasks.isEmpty).toList();
+    final entries = groups.entries.toList()
+      ..sort((a, b) {
+        double t(Map<int, ({double amt, List<String> lines})> m) => m.values.fold(0.0, (s, x) => s + x.amt);
+        return t(b.value).compareTo(t(a.value));
+      });
+    final out = <Widget>[];
+    if (entries.isEmpty && notAlloc.isEmpty) {
+      return [const Padding(padding: EdgeInsets.all(24), child: Center(child: Text('No one here.')))];
+    }
+    for (final en in entries) {
+      final people = en.value.entries.toList()
+        ..sort((a, b) => (nameOf[a.key] ?? '').toLowerCase().compareTo((nameOf[b.key] ?? '').toLowerCase()));
+      final total = attRound2(en.value.values.fold<double>(0, (s, x) => s + x.amt));
+      out.add(Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+        decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE0E7D8))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(
+              child: Text(tl(context, en.key),
+                  style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: attDark)),
+            ),
+            Text(attRs(total), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+          ]),
+          Text('${people.length} ${people.length == 1 ? 'person' : 'people'}',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+          const Divider(height: 14),
+          for (final pe in people)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(tl(context, nameOf[pe.key] ?? 'Worker ${pe.key}'),
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                    for (final l in pe.value.lines)
+                      Text(l, style: const TextStyle(fontSize: 12.5, color: Color(0xFF4B5563))),
+                    if (changed.contains(pe.key))
+                      const Text('change waiting for approval',
+                          style: TextStyle(fontSize: 12, color: attAmberFg)),
+                  ]),
+                ),
+                Text(attRs(attRound2(pe.value.amt)),
+                    style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800)),
+              ]),
+            ),
+        ]),
+      ));
+    }
+    if (notAlloc.isNotEmpty) {
+      out.add(Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+        decoration: BoxDecoration(
+            color: const Color(0xFFFFF4EC),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFF3D2B5))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Not allocated · ${notAlloc.length}',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Color(0xFF8C3F06))),
+          const SizedBox(height: 4),
+          Text(notAlloc.map((r) => tl(context, '${r.p['name']}')).join(', '),
+              style: const TextStyle(fontSize: 13)),
+        ]),
+      ));
+    }
+    out.add(const Padding(
+      padding: EdgeInsets.only(bottom: 6),
+      child: Text('A person on more than one task shows under each, with that part of the pay. Approve, return and changes are in the By person view.',
+          style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+    ));
+    return out;
   }
 
   Widget _sheetRow(({Map<String, dynamic> p, int id, List<Map<String, dynamic>> tasks, double wage, double total, Map<String, dynamic>? change}) r) {

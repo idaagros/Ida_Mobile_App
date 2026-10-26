@@ -26,6 +26,7 @@ dependencies:
   url_launcher: ^6.3.0
   # Speak the work allocation (Oct 2026): the phone's own speech recognition, free
   speech_to_text: ^7.0.0
+  flutter_tts: ^4.2.0
   camera: ^0.11.0
   google_mlkit_face_detection: any
   google_mlkit_text_recognition: any

@@ -8,6 +8,7 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../services/api_client.dart';
+import '../services/wage_speech.dart';
 import '../widgets/voice_allocation_sheet.dart';
 
 const Color _green = Color(0xFF3B7A28);
@@ -49,6 +50,7 @@ class _WagesScreenState extends State<WagesScreen> {
 
   @override
   void dispose() {
+    WageSpeech.stop();
     _ask.dispose();
     super.dispose();
   }
@@ -133,6 +135,7 @@ class _WagesScreenState extends State<WagesScreen> {
     if (res == null || !mounted) return;
     if (res['result'] == null) {
       _toast('I could not understand the question.');
+      WageSpeech.speak(res);
       return;
     }
     setState(() {
@@ -141,6 +144,8 @@ class _WagesScreenState extends State<WagesScreen> {
       _open.clear();
       if ((res['result']?['workers'] as List?)?.length == 1) _open.add(0);
     });
+    // asked by voice -> answer by voice (phone only; typed questions stay silent)
+    WageSpeech.speak(res);
   }
 
   void _toast(String m) => ScaffoldMessenger.of(context)
