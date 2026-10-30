@@ -436,6 +436,13 @@ String alertText(Map a, {bool withParty = true}) {
   final value = toD(a['value']);
   final kind = a['kind'];
   if (a['field'] == 'weight') return "$who$when was ${mt(value)} MT; this supplier's usual load is about ${mt(usual)} MT.";
+  if (a['field'] == 'vehicle') {
+    final pct = usual > 0 ? ((value - usual).abs() / usual * 100).round() : 0;
+    final dir = value > usual ? 'more' : 'less';
+    final veh = (a['vehicle'] ?? '').toString();
+    if (a['basis'] == 'supplier') return "$who$when: truck $veh is new to us and carried ${mt(value)} MT, $pct% $dir than this supplier's usual load of ${mt(usual)} MT.";
+    return '$who$when: truck $veh carried ${mt(value)} MT, $pct% $dir than its usual ${mt(usual)} MT (last ${toD(a['trips']).round()} trips). A different vehicle, or a wrong number?';
+  }
   final why = kind == 'explained' && a['note'] != null ? ' Narration: "${a['note']}".' : '';
   if (a['field'] == 'rate') {
     if (kind == 'changed') return '${who}rate changed from ${inr(usual)} to ${inr(value)} per MT from $when. Treated as the usual rate from now on.';
@@ -450,6 +457,12 @@ String alertText(Map a, {bool withParty = true}) {
 String alertShort(Map a) {
   final usual = toD(a['usual']);
   if (a['field'] == 'weight') return 'load usually about ${mt(usual)} MT';
+  if (a['field'] == 'vehicle') {
+    final veh = (a['vehicle'] ?? '').toString();
+    return a['basis'] == 'supplier'
+        ? "new truck $veh: ${toD(a['value']) > usual ? 'heavier' : 'lighter'} than this supplier's usual ${mt(usual)} MT"
+        : 'truck $veh usually carries ${mt(usual)} MT';
+  }
   if (a['field'] == 'rate') {
     if (a['kind'] == 'changed') return 'rate changed from ${inr(usual)}';
     return a['kind'] == 'explained' ? 'rate usually ${inr(usual)} (quality cut in narration)' : 'rate usually ${inr(usual)}';

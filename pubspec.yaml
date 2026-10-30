@@ -15,6 +15,7 @@ dependencies:
   http: ^1.2.0
   http_parser: ^4.0.2
   shared_preferences: ^2.2.0
+  flutter_tts: ^4.2.0
   image_picker: ^1.0.4
   intl: ^0.20.2
   path_provider: ^2.1.3
@@ -26,7 +27,6 @@ dependencies:
   url_launcher: ^6.3.0
   # Speak the work allocation (Oct 2026): the phone's own speech recognition, free
   speech_to_text: ^7.0.0
-  flutter_tts: ^4.2.0
   camera: ^0.11.0
   google_mlkit_face_detection: any
   google_mlkit_text_recognition: any
@@ -63,6 +63,9 @@ flutter:
 # term_glyph 1.2.2 (missing files → compile errors). Pin the previous
 # versions. Safe to remove when building with a normal Flutter install.
 dependency_overrides:
+  # image 4.11.0 needs archive 4.4+ (decodeLazy); this build has archive 4.0.9.
+  # 4.5.4 is the last image that works with archive 4.0.x.
+  image: 4.5.4
   # workmanager 0.9.0+3's matching parts (released together, Aug 2025).
   workmanager_android: 0.9.0+2
   workmanager_apple: 0.9.1+2

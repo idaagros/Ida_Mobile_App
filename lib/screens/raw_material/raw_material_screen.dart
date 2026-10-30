@@ -8,6 +8,7 @@
 //    running series, trucks with no vehicle number, a balance that differs from Tally's
 //  - Suppliers: received, rate, amount, paid, balance due; tap one for the ledger
 // Tally is read every 15 minutes by the server; the Refresh button reads it now.
+//  - Vehicles: opens each truck's usual load, trips and flagged loads
 // API: GET /raw-material/summary, POST /raw-material/refresh.
 // Web counterpart: src/pages/RawMaterial.jsx.
 
@@ -16,6 +17,7 @@ import '../../services/api_service.dart';
 import 'rm_common.dart';
 import 'rm_party_screen.dart';
 import 'rm_pay_screen.dart';
+import 'rm_vehicles_screen.dart';
 
 class RawMaterialScreen extends StatefulWidget {
   const RawMaterialScreen({super.key});
@@ -142,6 +144,34 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
     }
   }
 
+  // Admin: how far (in %) a truck's load may be from that truck's usual before it is flagged.
+  Future<void> _changeVehiclePct() async {
+    final st = data['status'] is Map ? data['status'] as Map : const {};
+    final c = TextEditingController(text: toD(st['vehicle_pct']).round().toString());
+    final v = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Truck weight check'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text("Flag a load when it is more than this many percent above or below what that truck usually brings."),
+          const SizedBox(height: 10),
+          TextField(controller: c, keyboardType: TextInputType.number, decoration: const InputDecoration(suffixText: '%', border: OutlineInputBorder())),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, int.tryParse(c.text.trim())), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (v == null) return;
+    try {
+      await RmApi.put('/raw-material/vehicle-pct', {'pct': v});
+      await _load();
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    }
+  }
+
   List<Map<String, dynamic>> _parties() {
     final all = List<Map<String, dynamic>>.from(
         ((data['parties'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)));
@@ -248,6 +278,11 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
                       : 'Season start not set (showing from ${dmy(status['season_start'])}) · set it'),
                 ),
               ),
+            if (isAdmin && status['vehicle_pct'] != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(onPressed: _changeVehiclePct, child: Text('Truck weight check: ${toD(status['vehicle_pct']).round()}% · change')),
+              ),
             if (items.length > 1) ...[
               const SizedBox(height: 8),
               Container(
@@ -309,7 +344,7 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
     final noVeh = toD(checks['no_vehicle']).round();
     final mism = toD(checks['tally_mismatch']).round();
     final alerts = <Map<String, dynamic>>[
-      for (final k in const ['rate_alerts', 'deduction_alerts', 'weight_alerts'])
+      for (final k in const ['rate_alerts', 'deduction_alerts', 'weight_alerts', 'vehicle_alerts'])
         ...((checks[k] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)),
     ]..sort((a, b) => b['date'].toString().compareTo(a['date'].toString()));
     final checkCount = dups.length + alerts.length + (missing.isNotEmpty ? 1 : 0) + (noVeh > 0 ? 1 : 0) + (mism > 0 ? 1 : 0);
@@ -467,6 +502,18 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
           ),
         ),
       _rateBoard(),
+      RmCard(
+        padding: EdgeInsets.zero,
+        child: ListTile(
+          title: const Text('Vehicles', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
+          subtitle: const Text("Each truck's usual load, trips and flagged loads", style: TextStyle(fontSize: 12)),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => RmVehiclesScreen(
+                query: range == 'season' ? <String, dynamic>{} : <String, dynamic>{'from': dates.from, 'to': dates.to},
+                label: rangeLabel(range, dates),
+              ))),
+        ),
+      ),
       if (days.isNotEmpty) ...[
         const RmSectionLabel('Received per day'),
         RmCard(child: _dayBars(days)),
