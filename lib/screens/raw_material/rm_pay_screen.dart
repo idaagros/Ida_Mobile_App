@@ -10,8 +10,12 @@
 // API: /tally-payments (routes/tallyPayments.js).  Web counterpart: src/pages/RawMaterialPay.jsx.
 
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../models/user_model.dart';
+import '../../widgets/tally_company_badge.dart';
 import '../../widgets/voice_allocation_sheet.dart';
 import 'rm_common.dart';
 
@@ -41,6 +45,9 @@ class _RmPayScreenState extends State<RmPayScreen> {
   bool loading = true;
   bool busy = false;
   bool forbidden = false;
+  // From Users & permissions ("Pay suppliers"): Add = enter a payment, Edit = retry / cancel one waiting for Tally.
+  bool mayAdd = false;
+  bool mayRetry = false;
   Timer? _debounce;
 
   @override
@@ -58,12 +65,26 @@ class _RmPayScreenState extends State<RmPayScreen> {
     super.dispose();
   }
 
+  Future<void> _loadPerms() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final admin = prefs.getBool('is_admin') ?? (prefs.getString('role') == 'admin');
+      final perms = parsePermissions(jsonDecode(prefs.getString('permissions') ?? '[]'));
+      mayAdd = admin || hasAddAccess(perms, 'supplier_payments');
+      mayRetry = admin || hasUpdateAccess(perms, 'supplier_payments');
+    } catch (_) {
+      mayAdd = false;
+      mayRetry = false;
+    }
+  }
+
   Future<void> _init() async {
     setState(() {
       loading = true;
       error = null;
     });
     try {
+      await _loadPerms();
       final o = Map<String, dynamic>.from(await RmApi.get('/tally-payments/options') as Map);
       banks = (o['banks'] as List).map((e) => e.toString()).toList();
       suppliers = (o['suppliers'] as List).map((e) => e.toString()).toList();
@@ -289,48 +310,6 @@ class _RmPayScreenState extends State<RmPayScreen> {
     if (mounted) setState(() => busy = false);
   }
 
-  // ── who may enter payments ─────────────────────────────────────────
-  Future<void> _access() async {
-    try {
-      final a = Map<String, dynamic>.from(await RmApi.get('/tally-payments/access/list') as Map);
-      final admins = (a['admins'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
-      final ticked = <int>{...((a['ticked'] as List?) ?? const []).map((e) => (e as num).toInt())};
-      if (!mounted) return;
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (c) => StatefulBuilder(builder: (c, setD) {
-          return AlertDialog(
-            title: const Text('Who can enter payments'),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Tick the admins who may enter supplier payments. If nobody is ticked, every admin can.', style: TextStyle(fontSize: 12.5)),
-                const SizedBox(height: 8),
-                for (final u in admins)
-                  CheckboxListTile(
-                    dense: true,
-                    value: ticked.contains((u['id'] as num).toInt()),
-                    title: Text('${u['name']}'),
-                    onChanged: (v) => setD(() => v == true ? ticked.add((u['id'] as num).toInt()) : ticked.remove((u['id'] as num).toInt())),
-                  ),
-              ]),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-              TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Save')),
-            ],
-          );
-        }),
-      );
-      if (ok == true) {
-        await RmApi.put('/tally-payments/access/list', {'ids': ticked.toList()});
-        if (mounted) setState(() => notice = 'Saved.');
-      }
-    } catch (e) {
-      if (mounted) setState(() => error = e.toString());
-    }
-  }
-
   // ── screen ─────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
@@ -340,22 +319,13 @@ class _RmPayScreenState extends State<RmPayScreen> {
         title: const Text('Pay supplier'),
         backgroundColor: rmAppBar,
         foregroundColor: Colors.white,
-        actions: [
-          if (!forbidden && !loading)
-            PopupMenuButton<String>(
-              onSelected: (v) {
-                if (v == 'access') _access();
-              },
-              itemBuilder: (_) => const [PopupMenuItem<String>(value: 'access', child: Text('Who can enter payments'))],
-            ),
-        ],
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : forbidden
               ? const Padding(
                   padding: EdgeInsets.all(24),
-                  child: Text('Only admins who are allowed to enter supplier payments can use this screen.', style: TextStyle(fontSize: 15)),
+                  child: Text('You do not have access to Pay suppliers. Ask an admin to tick it for you.', style: TextStyle(fontSize: 15)),
                 )
               : RefreshIndicator(onRefresh: () async { await _loadRecent(); if (mounted) setState(() {}); }, child: _body()),
     );
@@ -363,6 +333,7 @@ class _RmPayScreenState extends State<RmPayScreen> {
 
   Widget _body() {
     return ListView(padding: const EdgeInsets.fromLTRB(14, 12, 14, 28), children: [
+      const TallyCompanyBadge(),
       if (error != null) RmErrorBox(error!),
       if (notice != null)
         RmCard(
@@ -370,6 +341,9 @@ class _RmPayScreenState extends State<RmPayScreen> {
           borderColor: const Color(0xFFCFE3C0),
           child: Text(notice!, style: const TextStyle(fontSize: 13.5, color: Color(0xFF1F4A0E), fontWeight: FontWeight.w600)),
         ),
+      if (!mayAdd)
+        const RmCard(child: Text('You can see the recent payments. To enter a payment, ask an admin to tick Add for you.', style: TextStyle(fontSize: 13))),
+      if (mayAdd) ...[
       if (!kIsWeb)
         SizedBox(
           height: 56,
@@ -524,6 +498,7 @@ class _RmPayScreenState extends State<RmPayScreen> {
         padding: EdgeInsets.only(top: 6),
         child: Text('Nothing is entered until you tap the button.', textAlign: TextAlign.center, style: TextStyle(fontSize: 11.5, color: Color(0xFF5F6A58))),
       ),
+      ],
       if (recent.isNotEmpty) ...[
         const RmSectionLabel('Recent entries'),
         for (final r in recent) _recentRow(r),
@@ -581,7 +556,7 @@ class _RmPayScreenState extends State<RmPayScreen> {
             child: Text(label, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: color)),
           ),
           const Spacer(),
-          if (st == 'queued' || st == 'failed') ...[
+          if (mayRetry && (st == 'queued' || st == 'failed')) ...[
             TextButton(onPressed: busy ? null : () => _act(r, 'retry'), child: const Text('Try now')),
             TextButton(onPressed: busy ? null : () => _act(r, 'cancel'), child: const Text('Cancel')),
           ],

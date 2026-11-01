@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import '../../services/api_client.dart';
+import '../../widgets/tally_company_badge.dart';
 
 const Color rmDark = Color(0xFF1E3313);
 const Color rmAppBar = Color(0xFF1E4012);
@@ -37,7 +38,8 @@ class RmApi {
       Duration timeout = const Duration(seconds: 60)}) async {
     http.Response res;
     try {
-      res = await Api.send(method, path, body: body, query: query, timeout: timeout);
+      res = await Api.send(method, path,
+          body: body, query: query, timeout: timeout);
     } catch (e) {
       throw RmApiException(Api.errorText(e), 0);
     }
@@ -68,7 +70,8 @@ double toD(dynamic v) {
 }
 
 final NumberFormat _inrWhole = NumberFormat.decimalPattern('en_IN');
-final NumberFormat _inrPaise = NumberFormat.decimalPatternDigits(locale: 'en_IN', decimalDigits: 2);
+final NumberFormat _inrPaise =
+    NumberFormat.decimalPatternDigits(locale: 'en_IN', decimalDigits: 2);
 final NumberFormat _mtFmt = NumberFormat('#,##0.00#', 'en_IN');
 
 // ₹1,23,456 (paise only when there are some); negatives with a real minus.
@@ -136,7 +139,11 @@ class RmDates {
   const RmDates(this.from, this.to);
 }
 
-RmDates rangeDates(String key, {String? fyFrom, String? seasonFrom, String? customFrom, String? customTo}) {
+RmDates rangeDates(String key,
+    {String? fyFrom,
+    String? seasonFrom,
+    String? customFrom,
+    String? customTo}) {
   final now = DateTime.now();
   final today = isoDay(now);
   String back(int n) => isoDay(now.subtract(Duration(days: n)));
@@ -161,7 +168,8 @@ RmDates rangeDates(String key, {String? fyFrom, String? seasonFrom, String? cust
 
 String rangeLabel(String key, RmDates r) {
   if (key == 'today') return 'today';
-  if (key == 'season') return r.from.isEmpty ? 'this season' : 'season since ${dmy(r.from)}';
+  if (key == 'season')
+    return r.from.isEmpty ? 'this season' : 'season since ${dmy(r.from)}';
   if (key == 'month') {
     final d = parseDay(r.from);
     return d == null ? '' : DateFormat('MMMM yyyy').format(d);
@@ -174,7 +182,11 @@ class RmRangePicker extends StatelessWidget {
   final String range;
   final RmDates dates;
   final void Function(String range, RmDates dates) onChanged;
-  const RmRangePicker({super.key, required this.range, required this.dates, required this.onChanged});
+  const RmRangePicker(
+      {super.key,
+      required this.range,
+      required this.dates,
+      required this.onChanged});
 
   Future<void> _pickCustom(BuildContext context) async {
     final first = DateTime(2020);
@@ -209,7 +221,9 @@ class RmRangePicker extends StatelessWidget {
             for (final r in kRmRanges)
               DropdownMenuItem<String>(
                 value: r.key,
-                child: Text(r.key == 'custom' && range == 'custom' ? '${dm(dates.from)} – ${dmy(dates.to)}' : r.label),
+                child: Text(r.key == 'custom' && range == 'custom'
+                    ? '${dm(dates.from)} – ${dmy(dates.to)}'
+                    : r.label),
               ),
           ],
           onChanged: (k) {
@@ -259,7 +273,12 @@ class RmTile extends StatelessWidget {
   final String value;
   final String sub;
   final bool dark;
-  const RmTile({super.key, required this.label, required this.value, required this.sub, this.dark = false});
+  const RmTile(
+      {super.key,
+      required this.label,
+      required this.value,
+      required this.sub,
+      this.dark = false});
 
   @override
   Widget build(BuildContext context) {
@@ -273,9 +292,13 @@ class RmTile extends StatelessWidget {
         border: Border.all(color: dark ? rmDark : rmBorder),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: muted)),
+        Text(label,
+            style: TextStyle(
+                fontSize: 12.5, fontWeight: FontWeight.w600, color: muted)),
         const SizedBox(height: 2),
-        Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: fg)),
+        Text(value,
+            style: TextStyle(
+                fontSize: 20, fontWeight: FontWeight.w800, color: fg)),
         const SizedBox(height: 2),
         Text(sub, style: TextStyle(fontSize: 11.5, color: muted)),
       ]),
@@ -298,7 +321,10 @@ class RmTileGrid extends StatelessWidget {
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Expanded(child: tiles[i]),
             const SizedBox(width: 10),
-            Expanded(child: i + 1 < tiles.length ? tiles[i + 1] : const SizedBox.shrink()),
+            Expanded(
+                child: i + 1 < tiles.length
+                    ? tiles[i + 1]
+                    : const SizedBox.shrink()),
           ]),
         ),
       ));
@@ -313,7 +339,11 @@ class RmSectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.fromLTRB(2, 6, 2, 8),
-        child: Text(text, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Color(0xFF1E3313))),
+        child: Text(text,
+            style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF1E3313))),
       );
 }
 
@@ -330,7 +360,8 @@ class RmErrorBox extends StatelessWidget {
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: const Color(0xFFFECACA)),
         ),
-        child: Text(message, style: const TextStyle(fontSize: 13, color: Color(0xFF991B1B))),
+        child: Text(message,
+            style: const TextStyle(fontSize: 13, color: Color(0xFF991B1B))),
       );
 }
 
@@ -342,20 +373,29 @@ class RmSyncBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final last = status['last_attempt'];
-    if (last is! Map || last['status'] != 'error') return const SizedBox.shrink();
+    if (last is! Map || last['status'] != 'error')
+      return const TallyCompanyBadge();
     final msg = (last['message'] ?? '').toString();
     final okAt = status['last_ok_at'];
-    final text = "Couldn't read Tally at ${whenText(last['at'])}${msg.isNotEmpty ? ': $msg' : ''}."
+    final text =
+        "Couldn't read Tally at ${whenText(last['at'])}${msg.isNotEmpty ? ': $msg' : ''}."
         "${okAt != null ? ' Showing what was read at ${whenText(okAt)}.' : ''}";
-    return RmCard(
-      color: const Color(0xFFFFF7EA),
-      borderColor: const Color(0xFFF3D7A6),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Icon(Icons.warning_amber_rounded, color: Color(0xFF7A4D00), size: 20),
-        const SizedBox(width: 10),
-        Expanded(child: Text(text, style: const TextStyle(fontSize: 12.5, color: Color(0xFF6A4300)))),
-      ]),
-    );
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const TallyCompanyBadge(),
+      RmCard(
+        color: const Color(0xFFFFF7EA),
+        borderColor: const Color(0xFFF3D7A6),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Icon(Icons.warning_amber_rounded,
+              color: Color(0xFF7A4D00), size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+              child: Text(text,
+                  style: const TextStyle(
+                      fontSize: 12.5, color: Color(0xFF6A4300)))),
+        ]),
+      ),
+    ]);
   }
 }
 
@@ -378,7 +418,10 @@ class RmTallyChip extends StatelessWidget {
       ),
       child: Text(
         ok ? '✓ Matches Tally' : '⚠ Differs from Tally by ${inr(d.abs())}',
-        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: ok ? const Color(0xFF2C5E17) : const Color(0xFF7A4D00)),
+        style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: ok ? const Color(0xFF2C5E17) : const Color(0xFF7A4D00)),
       ),
     );
   }
@@ -389,7 +432,11 @@ class RmAgingBar extends StatelessWidget {
   final Map<String, dynamic> aging;
   final Map<String, dynamic> labels;
   final double total;
-  const RmAgingBar({super.key, required this.aging, required this.labels, required this.total});
+  const RmAgingBar(
+      {super.key,
+      required this.aging,
+      required this.labels,
+      required this.total});
 
   @override
   Widget build(BuildContext context) {
@@ -414,10 +461,18 @@ class RmAgingBar extends StatelessWidget {
       Wrap(spacing: 14, runSpacing: 4, children: [
         for (var i = 0; i < keys.length; i++)
           Row(mainAxisSize: MainAxisSize.min, children: [
-            Container(width: 10, height: 10, decoration: BoxDecoration(color: rmAgeColors[i % rmAgeColors.length], borderRadius: BorderRadius.circular(2))),
+            Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                    color: rmAgeColors[i % rmAgeColors.length],
+                    borderRadius: BorderRadius.circular(2))),
             const SizedBox(width: 5),
-            Text('${labels[keys[i]]} ', style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-            Text(inr(aging[keys[i]]), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+            Text('${labels[keys[i]]} ',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+            Text(inr(aging[keys[i]]),
+                style:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
           ]),
       ]),
     ]);
@@ -435,22 +490,30 @@ String alertText(Map a, {bool withParty = true}) {
   final usual = toD(a['usual']);
   final value = toD(a['value']);
   final kind = a['kind'];
-  if (a['field'] == 'weight') return "$who$when was ${mt(value)} MT; this supplier's usual load is about ${mt(usual)} MT.";
+  if (a['field'] == 'weight')
+    return "$who$when was ${mt(value)} MT; this supplier's usual load is about ${mt(usual)} MT.";
   if (a['field'] == 'vehicle') {
     final pct = usual > 0 ? ((value - usual).abs() / usual * 100).round() : 0;
     final dir = value > usual ? 'more' : 'less';
     final veh = (a['vehicle'] ?? '').toString();
-    if (a['basis'] == 'supplier') return "$who$when: truck $veh is new to us and carried ${mt(value)} MT, $pct% $dir than this supplier's usual load of ${mt(usual)} MT.";
+    if (a['basis'] == 'supplier')
+      return "$who$when: truck $veh is new to us and carried ${mt(value)} MT, $pct% $dir than this supplier's usual load of ${mt(usual)} MT.";
     return '$who$when: truck $veh carried ${mt(value)} MT, $pct% $dir than its usual ${mt(usual)} MT (last ${toD(a['trips']).round()} trips). A different vehicle, or a wrong number?';
   }
-  final why = kind == 'explained' && a['note'] != null ? ' Narration: "${a['note']}".' : '';
+  final why = kind == 'explained' && a['note'] != null
+      ? ' Narration: "${a['note']}".'
+      : '';
   if (a['field'] == 'rate') {
-    if (kind == 'changed') return '${who}rate changed from ${inr(usual)} to ${inr(value)} per MT from $when. Treated as the usual rate from now on.';
+    if (kind == 'changed')
+      return '${who}rate changed from ${inr(usual)} to ${inr(value)} per MT from $when. Treated as the usual rate from now on.';
     return '$who$when was at ${inr(value)} per MT; usual is ${inr(usual)}${kind == 'new?' ? ' (latest purchase: a new rate, or a mistake?)' : ''}.$why';
   }
-  if (kind == 'changed') return '${who}deduction changed from ${inr(usual)} to ${inr(value)} from $when. Treated as the usual from now on.';
-  if (usual == 0) return '$who$when has a deduction of ${inr(value)}; usually none.$why';
-  if (value == 0) return '$who$when has no deduction; usually ${inr(usual)}.$why';
+  if (kind == 'changed')
+    return '${who}deduction changed from ${inr(usual)} to ${inr(value)} from $when. Treated as the usual from now on.';
+  if (usual == 0)
+    return '$who$when has a deduction of ${inr(value)}; usually none.$why';
+  if (value == 0)
+    return '$who$when has no deduction; usually ${inr(usual)}.$why';
   return '$who$when has a deduction of ${inr(value)}; usually ${inr(usual)}.$why';
 }
 
@@ -465,8 +528,13 @@ String alertShort(Map a) {
   }
   if (a['field'] == 'rate') {
     if (a['kind'] == 'changed') return 'rate changed from ${inr(usual)}';
-    return a['kind'] == 'explained' ? 'rate usually ${inr(usual)} (quality cut in narration)' : 'rate usually ${inr(usual)}';
+    return a['kind'] == 'explained'
+        ? 'rate usually ${inr(usual)} (quality cut in narration)'
+        : 'rate usually ${inr(usual)}';
   }
   if (a['kind'] == 'changed') return 'deduction changed from ${inr(usual)}';
-  return (usual == 0 ? 'usually no deduction' : 'deduction usually ${inr(usual)}') + (a['kind'] == 'explained' ? ' (quality cut in narration)' : '');
+  return (usual == 0
+          ? 'usually no deduction'
+          : 'deduction usually ${inr(usual)}') +
+      (a['kind'] == 'explained' ? ' (quality cut in narration)' : '');
 }

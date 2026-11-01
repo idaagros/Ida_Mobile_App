@@ -43,6 +43,7 @@ import 'needs_attention_screen.dart';
 import 'weather_screen.dart';
 import 'mandi/mandi_prices_screen.dart';
 import 'raw_material/raw_material_screen.dart';
+import 'accounts/daily_jv_screen.dart';
 import 'electricity_bill_projection_screen.dart';
 import '../localization/app_localizations.dart';
 import '../localization/app_locale.dart';
@@ -217,7 +218,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     PushService.registerDevice();
     PushService.handleLaunchNotification();
     PushService.refreshUnread();
-    _unreadTimer = Timer.periodic(const Duration(seconds: 60), (_) => PushService.refreshUnread());
+    _unreadTimer = Timer.periodic(
+        const Duration(seconds: 60), (_) => PushService.refreshUnread());
   }
 
   Future<void> _switchSector() async {
@@ -251,8 +253,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       // Fetch both 'returned' (needs correction) and 'rejected' (final decision)
       for (final fetchStatus in ['returned', 'rejected']) {
         try {
-          final res = await Api.get(
-              '/${m.key}?status=$fetchStatus&mine=1',
+          final res = await Api.get('/${m.key}?status=$fetchStatus&mine=1',
               timeout: const Duration(seconds: 6));
           if (res.statusCode == 200) {
             final body = jsonDecode(res.body);
@@ -420,7 +421,8 @@ class _DashboardScreenState extends State<DashboardScreen>
       final go = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Text(off.offSignOutTitle,
               style: const TextStyle(fontWeight: FontWeight.w700)),
           content: Text(off.offSignOutWarn(waiting)),
@@ -509,8 +511,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                 icon: const Icon(Icons.notifications_none, color: Colors.white),
                 tooltip: 'Notifications',
                 onPressed: () async {
-                  await Navigator.push(context,
-                      MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+                  await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const NotificationsScreen()));
                   PushService.refreshUnread();
                 },
               ),
@@ -523,11 +527,14 @@ class _DashboardScreenState extends State<DashboardScreen>
                     height: 16,
                     padding: const EdgeInsets.symmetric(horizontal: 4),
                     decoration: BoxDecoration(
-                        color: Colors.orange.shade700, borderRadius: BorderRadius.circular(8)),
+                        color: Colors.orange.shade700,
+                        borderRadius: BorderRadius.circular(8)),
                     child: Center(
                       child: Text(unread > 99 ? '99+' : '$unread',
                           style: const TextStyle(
-                              color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700)),
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700)),
                     ),
                   ),
                 ),
@@ -845,7 +852,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                     _tile(
                       icon: Icons.insert_chart_outlined,
                       label: 'All reports',
-                      sub: 'Group, filter and download any report as Excel or PDF',
+                      sub:
+                          'Group, filter and download any report as Excel or PDF',
                       iconBg: const Color(0xFFE8F5E2),
                       iconColor: const Color(0xFF3B7A28),
                       onTap: () => Navigator.push(
@@ -903,8 +911,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                         onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
-                                builder: (_) =>
-                                    const ReportBuilderScreen(reportKey: 'dispatch'))),
+                                builder: (_) => const ReportBuilderScreen(
+                                    reportKey: 'dispatch'))),
                       ),
                   ]),
                 ],
@@ -1010,7 +1018,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                       _tile(
                         icon: Icons.fact_check_outlined,
                         label: "Today's work (new)",
-                        sub: 'Attendance and work allocation on one screen, one approval',
+                        sub:
+                            'Attendance and work allocation on one screen, one approval',
                         iconBg: const Color(0xFFE8F5E2),
                         iconColor: idaGreen,
                         onTap: () => Navigator.push(
@@ -1022,7 +1031,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                       _tile(
                         icon: Icons.payments_outlined,
                         label: 'Wages',
-                        sub: 'Ask who is to be paid how much — by name, day, week (Sun–Sat)',
+                        sub:
+                            'Ask who is to be paid how much — by name, day, week (Sun–Sat)',
                         iconBg: const Color(0xFFE8F5E2),
                         iconColor: idaGreen,
                         onTap: () => Navigator.push(
@@ -1034,7 +1044,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                       _tile(
                         icon: Icons.agriculture_outlined,
                         label: 'Farm Masters',
-                        sub: 'Manage the farm list, worker list & permanent workers',
+                        sub:
+                            'Manage the farm list, worker list & permanent workers',
                         iconBg: const Color(0xFFE8F5E2),
                         iconColor: idaGreen,
                         onTap: () => Navigator.push(
@@ -1045,7 +1056,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                       _tile(
                         icon: Icons.satellite_alt_outlined,
                         label: 'Precision Agriculture',
-                        sub: 'Farm boundaries, vegetation health & soil analysis',
+                        sub:
+                            'Farm boundaries, vegetation health & soil analysis',
                         iconBg: const Color(0xFFE3F2FD),
                         iconColor: const Color(0xFF1565C0),
                         onTap: () => Navigator.push(
@@ -1112,7 +1124,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                         icon: Icons.spa_outlined,
                         label: AppLocalizations.of(context)!
                             .agriAgronomySetupTitle,
-                        sub: 'Crop plans (spray & fertiliser steps) and products',
+                        sub:
+                            'Crop plans (spray & fertiliser steps) and products',
                         iconBg: const Color(0xFFE8F5E2),
                         iconColor: idaGreen,
                         onTap: () => Navigator.push(
@@ -1122,8 +1135,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                       ),
                       _tile(
                         icon: Icons.park_outlined,
-                        label: AppLocalizations.of(context)!
-                            .agriOrchardBlocksTab,
+                        label:
+                            AppLocalizations.of(context)!.agriOrchardBlocksTab,
                         sub: 'Blocks of trees: variety, planting date, trees',
                         iconBg: const Color(0xFFE8F5E2),
                         iconColor: idaGreen,
@@ -1176,7 +1189,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                         onTap: () => Navigator.push(
                             context,
                             MaterialPageRoute(
-                                builder: (_) => const ReportBuilderScreen(reportKey: 'crop_cost'))),
+                                builder: (_) => const ReportBuilderScreen(
+                                    reportKey: 'crop_cost'))),
                       ),
                     ],
                   ]),
@@ -1212,93 +1226,107 @@ class _DashboardScreenState extends State<DashboardScreen>
                 const SizedBox(height: 12),
                 _tileGrid(context, [
                   if (_canReview)
-                  _tile(
-                    icon: Icons.fact_check_outlined,
-                    label: 'Review Submissions',
-                    sub: 'Check photo and usual range, then approve or return',
-                    iconBg: const Color(0xFFE8F0FE),
-                    iconColor: const Color(0xFF1A73E8),
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const ReviewQueueScreen())),
-                  ),
+                    _tile(
+                      icon: Icons.fact_check_outlined,
+                      label: 'Review Submissions',
+                      sub:
+                          'Check photo and usual range, then approve or return',
+                      iconBg: const Color(0xFFE8F0FE),
+                      iconColor: const Color(0xFF1A73E8),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const ReviewQueueScreen())),
+                    ),
                   if (_canDispatchReview)
-                  _tile(
-                    icon: Icons.local_shipping_outlined,
-                    label: 'Dispatch Review',
-                    sub: 'Approve each section of an outward dispatch entry',
-                    iconBg: const Color(0xFFE8F0FE),
-                    iconColor: const Color(0xFF1A73E8),
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) =>
-                                const OutwardRegisterReviewListScreen())),
-                  ),
+                    _tile(
+                      icon: Icons.local_shipping_outlined,
+                      label: 'Dispatch Review',
+                      sub: 'Approve each section of an outward dispatch entry',
+                      iconBg: const Color(0xFFE8F0FE),
+                      iconColor: const Color(0xFF1A73E8),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) =>
+                                  const OutwardRegisterReviewListScreen())),
+                    ),
                   if (_isAdmin) ...[
-                  _tile(
-                    icon: Icons.lock_clock_outlined,
-                    label: 'OTP Approvals',
-                    sub:
-                        'Approve password access requests & share OTP with users',
-                    iconBg: const Color(0xFFEDE7F6),
-                    iconColor: const Color(0xFF4A148C),
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const OtpApprovalsScreen())),
-                  ),
-                  _tile(
-                    icon: Icons.manage_accounts_outlined,
-                    label: 'Manage Users',
-                    sub: 'Create accounts and assign module access',
-                    onTap: () => Navigator.pushNamed(context, '/admin/users'),
-                  ),
-                  _tile(
-                    icon: Icons.business_outlined,
-                    label: 'Manage Parties',
-                    sub: 'Buyer list used in the Outward Sales Register',
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const PartiesScreen())),
-                  ),
-                  _tile(
-                    icon: Icons.flag_outlined,
-                    label: 'Manage Destinations',
-                    sub: 'Destination list used in the Outward Sales Register',
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const DestinationsScreen())),
-                  ),
-                  // Farm Masters moved to the Agriculture sector above,
-                  // gated by _can('farm_masters') instead of admin-only —
-                  // an admin still sees it there too (_can treats admin
-                  // as having every module).
-                  _tile(
-                    icon: Icons.tv_outlined,
-                    label: "Owner's dashboard",
-                    sub: 'Today, factory and farms — same as the TV',
-                    iconBg: const Color(0xFFE3F2FD),
-                    iconColor: const Color(0xFF1565C0),
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const TvDashboardScreen())),
-                  ),
-                  _tile(
-                    icon: Icons.settings_outlined,
-                    label: 'App Settings',
-                    sub: 'Reading reminders, face login, server address',
-                    iconBg: const Color(0xFFF1F3F4),
-                    iconColor: const Color(0xFF455A64),
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const AppSettingsScreen())),
-                  ),
+                    _tile(
+                      icon: Icons.lock_clock_outlined,
+                      label: 'OTP Approvals',
+                      sub:
+                          'Approve password access requests & share OTP with users',
+                      iconBg: const Color(0xFFEDE7F6),
+                      iconColor: const Color(0xFF4A148C),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const OtpApprovalsScreen())),
+                    ),
+                    _tile(
+                      icon: Icons.manage_accounts_outlined,
+                      label: 'Manage Users',
+                      sub: 'Create accounts and assign module access',
+                      onTap: () => Navigator.pushNamed(context, '/admin/users'),
+                    ),
+                    _tile(
+                      icon: Icons.business_outlined,
+                      label: 'Manage Parties',
+                      sub: 'Buyer list used in the Outward Sales Register',
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const PartiesScreen())),
+                    ),
+                    _tile(
+                      icon: Icons.flag_outlined,
+                      label: 'Manage Destinations',
+                      sub:
+                          'Destination list used in the Outward Sales Register',
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const DestinationsScreen())),
+                    ),
+                    // Farm Masters moved to the Agriculture sector above,
+                    // gated by _can('farm_masters') instead of admin-only —
+                    // an admin still sees it there too (_can treats admin
+                    // as having every module).
+                    _tile(
+                      icon: Icons.receipt_long_outlined,
+                      label: 'Daily Expenses',
+                      sub:
+                          'Say or type the day\'s expenses: one Journal voucher a day in Tally',
+                      iconBg: const Color(0xFFE8F5E2),
+                      iconColor: idaGreen,
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const DailyJvScreen())),
+                    ),
+                    _tile(
+                      icon: Icons.tv_outlined,
+                      label: "Owner's dashboard",
+                      sub: 'Today, factory and farms — same as the TV',
+                      iconBg: const Color(0xFFE3F2FD),
+                      iconColor: const Color(0xFF1565C0),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const TvDashboardScreen())),
+                    ),
+                    _tile(
+                      icon: Icons.settings_outlined,
+                      label: 'App Settings',
+                      sub: 'Reading reminders, face login, server address',
+                      iconBg: const Color(0xFFF1F3F4),
+                      iconColor: const Color(0xFF455A64),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const AppSettingsScreen())),
+                    ),
                   ],
                 ]),
               ],
