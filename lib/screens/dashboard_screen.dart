@@ -56,6 +56,8 @@ import 'notifications_screen.dart';
 import 'transport_screen.dart';
 import 'password_screen.dart';
 import 'otp_approvals_screen.dart';
+import 'factory/inventory_screen.dart';
+import 'factory/contractor_screen.dart';
 
 // ── Returned record model ─────────────────────────────────────────────────────
 class ReturnedRecord {
@@ -981,6 +983,39 @@ class _DashboardScreenState extends State<DashboardScreen>
                             context,
                             MaterialPageRoute(
                                 builder: (_) => const MachineMaintScreen())),
+                      ),
+                  ]),
+                ],
+
+                // ── Stores: spares & consumables ─────────────────────────
+                if (_can('inventory') || _can('contractor')) ...[
+                  const SizedBox(height: 20),
+                  _sectionHeader('Stores & contractor'),
+                  const SizedBox(height: 12),
+                  _tileGrid(context, [
+                    if (_can('inventory'))
+                      _tile(
+                      icon: Icons.inventory_2_outlined,
+                      label: 'Inventory',
+                      sub: 'Spares, consumables and wear-out alerts',
+                      iconBg: const Color(0xFFE8F0FE),
+                      iconColor: const Color(0xFF1A73E8),
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const InventoryScreen())),
+                    ),
+                    if (_can('contractor'))
+                      _tile(
+                        icon: Icons.engineering_outlined,
+                        label: 'Contractor payment',
+                        sub: 'What is due to the operator: rate x pellets made, less advances',
+                        iconBg: const Color(0xFFFEF3DC),
+                        iconColor: amber,
+                        onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const ContractorScreen())),
                       ),
                   ]),
                 ],

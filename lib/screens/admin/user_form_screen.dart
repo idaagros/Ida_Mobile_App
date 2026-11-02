@@ -26,40 +26,74 @@ import 'user_face_enrollment_screen.dart';
 
 // Same grouping and short names as the website (moduleDefinitions.js).
 const List<(String, String, List<(String, String, String)>)> kPermGroups = [
-  ('factory', 'Factory', [
-    ('electricity', 'Electricity meter', ''),
-    ('tractor', 'Factory tractor', 'hours & diesel'),
-    ('machine', 'Machine hours', ''),
-    ('machine_pf', 'Power factor', ''),
-    ('factory', 'Factory run hours', ''),
-    ('labour', 'Labour management', ''),
-    ('machine_maintenance', 'Machine maintenance', ''),
-    ('tractor_maintenance', 'Tractor maintenance', ''),
-    ('daily_report', 'Daily reading report', ''),
-    ('raw_material', 'Raw material & dues', 'from Tally'),
-  ]),
-  ('office', 'Office', [
-    ('reports_analytics', 'Reports & analytics', 'report tiles'),
-    ('payroll', 'Payroll', 'not built yet'),
-    ('passwords', 'Password manager', 'code from admin'),
-  ]),
-  ('farms', 'Farms', [
-    ('farm_attendance', 'Farm attendance', ''),
-    ('farm_masters', 'Farm masters', 'farms, workers, work types'),
-    ('farm_tractor', 'Farm tractor', ''),
-    ('agri', 'Crop planning', 'crops, cycles, sprays'),
-    ('mandi_prices', 'Mandi prices', ''),
-  ]),
-  ('dispatch', 'Dispatch & sales', [
-    ('outward_register', 'Outward register', ''),
-    ('destinations', 'Destinations', ''),
-    ('parties', 'Parties', ''),
-    ('transport', 'Transport directory', ''),
-  ]),
+  (
+    'factory',
+    'Factory',
+    [
+      ('electricity', 'Electricity meter', ''),
+      ('tractor', 'Factory tractor', 'hours & diesel'),
+      ('machine', 'Machine hours', ''),
+      ('machine_pf', 'Power factor', ''),
+      ('factory', 'Factory run hours', ''),
+      ('labour', 'Labour management', ''),
+      ('machine_maintenance', 'Machine maintenance', ''),
+      ('tractor_maintenance', 'Tractor maintenance', ''),
+      ('daily_report', 'Daily reading report', ''),
+      ('raw_material', 'Raw material & dues', 'from Tally'),
+      ('inventory', 'Inventory', 'spares & alerts'),
+      ('contractor', 'Contractor payment', 'operator dues'),
+    ]
+  ),
+  (
+    'office',
+    'Office',
+    [
+      ('reports_analytics', 'Reports & analytics', 'report tiles'),
+      ('payroll', 'Payroll', 'not built yet'),
+      ('passwords', 'Password manager', 'code from admin'),
+    ]
+  ),
+  (
+    'farms',
+    'Farms',
+    [
+      ('farm_attendance', 'Farm attendance', ''),
+      ('farm_masters', 'Farm masters', 'farms, workers, work types'),
+      ('farm_tractor', 'Farm tractor', ''),
+      ('agri', 'Crop planning', 'crops, cycles, sprays'),
+      ('mandi_prices', 'Mandi prices', ''),
+    ]
+  ),
+  (
+    'dispatch',
+    'Dispatch & sales',
+    [
+      ('outward_register', 'Outward register', ''),
+      ('destinations', 'Destinations', ''),
+      ('parties', 'Parties', ''),
+      ('transport', 'Transport directory', ''),
+    ]
+  ),
 ];
 
-const List<String> kLevelOrder = ['view', 'add', 'update', 'delete', 'approve', 'correct', 'reopen'];
-const Map<String, String> kLevelLabels = {'view': 'View', 'add': 'Add', 'update': 'Edit', 'delete': 'Delete', 'approve': 'Approve', 'correct': 'Correct approved day', 'reopen': 'Reopen'};
+const List<String> kLevelOrder = [
+  'view',
+  'add',
+  'update',
+  'delete',
+  'approve',
+  'correct',
+  'reopen'
+];
+const Map<String, String> kLevelLabels = {
+  'view': 'View',
+  'add': 'Add',
+  'update': 'Edit',
+  'delete': 'Delete',
+  'approve': 'Approve',
+  'correct': 'Correct approved day',
+  'reopen': 'Reopen'
+};
 
 String _shortName(String module) {
   for (final g in kPermGroups) {
@@ -113,7 +147,9 @@ class _UserFormScreenState extends State<UserFormScreen> {
     _adminBefore = _admin;
     // Open on the first group that has something ticked.
     for (final g in kPermGroups) {
-      if (g.$3.any((m) => (_perms[m.$1] ?? const <String>{}).isNotEmpty || _parts.any((p) => p.startsWith('${m.$1}::')))) {
+      if (g.$3.any((m) =>
+          (_perms[m.$1] ?? const <String>{}).isNotEmpty ||
+          _parts.any((p) => p.startsWith('${m.$1}::')))) {
         _tab = g.$1;
         break;
       }
@@ -133,7 +169,9 @@ class _UserFormScreenState extends State<UserFormScreen> {
     final s = <String>{};
     for (final e in list) {
       if (e.scope != null) {
-        final List<String> partLevels = e.level == 'edit' ? (kSectionLevels[e.module] ?? const ['update']) : [e.level];
+        final List<String> partLevels = e.level == 'edit'
+            ? (kSectionLevels[e.module] ?? const ['update'])
+            : [e.level];
         for (final l in partLevels) {
           s.add('${e.module}::${e.scope}::$l');
         }
@@ -142,7 +180,13 @@ class _UserFormScreenState extends State<UserFormScreen> {
       final List<String> levels;
       if (e.level == 'edit') {
         final sup = moduleSupportedLevels(e.module);
-        levels = ['add', 'update', 'delete', for (final l in const ['approve', 'correct', 'reopen']) if (sup.contains(l)) l];
+        levels = [
+          'add',
+          'update',
+          'delete',
+          for (final l in const ['approve', 'correct', 'reopen'])
+            if (sup.contains(l)) l
+        ];
       } else {
         levels = [e.level];
       }
@@ -217,31 +261,46 @@ class _UserFormScreenState extends State<UserFormScreen> {
     final picked = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => SafeArea(
         child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.7),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 18, 20, 4),
-              child: Text('Copy access from…', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-            ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Text('Their ticks replace the ones here. You can still change them before saving.', style: TextStyle(fontSize: 13, color: aMuted)),
-            ),
-            Flexible(
-              child: ListView(shrinkWrap: true, children: [
-                for (final o in others)
-                  ListTile(
-                    leading: AAvatar('${o['display_name'] ?? o['username'] ?? ''}', orange: o['is_admin'] == true, size: 36),
-                    title: Text('${o['display_name'] ?? o['username'] ?? ''}'),
-                    subtitle: Text(o['is_admin'] == true ? 'Admin' : '@${o['username'] ?? ''}'),
-                    onTap: () => Navigator.pop(ctx, o),
-                  ),
+          constraints:
+              BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.7),
+          child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 18, 20, 4),
+                  child: Text('Copy access from…',
+                      style:
+                          TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  child: Text(
+                      'Their ticks replace the ones here. You can still change them before saving.',
+                      style: TextStyle(fontSize: 13, color: aMuted)),
+                ),
+                Flexible(
+                  child: ListView(shrinkWrap: true, children: [
+                    for (final o in others)
+                      ListTile(
+                        leading: AAvatar(
+                            '${o['display_name'] ?? o['username'] ?? ''}',
+                            orange: o['is_admin'] == true,
+                            size: 36),
+                        title:
+                            Text('${o['display_name'] ?? o['username'] ?? ''}'),
+                        subtitle: Text(o['is_admin'] == true
+                            ? 'Admin'
+                            : '@${o['username'] ?? ''}'),
+                        onTap: () => Navigator.pop(ctx, o),
+                      ),
+                  ]),
+                ),
               ]),
-            ),
-          ]),
         ),
       ),
     );
@@ -261,7 +320,10 @@ class _UserFormScreenState extends State<UserFormScreen> {
     if (e == null) return;
     final done = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(builder: (_) => UserFaceEnrollmentScreen(userId: '${e['id']}', userName: '${e['display_name'] ?? e['username'] ?? ''}')),
+      MaterialPageRoute(
+          builder: (_) => UserFaceEnrollmentScreen(
+              userId: '${e['id']}',
+              userName: '${e['display_name'] ?? e['username'] ?? ''}')),
     );
     if (done == true && mounted) showOk(context, 'Face login saved');
   }
@@ -299,7 +361,8 @@ class _UserFormScreenState extends State<UserFormScreen> {
     setState(() => _saving = true);
     try {
       if (_isNew) {
-        await AdminApi.post('/admin/users', {...body, 'username': username.toLowerCase()});
+        await AdminApi.post(
+            '/admin/users', {...body, 'username': username.toLowerCase()});
       } else {
         await AdminApi.put('/admin/users/${widget.existing!['id']}', body);
       }
@@ -315,19 +378,40 @@ class _UserFormScreenState extends State<UserFormScreen> {
   Widget build(BuildContext context) {
     final changes = _changes;
     final e = widget.existing;
-    final title = _isNew ? 'New user' : (_name.text.trim().isEmpty ? '${e?['username'] ?? ''}' : _name.text.trim());
+    final title = _isNew
+        ? 'New user'
+        : (_name.text.trim().isEmpty
+            ? '${e?['username'] ?? ''}'
+            : _name.text.trim());
     final faceAt = e?['face_enrolled_at'];
     String faceText = 'No face login yet';
     if (faceAt != null) {
       final d = DateTime.tryParse('$faceAt');
-      faceText = d == null ? 'Face login set up' : 'Face login set up on ${d.day} ${const ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.month - 1]} ${d.year}';
+      faceText = d == null
+          ? 'Face login set up'
+          : 'Face login set up on ${d.day} ${const [
+              'Jan',
+              'Feb',
+              'Mar',
+              'Apr',
+              'May',
+              'Jun',
+              'Jul',
+              'Aug',
+              'Sep',
+              'Oct',
+              'Nov',
+              'Dec'
+            ][d.month - 1]} ${d.year}';
     }
 
     return PopScope(
       canPop: changes == 0 || _saving,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
-        final leave = await aConfirm(context, 'Leave without saving?', 'Your $changes change${changes == 1 ? '' : 's'} will be lost.', yes: 'Leave', danger: true);
+        final leave = await aConfirm(context, 'Leave without saving?',
+            'Your $changes change${changes == 1 ? '' : 's'} will be lost.',
+            yes: 'Leave', danger: true);
         if (leave && context.mounted) Navigator.of(context).pop(false);
       },
       child: Scaffold(
@@ -338,81 +422,123 @@ class _UserFormScreenState extends State<UserFormScreen> {
           children: [
             ACard(
               padding: const EdgeInsets.all(14),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
-                  AAvatar(_name.text.isEmpty ? '?' : _name.text, orange: _admin, size: 46),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: aText)),
-                      Text(_isNew ? 'They sign in with the username and password you set here.' : '@${e?['username'] ?? ''} · $faceText',
-                          style: const TextStyle(fontSize: 12.5, color: aMuted)),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      AAvatar(_name.text.isEmpty ? '?' : _name.text,
+                          orange: _admin, size: 46),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(title,
+                                  style: const TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w800,
+                                      color: aText)),
+                              Text(
+                                  _isNew
+                                      ? 'They sign in with the username and password you set here.'
+                                      : '@${e?['username'] ?? ''} · $faceText',
+                                  style: const TextStyle(
+                                      fontSize: 12.5, color: aMuted)),
+                            ]),
+                      ),
                     ]),
-                  ),
-                ]),
-                const SizedBox(height: 6),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Can sign in', style: TextStyle(fontWeight: FontWeight.w600)),
-                  value: _active,
-                  activeTrackColor: aGreen,
-                  onChanged: (v) => setState(() => _active = v),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Admin', style: TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: const Text('Can do everything', style: TextStyle(fontSize: 12.5)),
-                  value: _admin,
-                  activeTrackColor: const Color(0xFFD9650F),
-                  onChanged: (v) => setState(() => _admin = v),
-                ),
-                const SizedBox(height: 6),
-                TextField(controller: _name, onChanged: (_) => setState(() {}), decoration: aInput('Name', hint: 'e.g. Ramesh Patil')),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _username,
-                  enabled: _isNew,
-                  autocorrect: false,
-                  onChanged: (_) => setState(() {}),
-                  decoration: aInput('Username', hint: 'e.g. ramesh', helper: _isNew ? null : 'A username can’t be changed'),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _password,
-                  autocorrect: false,
-                  onChanged: (_) => setState(() {}),
-                  decoration: aInput(_isNew ? 'Password' : 'New password',
-                      hint: _isNew ? 'At least 4 characters' : 'Leave empty to keep the current one'),
-                ),
-                if (!_isNew) ...[
-                  const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                    style: aSecondary(),
-                    onPressed: _face,
-                    icon: const Icon(Icons.face_outlined, size: 19),
-                    label: Text(faceAt == null ? 'Set up face login' : 'Redo face login'),
-                  ),
-                ],
-              ]),
+                    const SizedBox(height: 6),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Can sign in',
+                          style: TextStyle(fontWeight: FontWeight.w600)),
+                      value: _active,
+                      activeTrackColor: aGreen,
+                      onChanged: (v) => setState(() => _active = v),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Admin',
+                          style: TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: const Text('Can do everything',
+                          style: TextStyle(fontSize: 12.5)),
+                      value: _admin,
+                      activeTrackColor: const Color(0xFFD9650F),
+                      onChanged: (v) => setState(() => _admin = v),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                        controller: _name,
+                        onChanged: (_) => setState(() {}),
+                        decoration: aInput('Name', hint: 'e.g. Ramesh Patil')),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _username,
+                      enabled: _isNew,
+                      autocorrect: false,
+                      onChanged: (_) => setState(() {}),
+                      decoration: aInput('Username',
+                          hint: 'e.g. ramesh',
+                          helper:
+                              _isNew ? null : 'A username can’t be changed'),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _password,
+                      autocorrect: false,
+                      onChanged: (_) => setState(() {}),
+                      decoration: aInput(_isNew ? 'Password' : 'New password',
+                          hint: _isNew
+                              ? 'At least 4 characters'
+                              : 'Leave empty to keep the current one'),
+                    ),
+                    if (!_isNew) ...[
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        style: aSecondary(),
+                        onPressed: _face,
+                        icon: const Icon(Icons.face_outlined, size: 19),
+                        label: Text(faceAt == null
+                            ? 'Set up face login'
+                            : 'Redo face login'),
+                      ),
+                    ],
+                  ]),
             ),
             const SizedBox(height: 14),
             Row(children: [
-              const Text('Access', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: aText)),
+              const Text('Access',
+                  style: TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800, color: aText)),
               const Spacer(),
               if (widget.others.isNotEmpty)
-                TextButton.icon(onPressed: _copyFrom, icon: const Icon(Icons.copy_all_outlined, size: 18), label: const Text('Copy from…')),
+                TextButton.icon(
+                    onPressed: _copyFrom,
+                    icon: const Icon(Icons.copy_all_outlined, size: 18),
+                    label: const Text('Copy from…')),
             ]),
             if (_admin)
-              const ANote('An admin can see and do everything, so there is nothing to tick.')
+              const ANote(
+                  'An admin can see and do everything, so there is nothing to tick.')
             else ...[
-              const Text('Tick what this person may do. Only the actions an area has are shown.', style: TextStyle(fontSize: 13, color: aMuted)),
+              const Text(
+                  'Tick what this person may do. Only the actions an area has are shown.',
+                  style: TextStyle(fontSize: 13, color: aMuted)),
               const SizedBox(height: 10),
               AFilterChips<String>(
                 value: _tab,
                 onChanged: (v) => setState(() => _tab = v),
                 options: [
                   for (final g in kPermGroups)
-                    (g.$1, g.$2, g.$3.where((m) => (_perms[m.$1] ?? const <String>{}).isNotEmpty || _parts.any((p) => p.startsWith('${m.$1}::'))).length),
+                    (
+                      g.$1,
+                      g.$2,
+                      g.$3
+                          .where((m) =>
+                              (_perms[m.$1] ?? const <String>{}).isNotEmpty ||
+                              _parts.any((p) => p.startsWith('${m.$1}::')))
+                          .length
+                    ),
                 ],
               ),
               const SizedBox(height: 10),
@@ -420,12 +546,15 @@ class _UserFormScreenState extends State<UserFormScreen> {
                 child: Column(children: [
                   for (final g in kPermGroups)
                     if (g.$1 == _tab)
-                      for (var i = 0; i < g.$3.length; i++) _area(g.$3[i], i == 0),
+                      for (var i = 0; i < g.$3.length; i++)
+                        _area(g.$3[i], i == 0),
                 ]),
               ),
               const SizedBox(height: 8),
               Row(children: [
-                TextButton(onPressed: _viewEverything, child: const Text('View everything')),
+                TextButton(
+                    onPressed: _viewEverything,
+                    child: const Text('View everything')),
                 TextButton(
                   onPressed: () => setState(() {
                     _perms = {};
@@ -442,15 +571,23 @@ class _UserFormScreenState extends State<UserFormScreen> {
         bottomNavigationBar: SafeArea(
           child: Container(
             padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-            decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: Color(0xFFE2E6DC)))),
+            decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(top: BorderSide(color: Color(0xFFE2E6DC)))),
             child: Row(children: [
-              if (changes > 0) AChip.wait('$changes change${changes == 1 ? '' : 's'}') else const Text('No changes', style: TextStyle(color: aMuted, fontSize: 13)),
+              if (changes > 0)
+                AChip.wait('$changes change${changes == 1 ? '' : 's'}')
+              else
+                const Text('No changes',
+                    style: TextStyle(color: aMuted, fontSize: 13)),
               const Spacer(),
               FilledButton.icon(
                 style: aPrimary(height: 46),
                 onPressed: _saving || changes == 0 ? null : _save,
-                icon: Icon(_isNew ? Icons.person_add_alt_1 : Icons.check, size: 19),
-                label: Text(_saving ? 'Saving…' : (_isNew ? 'Add user' : 'Save')),
+                icon: Icon(_isNew ? Icons.person_add_alt_1 : Icons.check,
+                    size: 19),
+                label:
+                    Text(_saving ? 'Saving…' : (_isNew ? 'Add user' : 'Save')),
               ),
             ]),
           ),
@@ -467,11 +604,18 @@ class _UserFormScreenState extends State<UserFormScreen> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
-      decoration: BoxDecoration(border: first ? null : const Border(top: BorderSide(color: aLine))),
+      decoration: BoxDecoration(
+          border: first ? null : const Border(top: BorderSide(color: aLine))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text.rich(TextSpan(children: [
-          TextSpan(text: m.$2, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: aText)),
-          if (m.$3.isNotEmpty) TextSpan(text: '  · ${m.$3}', style: const TextStyle(fontSize: 12, color: aMuted)),
+          TextSpan(
+              text: m.$2,
+              style: const TextStyle(
+                  fontSize: 14.5, fontWeight: FontWeight.w700, color: aText)),
+          if (m.$3.isNotEmpty)
+            TextSpan(
+                text: '  · ${m.$3}',
+                style: const TextStyle(fontSize: 12, color: aMuted)),
         ])),
         const SizedBox(height: 8),
         Wrap(spacing: 6, runSpacing: 6, children: [
@@ -481,10 +625,13 @@ class _UserFormScreenState extends State<UserFormScreen> {
         if (parts != null) ...[
           for (final lv in (kSectionLevels[module] ?? const ['update'])) ...[
             const SizedBox(height: 8),
-            Text('Or ${kLevelLabels[lv]} only these parts:', style: const TextStyle(fontSize: 12.5, color: aMuted)),
+            Text('Or ${kLevelLabels[lv]} only these parts:',
+                style: const TextStyle(fontSize: 12.5, color: aMuted)),
             const SizedBox(height: 6),
             Wrap(spacing: 6, runSpacing: 6, children: [
-              for (final p in parts) _partChip(module, p['key']!, lv, _partLabel(p['label']!), _parts.contains('$module::${p['key']}::$lv')),
+              for (final p in parts)
+                _partChip(module, p['key']!, lv, _partLabel(p['label']!),
+                    _parts.contains('$module::${p['key']}::$lv')),
             ]),
           ],
         ],
@@ -492,12 +639,17 @@ class _UserFormScreenState extends State<UserFormScreen> {
     );
   }
 
-  String _partLabel(String l) => l.replaceFirst('Stage A: ', '').replaceFirst('Stage B: ', '');
+  String _partLabel(String l) =>
+      l.replaceFirst('Stage A: ', '').replaceFirst('Stage B: ', '');
 
   Widget _levelChip(String module, String level, bool on) {
     final color = level == 'approve'
         ? aBlue
-        : (level == 'delete' ? const Color(0xFFB3392B) : (level == 'reopen' ? const Color(0xFF8A5628) : (level == 'correct' ? const Color(0xFFB07A1E) : aGreen)));
+        : (level == 'delete'
+            ? const Color(0xFFB3392B)
+            : (level == 'reopen'
+                ? const Color(0xFF8A5628)
+                : (level == 'correct' ? const Color(0xFFB07A1E) : aGreen)));
     return Semantics(
       checked: on,
       label: '${_shortName(module)}: ${kLevelLabels[level]}',
@@ -513,15 +665,24 @@ class _UserFormScreenState extends State<UserFormScreen> {
             border: Border.all(color: on ? color : const Color(0xFFC3CCB9)),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            if (on) const Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.check, size: 15, color: Colors.white)),
-            Text(kLevelLabels[level]!, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: on ? Colors.white : const Color(0xFF3A4833))),
+            if (on)
+              const Padding(
+                  padding: EdgeInsets.only(right: 4),
+                  child: Icon(Icons.check, size: 15, color: Colors.white)),
+            Text(kLevelLabels[level]!,
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: on ? Colors.white : const Color(0xFF3A4833))),
           ]),
         ),
       ),
     );
   }
 
-  Widget _partChip(String module, String key, String level, String label, bool on) => InkWell(
+  Widget _partChip(
+          String module, String key, String level, String label, bool on) =>
+      InkWell(
         borderRadius: BorderRadius.circular(99),
         onTap: () => _togglePart(module, key, level),
         child: Container(
@@ -530,11 +691,21 @@ class _UserFormScreenState extends State<UserFormScreen> {
           decoration: BoxDecoration(
             color: on ? const Color(0xFFEEF5E8) : Colors.white,
             borderRadius: BorderRadius.circular(99),
-            border: Border.all(color: on ? const Color(0xFF9CC27D) : const Color(0xFFD5DCCD)),
+            border: Border.all(
+                color: on ? const Color(0xFF9CC27D) : const Color(0xFFD5DCCD)),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            if (on) const Padding(padding: EdgeInsets.only(right: 4), child: Icon(Icons.check, size: 14, color: Color(0xFF1F4A0E))),
-            Text(label, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: on ? const Color(0xFF1F4A0E) : const Color(0xFF3A4833))),
+            if (on)
+              const Padding(
+                  padding: EdgeInsets.only(right: 4),
+                  child: Icon(Icons.check, size: 14, color: Color(0xFF1F4A0E))),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: on
+                        ? const Color(0xFF1F4A0E)
+                        : const Color(0xFF3A4833))),
           ]),
         ),
       );

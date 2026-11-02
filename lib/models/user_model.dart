@@ -87,6 +87,16 @@ const List<Map<String, String>> kModuleDefinitions = [
     'icon': 'scale',
   },
   {
+    'key': 'inventory',
+    'levels': 'view,add,update,delete',
+    'label': 'Inventory',
+    'description':
+        'Spares and consumables with stock and wear-out alerts. Add = new items and stock in; Edit = use, fit / change a part, stock count; Delete = remove items and entries',
+    'route': '/inventory',
+    'icon': 'factory',
+    'sensitive': 'true',
+  },
+  {
     'key': 'mandi_prices',
     'levels': 'view,add,update,delete',
     'label': 'Mandi Prices',
@@ -389,8 +399,8 @@ bool hasCorrectAccess(List<PermissionEntry> perms, String moduleKey) =>
 
 // Section-aware check: an unscoped grant covers every section, a scoped
 // one only its own. Matches the backend's _hasScopedLevel.
-bool hasScopedLevel(List<PermissionEntry> perms, String moduleKey,
-        String scope, String level) =>
+bool hasScopedLevel(List<PermissionEntry> perms, String moduleKey, String scope,
+        String level) =>
     perms.any((p) =>
         p.module == moduleKey &&
         (p.level == level || p.level == 'edit') &&
