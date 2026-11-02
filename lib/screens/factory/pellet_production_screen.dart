@@ -5,6 +5,7 @@
 // the meter is used and the day is shown in orange. Admins set the opening stock and the tonnes-per-hour rate here.
 // Server: /pellet (routes/pellet.js). Web: pages/PelletProduction.jsx.
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../services/api_client.dart';
 import '../../services/api_service.dart';
@@ -49,6 +50,7 @@ class _PelletProductionScreenState extends State<PelletProductionScreen> {
   bool _busy = false;
   bool _admin = false;
   String? _error;
+  Timer? _timer; // the figure moves while the plant runs: read again every 15 minutes
 
   @override
   void initState() {
@@ -60,6 +62,13 @@ class _PelletProductionScreenState extends State<PelletProductionScreen> {
       if (mounted) setState(() => _admin = v);
     });
     _load();
+    _timer = Timer.periodic(const Duration(minutes: 15), (_) => _load(silent: true));
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 
   void _pick(String k) {
@@ -101,9 +110,9 @@ class _PelletProductionScreenState extends State<PelletProductionScreen> {
     _load();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool silent = false}) async {
     setState(() {
-      _busy = true;
+      _busy = !silent;
       _error = null;
     });
     try {
@@ -279,6 +288,18 @@ class _PelletProductionScreenState extends State<PelletProductionScreen> {
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(color: const Color(0xFFFDECEA), borderRadius: BorderRadius.circular(10)),
               child: Text(_error!, style: const TextStyle(color: Color(0xFF8A1C1C))),
+            ),
+          if (d != null && d['live'] is Map && (d['live'] as Map)['running'] == true)
+            Container(
+              margin: const EdgeInsets.only(top: 10),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: const Color(0xFFF3F8EE), border: Border.all(color: const Color(0xFFCFE3C0)), borderRadius: BorderRadius.circular(10)),
+              child: Text(
+                '● Plant running${(d['live'] as Map)['on_break'] == true ? ' (on a break)' : ''} since ${(d['live'] as Map)['since']}\n'
+                'Today so far: ${_t1((d['live'] as Map)['hours_today'] as num?)} h · ${_t1((d['live'] as Map)['made_today_mt'] as num?)} t of pellets made (and the same raw material used)\n'
+                'updated ${(d['live'] as Map)['as_of']} · refreshes every 15 min',
+                style: const TextStyle(fontSize: 12.5, color: Color(0xFF1F4A0E), fontWeight: FontWeight.w600),
+              ),
             ),
           if (d != null && totals != null && st != null) ...[
             const SizedBox(height: 12),

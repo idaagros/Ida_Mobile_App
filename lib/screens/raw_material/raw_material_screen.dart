@@ -12,6 +12,7 @@
 // API: GET /raw-material/summary, POST /raw-material/refresh.
 // Web counterpart: src/pages/RawMaterial.jsx.
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import 'rm_common.dart';
@@ -43,6 +44,7 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
   bool showRates = false;
   Map<String, dynamic> rates = {};
   Map<String, dynamic> stock = {};
+  Timer? _stockTimer; // the yard stock moves while the plant runs: read again every 15 minutes
 
   @override
   void initState() {
@@ -51,6 +53,20 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
       if (mounted) setState(() => isAdmin = v);
     });
     _load();
+    _stockTimer = Timer.periodic(const Duration(minutes: 15), (_) => _loadStock());
+  }
+
+  @override
+  void dispose() {
+    _stockTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadStock() async {
+    try {
+      final r = await RmApi.get('/raw-material/stock');
+      if (mounted) setState(() => stock = Map<String, dynamic>.from(r as Map));
+    } catch (_) {}
   }
 
   Future<void> _load() async {
@@ -521,7 +537,8 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
     ];
   }
 
-  // Estimated stock in the yard: received (Tally) minus factory run hours x tonnes per hour.
+  // Estimated stock in the yard: received (Tally) minus pellets made (ONE rate, set on Pellet production: run hours x tonnes
+  // per hour, including the run open now; raw material used = pellets made).
   Widget _stockCard() {
     if (stock.isEmpty) return const SizedBox.shrink();
     if (stock['stock_mt'] == null) {
@@ -532,19 +549,23 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           const Expanded(child: Text('Stock in the yard (estimate)', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800))),
+          InkWell(onTap: _loadStock, child: const Padding(padding: EdgeInsets.all(4), child: Icon(Icons.refresh, size: 18))),
           if (isAdmin)
             InkWell(
               onTap: _editStock,
               child: const Padding(padding: EdgeInsets.all(4), child: Icon(Icons.edit_outlined, size: 18)),
             ),
         ]),
+        if (stock['running'] == true)
+          Text('● Plant running${stock['on_break'] == true ? ' (on a break)' : ''}: updated ${stock['as_of']}, refreshes every 15 min',
+              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF2C5E17))),
         Text('${mt(stock['stock_mt'])} MT', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
         if (daysLeft != null)
           Text('about $daysLeft days at the last 7 days\' pace (${mt(stock['use_per_day_mt'])} MT/day)', style: const TextStyle(fontSize: 12.5)),
         const SizedBox(height: 4),
         Text(
-          '${toD(stock['opening_mt']) != 0 ? '${mt(stock['opening_mt'])} opening + ' : ''}${mt(stock['received_mt'])} received − ${mt(stock['used_mt'])} used (${mt(stock['run_hours'])} run hours × ${stock['per_hour']} MT/hour) since ${dmy(stock['since'])}.'
-          '${stock['last_run_date'] != null ? ' Run hours entered up to ${dmy(stock['last_run_date'])}.' : ' No run hours entered yet.'} Days without a run entry count as no use.',
+          '${toD(stock['opening_mt']) != 0 ? '${mt(stock['opening_mt'])} opening + ' : ''}${mt(stock['received_mt'])} received − ${mt(stock['used_mt'])} used = pellets made (${mt(stock['run_hours'])} run hours × ${stock['per_hour']} t/hour) since ${dmy(stock['since'])}.'
+          '${stock['last_run_date'] != null ? ' Run hours up to ${dmy(stock['last_run_date'])}.' : ' No run hours entered yet.'} The rate is set on the Pellet production screen.',
           style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
         ),
       ]),
@@ -553,23 +574,15 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
 
   Future<void> _editStock() async {
     final opening = TextEditingController(text: toD(stock['opening_mt']) == 0 ? '' : stock['opening_mt'].toString());
-    final perHour = TextEditingController(text: stock['per_hour'].toString());
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Stock settings'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(
-            controller: opening,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-            decoration: InputDecoration(labelText: 'Opening stock on ${dmy(stock['since'])} (MT)'),
-          ),
-          TextField(
-            controller: perHour,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(labelText: 'Used per run hour (MT)'),
-          ),
-        ]),
+        title: const Text('Opening stock'),
+        content: TextField(
+          controller: opening,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+          decoration: InputDecoration(labelText: 'Opening stock on ${dmy(stock['since'])} (MT)'),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
           TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Save')),
@@ -580,7 +593,6 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
     try {
       final r = await RmApi.put('/raw-material/stock', {
         'opening_mt': opening.text.trim().isEmpty ? null : double.tryParse(opening.text.trim()),
-        'per_hour': perHour.text.trim().isEmpty ? null : double.tryParse(perHour.text.trim()),
       });
       if (mounted) setState(() => stock = Map<String, dynamic>.from(r as Map));
     } catch (e) {
