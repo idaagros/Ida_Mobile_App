@@ -42,6 +42,9 @@ class _Card {
   final TextEditingController amount;
   final TextEditingController note = TextEditingController();
   final TextEditingController alias = TextEditingController();
+  // spoken by voice, and what the app read from it (sent back on Add so the app can learn from a correction)
+  bool voice = false;
+  Map<String, dynamic>? learn;
   _Card({required this.heard, this.ledger, this.payer, required this.sure, required this.choices, required this.date, required this.warns, String amountText = ''})
       : amount = TextEditingController(text: amountText);
   void dispose() {
@@ -82,6 +85,7 @@ class _DailyJvScreenState extends State<DailyJvScreen> {
   bool mayDelete = false;
   String? error;
   String? notice;
+  List<Map<String, dynamic>> learned = []; // what the app has just learned from a correction (shown with Undo)
 
   @override
   void initState() {
@@ -291,10 +295,10 @@ class _DailyJvScreenState extends State<DailyJvScreen> {
       builder: (_) => const _SpeakSheet(),
     );
     if (said == null || said.trim().isEmpty) return;
-    await _readText(text: said.trim());
+    await _readText(text: said.trim(), voice: true);
   }
 
-  Future<void> _readText({String? draftId, String? text}) async {
+  Future<void> _readText({String? draftId, String? text, bool voice = false}) async {
     final t = (text ?? typeCtrl.text).trim();
     if (t.isEmpty) return;
     setState(() {
@@ -320,6 +324,8 @@ class _DailyJvScreenState extends State<DailyJvScreen> {
           amountText: a == null ? '' : (toD(a) == toD(a).roundToDouble() ? toD(a).round().toString() : toD(a).toStringAsFixed(2)),
         );
         c.note.text = (e['note'] ?? '').toString();
+        c.voice = voice;
+        c.learn = e['learn'] is Map ? Map<String, dynamic>.from(e['learn'] as Map) : null;
         cards.add(c);
       }
       typeCtrl.clear();
@@ -461,6 +467,7 @@ class _DailyJvScreenState extends State<DailyJvScreen> {
       busy = true;
       error = null;
       notice = null;
+      learned = [];
     });
     final body = {
       'debit_ledger': c.ledger,
@@ -470,6 +477,8 @@ class _DailyJvScreenState extends State<DailyJvScreen> {
       'note': c.note.text.trim(),
       'spoken': c.heard,
       if (c.alias.text.trim().isNotEmpty) 'alias': c.alias.text.trim(),
+      if (c.voice) 'voice': true,
+      if (c.voice && c.learn != null) 'learn': c.learn,
     };
     try {
       final res = await Api.send(
@@ -492,6 +501,7 @@ class _DailyJvScreenState extends State<DailyJvScreen> {
             : v['state'] == 'pending'
                 ? 'Added and saved. Tally is not answering; it will go in by itself when Tally is open.'
                 : 'Added, but Tally said: ${v['message'] ?? v['state']}';
+        learned = (d is Map && d['learned'] is List) ? (d['learned'] as List).map((x) => Map<String, dynamic>.from(x as Map)).toList() : [];
         _dropCard(c);
         if (isoDay(c.date) != isoDay(date)) date = c.date;
         await _load();
@@ -504,6 +514,16 @@ class _DailyJvScreenState extends State<DailyJvScreen> {
       error = Api.errorText(e);
     }
     if (mounted) setState(() => busy = false);
+  }
+
+  Future<void> _undoLearned() async {
+    final list = List<Map<String, dynamic>>.from(learned);
+    setState(() => learned = []);
+    for (final f in list) {
+      try {
+        await Api.json('DELETE', '/voice-fixes/${f['id']}');
+      } catch (_) {}
+    }
   }
 
   void _dropCard(_Card c) {
@@ -589,6 +609,15 @@ class _DailyJvScreenState extends State<DailyJvScreen> {
                 TallyCompanyBadge(company: loading && settings.isEmpty ? null : company),
                 if (loading && settings.isEmpty) const Padding(padding: EdgeInsets.all(30), child: Center(child: CircularProgressIndicator())),
                 if (error != null) RmCard(color: const Color(0xFFFDECEA), child: Text(error!)),
+                if (learned.isNotEmpty)
+                  RmCard(
+                    color: const Color(0xFFEEF5FB),
+                    child: Row(children: [
+                      Expanded(child: Text('🎤 Learned: ${learned.map((f) => '"${f['heard']}" = ${f['meant']}').join(' · ')}. Next time it will fill this in for you.', style: const TextStyle(fontSize: 13))),
+                      TextButton(onPressed: _undoLearned, child: const Text('Undo')),
+                      IconButton(icon: const Icon(Icons.close, size: 18), onPressed: () => setState(() => learned = [])),
+                    ]),
+                  ),
                 if (notice != null) RmCard(color: const Color(0xFFF3F8EE), child: Text(notice!)),
                 if (offline)
                   const RmCard(color: Color(0xFFFFF8E6), child: Text('No signal. You can still pick a ledger and add an entry (it is sent later), or say it and read it when there is signal.')),

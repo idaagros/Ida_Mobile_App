@@ -15,6 +15,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/user_model.dart';
+import '../../services/api_client.dart';
 import '../../widgets/tally_company_badge.dart';
 import '../../widgets/voice_allocation_sheet.dart';
 import 'rm_common.dart';
@@ -42,6 +43,10 @@ class _RmPayScreenState extends State<RmPayScreen> {
   List<Map<String, dynamic>> warns = [];
   String? error;
   String? notice;
+  // voice learning: spoken or typed, what the app read, and what it has just learned (shown with Undo)
+  bool fromVoice = false;
+  Map<String, dynamic>? learnObj;
+  List<Map<String, dynamic>> learned = [];
   bool loading = true;
   bool busy = false;
   bool forbidden = false;
@@ -128,7 +133,7 @@ class _RmPayScreenState extends State<RmPayScreen> {
       ),
     );
     if (res == null || !mounted) return;
-    _applyParsed(Map<String, dynamic>.from(res));
+    _applyParsed(Map<String, dynamic>.from(res), voice: true);
   }
 
   Future<void> _typed() async {
@@ -147,7 +152,7 @@ class _RmPayScreenState extends State<RmPayScreen> {
     if (mounted) setState(() => busy = false);
   }
 
-  void _applyParsed(Map<String, dynamic> r) {
+  void _applyParsed(Map<String, dynamic> r, {bool voice = false}) {
     final b = r['bank'] is Map ? Map<String, dynamic>.from(r['bank'] as Map) : <String, dynamic>{};
     final s = r['supplier'] is Map ? Map<String, dynamic>.from(r['supplier'] as Map) : <String, dynamic>{};
     setState(() {
@@ -163,6 +168,8 @@ class _RmPayScreenState extends State<RmPayScreen> {
       if (d != null) date = d;
       dues = r['dues'] is Map ? Map<String, dynamic>.from(r['dues'] as Map) : null;
       warns = ((r['warnings'] as List?) ?? const []).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      fromVoice = voice;
+      learnObj = r['learn'] is Map ? Map<String, dynamic>.from(r['learn'] as Map) : null;
       notice = null;
       error = null;
     });
@@ -255,6 +262,7 @@ class _RmPayScreenState extends State<RmPayScreen> {
       busy = true;
       error = null;
       notice = null;
+      learned = [];
     });
     try {
       final r = Map<String, dynamic>.from(await RmApi.post('/tally-payments', {
@@ -264,10 +272,13 @@ class _RmPayScreenState extends State<RmPayScreen> {
         'date': isoDay(date),
         'narration': narrCtrl.text.trim(),
         'spoken': heard,
+        if (fromVoice) 'voice': true,
+        if (fromVoice && learnObj != null) 'learn': learnObj,
       }) as Map);
       final st = r['status'];
       if (!mounted) return;
       setState(() {
+        learned = (r['learned'] is List) ? (r['learned'] as List).map((x) => Map<String, dynamic>.from(x as Map)).toList() : [];
         if (st == 'posted') {
           notice = 'Entered in Tally: ${inr(_amount)} to ${_short(supplier!)}.';
         } else if (st == 'queued') {
@@ -285,6 +296,16 @@ class _RmPayScreenState extends State<RmPayScreen> {
     if (mounted) setState(() => busy = false);
   }
 
+  Future<void> _undoLearned() async {
+    final list = List<Map<String, dynamic>>.from(learned);
+    setState(() => learned = []);
+    for (final f in list) {
+      try {
+        await Api.json('DELETE', '/voice-fixes/${f['id']}');
+      } catch (_) {}
+    }
+  }
+
   void _clear() {
     bank = null;
     supplier = null;
@@ -294,6 +315,8 @@ class _RmPayScreenState extends State<RmPayScreen> {
     narrCtrl.clear();
     typeCtrl.clear();
     heard = '';
+    fromVoice = false;
+    learnObj = null;
     dues = null;
     warns = [];
     date = DateTime.now();
@@ -340,6 +363,15 @@ class _RmPayScreenState extends State<RmPayScreen> {
           color: const Color(0xFFF3F8EE),
           borderColor: const Color(0xFFCFE3C0),
           child: Text(notice!, style: const TextStyle(fontSize: 13.5, color: Color(0xFF1F4A0E), fontWeight: FontWeight.w600)),
+        ),
+      if (learned.isNotEmpty)
+        RmCard(
+          color: const Color(0xFFEEF5FB),
+          child: Row(children: [
+            Expanded(child: Text('🎤 Learned: ${learned.map((f) => '"${f['heard']}" = ${f['meant']}').join(' · ')}. Next time it will fill this in for you.', style: const TextStyle(fontSize: 13))),
+            TextButton(onPressed: _undoLearned, child: const Text('Undo')),
+            IconButton(icon: const Icon(Icons.close, size: 18), onPressed: () => setState(() => learned = [])),
+          ]),
         ),
       if (!mayAdd)
         const RmCard(child: Text('You can see the recent payments. To enter a payment, ask an admin to tick Add for you.', style: TextStyle(fontSize: 13))),
