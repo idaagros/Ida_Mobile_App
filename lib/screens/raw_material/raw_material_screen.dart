@@ -718,6 +718,7 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
   Widget _partyCard(Map<String, dynamic> p) {
     final balance = toD(p['balance']);
     final trucks = toD(p['trucks']).round();
+    final badTrucks = toD(p['bad_trucks']).round();
     final diff = p['tally_diff'];
     final flagged = diff != null && toD(diff).abs() >= 1;
     final age = toD(p['oldest_days']).round();
@@ -745,6 +746,12 @@ class _RawMaterialScreenState extends State<RawMaterialScreen> {
                 : 'No purchase in this period${paid > 0 ? ' · paid ${inr(paid)}' : ''}',
             style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
           ),
+          if (badTrucks > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text('$badTrucks of $trucks truck${trucks == 1 ? '' : 's'} bad quality',
+                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFFB3261E))),
+            ),
           if (balance > 0.004)
             Padding(
               padding: const EdgeInsets.only(top: 3),
