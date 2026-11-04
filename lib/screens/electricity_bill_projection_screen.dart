@@ -195,6 +195,16 @@ class _ElectricityBillProjectionScreenState
             'Based on ${d['day_of_month']} of ${d['days_in_month']} days · ${d['reading_count']} reading(s) so far$mfText',
             style:
                 TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.6))),
+        if ((num.tryParse('${d['prompt_payment_discount']}') ?? 0) > 0) ...[
+          const SizedBox(height: 10),
+          Text(
+              'Pay by the discount date on the bill: ${_rupees(d['total_if_paid_early'])} (saves ${_rupees(d['prompt_payment_discount'])})',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white.withOpacity(0.9))),
+        ],
       ]),
     );
   }
@@ -268,8 +278,15 @@ class _ElectricityBillProjectionScreenState
         row('FAC', b['fac_charge']),
         row('Demand charge', b['demand_charge']),
         row('Electricity duty', b['electricity_duty']),
+        row('Tax on sale', b['tax_on_sale']),
       ]),
     );
+  }
+
+  int _kvahDaysOld(Map d) {
+    final last = DateTime.tryParse('${d['kvah_last_entry']}');
+    if (last == null) return 0;
+    return DateTime.now().difference(last).inDays;
   }
 
   Widget _basisCard(Map d) {
@@ -287,8 +304,17 @@ class _ElectricityBillProjectionScreenState
           Text(
               d['kvah_source'] == 'meter'
                   ? 'kVAh comes from the meter\'s own kVAh reading.'
-                  : 'kVAh is an estimate: kWh ÷ power factor. Enter the meter\'s kVAh reading daily for a closer figure.',
+                  : 'kVAh is an estimate: kWh ÷ power factor. Enter the meter\'s kVAh reading (Other registers) on two days at least 3 days apart for a closer figure.',
               style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+        ],
+        if (d['kvah_source'] == 'meter' && _kvahDaysOld(d) > 7) ...[
+          const SizedBox(height: 4),
+          Text(
+              'Last kVAh entry was ${_kvahDaysOld(d)} days ago — enter it again for a closer figure.',
+              style: const TextStyle(
+                  fontSize: 11.5,
+                  color: Color(0xFF92600A),
+                  fontWeight: FontWeight.w600)),
         ],
         if (d['pf_note'] != null) ...[
           const SizedBox(height: 4),
@@ -324,6 +350,10 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
   final contractDemandCtrl = TextEditingController();
   final dutyCtrl = TextEditingController();
   final multiplierCtrl = TextEditingController();
+  final taxCtrl = TextEditingController();
+  final pppCtrl = TextEditingController();
+  final highestMdCtrl = TextEditingController();
+  final highestMonthCtrl = TextEditingController();
   String readingType = 'kwh';
 
   @override
@@ -348,6 +378,10 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
         contractDemandCtrl.text = s['contract_demand_kva'].toString();
         dutyCtrl.text = s['electricity_duty_pct'].toString();
         multiplierCtrl.text = (s['multiplying_factor'] ?? 1).toString();
+        taxCtrl.text = (s['tax_on_sale_per_kwh'] ?? 0.279).toString();
+        pppCtrl.text = (s['prompt_payment_pct'] ?? 1).toString();
+        highestMdCtrl.text = s['highest_md_kva']?.toString() ?? '';
+        highestMonthCtrl.text = s['highest_md_month']?.toString() ?? '';
         readingType = s['daily_reading_type'] ?? 'kwh';
       } else {
         setState(() => error = Api.responseError(res));
@@ -368,6 +402,10 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
     contractDemandCtrl.dispose();
     dutyCtrl.dispose();
     multiplierCtrl.dispose();
+    taxCtrl.dispose();
+    pppCtrl.dispose();
+    highestMdCtrl.dispose();
+    highestMonthCtrl.dispose();
     super.dispose();
   }
 
@@ -376,6 +414,12 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
     if (mf == null || mf <= 0) {
       setState(() => error =
           'Multiplying factor must be a number above 0 (for example 1 or 5).');
+      return;
+    }
+    final hm = highestMonthCtrl.text.trim();
+    if (hm.isNotEmpty && !RegExp(r'^\d{4}-(0[1-9]|1[0-2])$').hasMatch(hm)) {
+      setState(
+          () => error = 'Month of the highest demand must look like 2026-06.');
       return;
     }
     setState(() {
@@ -395,6 +439,12 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
           'electricity_duty_pct': double.tryParse(dutyCtrl.text.trim()),
           'daily_reading_type': readingType,
           'multiplying_factor': mf,
+          'tax_on_sale_per_kwh': double.tryParse(taxCtrl.text.trim()),
+          'prompt_payment_pct': double.tryParse(pppCtrl.text.trim()),
+          'highest_md_kva': highestMdCtrl.text.trim().isEmpty
+              ? null
+              : double.tryParse(highestMdCtrl.text.trim()),
+          'highest_md_month': hm.isEmpty ? null : hm,
         }),
       );
       if (res.statusCode == 200) {
@@ -476,6 +526,37 @@ class _TariffSettingsScreenState extends State<TariffSettingsScreen> {
                     padding: const EdgeInsets.only(bottom: 14),
                     child: Text(
                         'Printed on your bill as "Multiplying Factor" (5 on the Sept 2026 bill). The meter dial reading × this = the units MSEDCL bills.',
+                        style: TextStyle(
+                            fontSize: 11.5, color: Colors.grey.shade600)),
+                  ),
+                  _rateField('Tax on sale', taxCtrl, suffix: '₹/kWh'),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: Text(
+                        'Printed on your bill as "Tax on Sale" (27.90 Ps/U on the Oct 2026 bill). It is charged on kWh, not kVAh.',
+                        style: TextStyle(
+                            fontSize: 11.5, color: Colors.grey.shade600)),
+                  ),
+                  _rateField('Prompt payment discount', pppCtrl, suffix: '%'),
+                  _rateField('Highest demand, last 11 months', highestMdCtrl,
+                      suffix: 'KVA'),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: TextField(
+                      controller: highestMonthCtrl,
+                      keyboardType: TextInputType.datetime,
+                      decoration: InputDecoration(
+                        labelText: 'Month it happened (YYYY-MM)',
+                        hintText: '2026-06',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: Text(
+                        'On the bill under Billing Demand: "75% of Highest Demand preceding 11 months" is 162 (JUN), so the highest demand was 216 KVA in 2026-06. Leave empty if unknown.',
                         style: TextStyle(
                             fontSize: 11.5, color: Colors.grey.shade600)),
                   ),

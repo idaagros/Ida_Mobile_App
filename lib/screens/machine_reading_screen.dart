@@ -41,6 +41,10 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
   bool loading = false;
   bool submitting = false;
 
+  // The meter has two decimals but is typed without the point
+  // (57216 means 572.16). The server tells us the divisor (100).
+  double entryDivisor = 1;
+
   double? previousReading;
   String? previousDate;
   String? previousTime;
@@ -143,8 +147,34 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
     }
   }
 
+  Future<void> _loadConfig() async {
+    try {
+      final res = await Api.get('/machine/config');
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        final v = double.tryParse(d['entry_divisor'].toString()) ?? 1;
+        if (v >= 1) entryDivisor = v;
+      }
+    } catch (_) {}
+  }
+
+  // The number as it is typed (572.16 stored -> 57216 typed).
+  String _asTyped(dynamic stored) {
+    final v = double.tryParse(stored?.toString() ?? '');
+    if (v == null) return '';
+    if (entryDivisor > 1) return (v * entryDivisor).round().toString();
+    return v.toString();
+  }
+
+  // What the typed number means in hours (57216 -> 572.16).
+  double? _typedValue() {
+    final t = double.tryParse(readingCtrl.text);
+    if (t == null) return null;
+    return t / entryDivisor;
+  }
+
   void _validateReading() {
-    final val = double.tryParse(readingCtrl.text);
+    final val = _typedValue();
     if (val == null) {
       setState(() {
         hoursRun = null;
@@ -152,10 +182,18 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
       });
       return;
     }
+    if (entryDivisor > 1 && readingCtrl.text.contains('.')) {
+      setState(() {
+        errorMessage =
+            'Type the meter number without the decimal point (e.g. 57216 for 572.16)';
+        hoursRun = null;
+      });
+      return;
+    }
     if (previousReading != null && val < previousReading!) {
       setState(() {
         errorMessage =
-            'Must be ≥ previous reading of ${previousReading!.toStringAsFixed(1)} hrs';
+            'Must be ≥ previous reading of ${previousReading!.toStringAsFixed(2)} hrs';
         hoursRun = null;
       });
     } else {
@@ -168,13 +206,14 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
 
   Future<void> _fetchReturnedRecord() async {
     setState(() => loading = true);
+    await _loadConfig();
     try {
       final res = await Api.get('/machine/${widget.returnedRecordId}');
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
           _returnedRecord = data;
-          readingCtrl.text = data['meter_reading']?.toString() ?? '';
+          readingCtrl.text = _asTyped(data['meter_reading']);
           notesCtrl.text = data['notes']?.toString() ?? '';
           try {
             selectedDate = DateTime.parse(data['reading_date']);
@@ -202,6 +241,7 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
       loading = true;
       _noSavedMsg = null;
     });
+    await _loadConfig();
     try {
       final results = await Future.wait([
         Api.get('/machine/summary'),
@@ -301,7 +341,7 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
         errorMessage = null;
         successMessage = null;
         if (record != null) {
-          readingCtrl.text = record['meter_reading']?.toString() ?? '';
+          readingCtrl.text = _asTyped(record['meter_reading']);
           notesCtrl.text = record['notes']?.toString() ?? '';
           hoursRun = double.tryParse(record['hours_run']?.toString() ?? '');
           final t = record['reading_time']?.toString();
@@ -437,7 +477,7 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
           successMessage = null;
           errorMessage = null;
           hoursRun = null;
-          previousReading = double.tryParse(readingCtrl.text);
+          previousReading = _typedValue();
           previousDate = dateStr;
           previousTime = timeStr;
           readingCtrl.clear();
@@ -467,7 +507,7 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
           hoursRun = newHours;
           monthlyHours = newMonthly;
           overallHours = newOverall;
-          previousReading = double.tryParse(readingCtrl.text);
+          previousReading = _typedValue();
           previousDate = dateStr;
           previousTime = timeStr;
 
@@ -643,13 +683,13 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
                           _summaryCard(
                               icon: Icons.calendar_month,
                               label: 'This month',
-                              value: '${monthlyHours.toStringAsFixed(1)} hrs',
+                              value: '${monthlyHours.toStringAsFixed(2)} hrs',
                               color: idaGreen),
                           const SizedBox(width: 12),
                           _summaryCard(
                               icon: Icons.av_timer,
                               label: 'Overall total',
-                              value: '${overallHours.toStringAsFixed(1)} hrs',
+                              value: '${overallHours.toStringAsFixed(2)} hrs',
                               color: amber),
                         ]),
                         const SizedBox(height: 16),
@@ -662,7 +702,7 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
                               color: idaGreen,
                               title: 'Previous reading',
                               value:
-                                  '${previousReading!.toStringAsFixed(1)} hrs',
+                                  '${previousReading!.toStringAsFixed(2)} hrs',
                               sub:
                                   'Recorded on ${_formatRecordedOn(previousDate, previousTime)}')
                           : _infoCard(
@@ -776,6 +816,19 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
                         ),
                       ),
 
+                      // How the number is read: typed 57216 -> 572.16 hrs
+                      if (entryDivisor > 1)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                              (_typedValue() != null &&
+                                      !readingCtrl.text.contains('.'))
+                                  ? 'Reads as ${_typedValue()!.toStringAsFixed(2)} hrs'
+                                  : 'Type it without the decimal point (57216 means 572.16)',
+                              style: const TextStyle(
+                                  fontSize: 12, color: Color(0xFF6B7280))),
+                        ),
+
                       // Live hours run preview
                       if (hoursRun != null &&
                           hoursRun! >= 0 &&
@@ -792,7 +845,7 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
                                 color: idaGreen, size: 18),
                             const SizedBox(width: 8),
                             Text(
-                                'Hours run today: ${hoursRun!.toStringAsFixed(1)} hrs',
+                                'Hours run today: ${hoursRun!.toStringAsFixed(2)} hrs',
                                 style: const TextStyle(
                                     color: idaDark,
                                     fontWeight: FontWeight.w600,
@@ -812,14 +865,14 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
                               child: _readonlyField(
                                   label: 'Monthly total',
                                   value:
-                                      '${monthlyHours.toStringAsFixed(1)} hrs',
+                                      '${monthlyHours.toStringAsFixed(2)} hrs',
                                   icon: Icons.calendar_month)),
                           const SizedBox(width: 12),
                           Expanded(
                               child: _readonlyField(
                                   label: 'Overall total',
                                   value:
-                                      '${overallHours.toStringAsFixed(1)} hrs',
+                                      '${overallHours.toStringAsFixed(2)} hrs',
                                   icon: Icons.av_timer)),
                         ]),
                         const SizedBox(height: 20),
@@ -990,11 +1043,11 @@ class _MachineReadingScreenState extends State<MachineReadingScreen> {
                                 const SizedBox(height: 12),
                                 if (hoursRun != null)
                                   _resultRow('Hours run today',
-                                      '${hoursRun!.toStringAsFixed(1)} hrs'),
+                                      '${hoursRun!.toStringAsFixed(2)} hrs'),
                                 _resultRow('Monthly total',
-                                    '${monthlyHours.toStringAsFixed(1)} hrs'),
+                                    '${monthlyHours.toStringAsFixed(2)} hrs'),
                                 _resultRow('Overall total',
-                                    '${overallHours.toStringAsFixed(1)} hrs'),
+                                    '${overallHours.toStringAsFixed(2)} hrs'),
                                 const SizedBox(height: 6),
                                 const Text('Pending admin review',
                                     style: TextStyle(
